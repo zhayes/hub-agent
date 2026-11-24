@@ -1,0 +1,19 @@
+{
+  "name": "hubagent-tc014-probe",
+  "private": true,
+  "type": "module",
+  "description": "TC-014 沙箱双向验证探针（不含业务代码）",
+  "scripts": {
+    "probe": "tsx probe.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.83"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

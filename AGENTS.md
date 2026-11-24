@@ -1,0 +1,115 @@
+# AGENTS.md
+
+本仓库是 **HubAgent**：本地优先的多 Agent 编排系统。
+
+动手之前请先读：
+
+- `docs/PRD.md` —— 产品边界、版本范围、验收标准（产品约束的唯一口径）
+- `docs/ARCHITECTURE.md` —— 技术落地方式（分层、进程模型、数据与接口）
+- `docs/PLAN.md` —— 实施顺序与里程碑门禁（当前做到哪一步，看这里）
+- `docs/adr/` —— 决策记录：为什么这么定，以及当时否掉了什么
+- `node_modules/@ui-sdk/solid/docs/llms.txt` —— 用 UI SDK 前先读；新建组件时再按标题搜 `core.md`，并读旁边的 `rendering.md`
+
+冲突时：PRD 的版本边界与安全底线优先；实现细节以 ARCHITECTURE 为准。
+
+---
+
+## 目录地图
+
+后端是**单个 npm 包**，内部按层分目录；前端是独立的 Solid SPA。
+
+```text
+packages/hub/src/
+  domain/          纯模型与不变量，零 IO
+  brain/           决策层
+    orchestrator-brain.ts   唯一对外契约
+    pi/                     唯一允许 import Pi 的目录
+  runtime/         状态机、调度、事件、验证、工作区、恢复
+  adapters/        ACP / A2A / Relay
+  agent-host/      子进程监管（预留拆进程）
+  storage/         schema、迁移、仓储、投影查询
+  interfaces/
+    http/          Hono 应用、SSE、鉴权、静态资源
+    cli/           commander 命令
+  shared/          错误码、时间、ULID、日志（叶子层）
+  bin/             hubagentd.ts、hubagent.ts
+
+packages/web/src/
+  routes/          页面骨架与路由参数
+  features/        tasks / agents / approvals / network / settings
+  components/      graph/（自研任务图）、charts/、ui/
+  shared/          api 客户端、SSE 原语、格式化
+```
+
+`fixtures/` 存放回归基线任务与 ACP 录制样本。
+
+---
+
+## 不可违反的规则
+
+### 依赖方向（由 `dependency-cruiser` 强制，CI 失败即阻断）
+
+| # | 规则 |
+|---|---|
+| R1 | `domain/**` 不得 import 任何其他层 |
+| R2 | `brain/**` 不得 import `storage/**`、`adapters/**` |
+| R3 | `runtime/**` 不得 import `brain/pi/**`，只依赖 `brain/orchestrator-brain.ts` |
+| R4 | `adapters/**` 不得 import `runtime/**` |
+| R5 | `interfaces/http` 只读可用 `storage/queries`，不得 import `storage/write` |
+| R6 | `shared/**` 不得 import 任何业务层 |
+| R7 | 禁止 barrel 文件（不要写 `index.ts` 转导出） |
+| R8 | 只有 `agent-host/**` 与 `sandbox/**` 可 import `node:child_process` |
+| R9 | `agent-host/**` 不得 import `storage/**`（拒绝启动不能写任务记录） |
+
+### 其他硬性约束
+
+- **事务内禁止 I/O**：不在事务里起进程、跑命令、调模型。
+- **Brain 不写文件、不改任务状态**：只能产出结构化动作（intent），由 Runtime 校验后执行。
+- **不按 Agent 生成工具**：只用稳定元工具（`discover_agents` / `delegate_task` / `await_any` / `get_task_result` / `cancel_task` / `revise_plan` / `request_human`）。
+- **验收不得自证**：判定来自 Runtime 执行的检查与证据，不采信 Agent 自述。
+- **本地服务只监听回环地址**，新增端点必须走统一鉴权中间件。
+- **所有子进程必须经 `SandboxProvider` 启动**：Coding Agent 与验证命令同一等级隔离；沙箱不可用时**拒绝执行**（fail-closed），不得降级为无隔离。
+- **不引入 React 及其生态包**；Solid 组件不得解构 props。
+- **UI 层依赖白名单**：只允许 `tailwindcss` / `@ui-sdk/core` / `@ui-sdk/solid` / `lucide-solid`。新增 UI 依赖先写 ADR；不得引入整套组件库或第二套设计系统（见 ADR 0004）。
+- **不得在 `features/**`、`routes/**` 直接 import `@ui-sdk/*`**：只能通过 `components/ui/*` 门面（SDK 处于 beta）。
+
+---
+
+## Solid 纪律（静默错误，务必遵守）
+
+| # | 禁止 | 正确做法 |
+|---|---|---|
+| S1 | 解构 `props` | 只用 `props.x`；需要拆分用 `splitProps` / `mergeProps` |
+| S2 | 用 `map` 渲染列表 | 用 `<For>` / `<Index>` |
+| S3 | 直接改 store 对象 | 走 `setStore` 的路径写法或 `produce` |
+| S4 | 把 `createEffect` 当 `useEffect` | 它是响应式副作用；数据获取用 query，不要放这里 |
+| S5 | 在组件外读取 signal | 读取必须在追踪作用域内（effect / memo / JSX） |
+| S6 | 自研小工具 | 优先 `@solid-primitives/*` |
+
+---
+
+## 常用命令
+
+以 `package.json` 的 scripts 为准，常用为：
+
+```bash
+pnpm typecheck     # tsc --noEmit
+pnpm lint          # biome + eslint(solid)
+pnpm test:unit     # vitest
+pnpm test:e2e      # playwright
+pnpm dev           # 启动 daemon
+pnpm dev:web       # vite dev server（代理 /api）
+```
+
+---
+
+## 改动流程
+
+1. 先判断改动落在哪一层；跨层需求优先改接口，而不是直接跨层 import。
+2. 涉及状态机或契约：同步更新 `docs/PRD.md` 对应章节与迁移表。
+3. 改完必须跑 `pnpm typecheck` + 相关单测；触碰状态机需跑属性测试。
+4. 提交信息用 Conventional Commits（`feat:` / `fix:` / `docs:` / `refactor:`）。
+
+## 如果发现文档与代码不一致
+
+报告不一致，不要默默跟随错误代码。改代码前先确认哪一边才是正确意图。

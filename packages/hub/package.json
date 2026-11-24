@@ -1,0 +1,18 @@
+{
+  "name": "@hubagent/hub",
+  "version": "0.0.0-m0",
+  "private": true,
+  "type": "module",
+  "description": "HubAgent 核心引擎（M0 骨架）",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.9.1",
+    "@anthropic-ai/sandbox-runtime": "0.0.83",
+    "better-sqlite3": "^13.2.0",
+    "commander": "^15.1.0",
+    "smol-toml": "^1.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+reports/
+*.log
+.DS_Store
+
+# 本地运行时状态（doctor / daemon 会写）
+.hubagent/
