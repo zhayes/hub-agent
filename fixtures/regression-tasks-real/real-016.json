@@ -1,0 +1,29 @@
+{
+  "id": "real-016",
+  "title": "修复 trimAll",
+  "objective": "修复 trimAll.js：trim 字符串并去掉连续空格；只改 trim.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "trim.js": "export const trimAll = (value) => value\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { trimAll } from './trim.js'\n\ntest('trimAll', () => {\n  assert.equal(trimAll('  a   b  '), 'a b')\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "trim.js"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "real-010",
+  "title": "修复 truncate",
+  "objective": "修复 truncate.js：超过 max 时截断并加 ...；只改 truncate.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "truncate.js": "export const truncate = (value, max) => value.slice(0, max)\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { truncate } from './truncate.js'\n\ntest('truncate', () => {\n  assert.equal(truncate('hello', 3), 'hel...'); assert.equal(truncate('hi', 3), 'hi')\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "truncate.js"
+      ]
+    }
+  ]
+}

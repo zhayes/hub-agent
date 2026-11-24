@@ -1,0 +1,29 @@
+{
+  "id": "real-019",
+  "title": "修复 pick",
+  "objective": "修复 pick.js：返回只包含 keys 中存在的字段；只改 pick.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "pick.js": "export const pick = (obj, keys) => ({})\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { pick } from './pick.js'\n\ntest('pick', () => {\n  assert.deepEqual(pick({a:1,b:2}, ['a']), {a:1})\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "pick.js"
+      ]
+    }
+  ]
+}

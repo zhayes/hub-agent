@@ -1,0 +1,27 @@
+{
+  "id": "real-025",
+  "title": "改 README 但不越界",
+  "objective": "把 README.md 标题改成 # New，但允许修改的只有 src 目录。",
+  "category": "negative",
+  "shouldNotSplit": true,
+  "expectedVerdict": "fail",
+  "files": {
+    "README.md": "# Old\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "grep -qx '# New' README.md",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "src"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "real-020",
+  "title": "修复 chunk",
+  "objective": "修复 chunk.js：按 size 切分数组；只改 chunk.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "chunk.js": "export const chunk = (values, size) => [values]\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { chunk } from './chunk.js'\n\ntest('chunk', () => {\n  assert.deepEqual(chunk([1,2,3,4,5], 2), [[1,2],[3,4],[5]])\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "chunk.js"
+      ]
+    }
+  ]
+}

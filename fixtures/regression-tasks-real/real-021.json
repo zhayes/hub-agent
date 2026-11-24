@@ -1,0 +1,27 @@
+{
+  "id": "real-021",
+  "title": "README 增加安装命令",
+  "objective": "把 README.md 增加一行安装命令 `npm i -g hubagent`，只改 README.md。",
+  "category": "docs",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "files": {
+    "README.md": "# Project\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "grep -q 'npm i -g hubagent' README.md",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "README.md"
+      ]
+    }
+  ]
+}

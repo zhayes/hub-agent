@@ -1,0 +1,29 @@
+{
+  "id": "real-012",
+  "title": "修复 titleCase",
+  "objective": "修复 titleCase.js：每个单词首字母大写，其余小写；只改 title.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "title.js": "export const titleCase = (value) => value.toUpperCase()\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { titleCase } from './title.js'\n\ntest('titleCase', () => {\n  assert.equal(titleCase('hello world'), 'Hello World')\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "title.js"
+      ]
+    }
+  ]
+}

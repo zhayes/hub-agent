@@ -1,0 +1,27 @@
+{
+  "id": "real-022",
+  "title": "config 打开 debug",
+  "objective": "把 config.json 的 debug 改为 true，只改 config.json。",
+  "category": "docs",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "files": {
+    "config.json": "{ \"debug\": false, \"port\": 3000 }\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"const c=require('./config.json'); if(c.debug!==true) process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "config.json"
+      ]
+    }
+  ]
+}

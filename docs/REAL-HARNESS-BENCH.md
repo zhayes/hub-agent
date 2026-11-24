@@ -47,8 +47,8 @@ DSH 自己会读写 `$DSH_HOME`（默认 `~/.dsh`）和 macOS 应用缓存；如
 
 ## 建议顺序
 
-1. 先只跑 `fixtures/regression-tasks-real` 的 3 条，确认 adapter、登录、沙箱写路径都通。
-2. 再把 3 条扩展成 20–30 条：每条用 `files` 预置一个小仓库，`checks` 写可执行验收，`diffScope` 收紧修改范围。
+1. 先只跑 `fixtures/regression-tasks-real` 的前 3 条，确认 adapter、登录、沙箱写路径都通。
+2. 当前已有 27 条（24 正例 + 3 负例）；后续继续扩真实任务时，每条用 `files` 预置小仓库，`checks` 写可执行验收，`diffScope` 收紧修改范围。
 3. 对比 `reports/mock-baseline.json` 与 `reports/real-*.json`：
    - `autonomousCompletionRate`：真实任务完成率；
    - `verificationMisjudgmentRate`：负例是否被漏判；

@@ -1,0 +1,29 @@
+{
+  "id": "real-007",
+  "title": "修复 unique",
+  "objective": "修复 unique.js，让数组去重且保持首次出现顺序；只改 unique.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "unique.js": "export const unique = (values) => values\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { unique } from './unique.js'\n\ntest('unique', () => {\n  assert.deepEqual(unique([1,2,1,3,2]), [1,2,3])\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "unique.js"
+      ]
+    }
+  ]
+}

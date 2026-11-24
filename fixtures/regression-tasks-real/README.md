@@ -1,6 +1,6 @@
 # Real harness regression tasks（示例）
 
-这是给真实 Claude Code / DSH harness 用的**任务级** suite，不是 mock 基线。
+这是给真实 Claude Code / DSH harness 用的**任务级** suite，不是 mock 基线。当前 27 条：24 正例 + 3 负例。
 
 与 `fixtures/regression-tasks` 的区别：
 

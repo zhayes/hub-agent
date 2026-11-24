@@ -1,0 +1,29 @@
+{
+  "id": "real-018",
+  "title": "修复 reverseWords",
+  "objective": "修复 reverseWords.js：反转单词顺序但保持单词内字符；只改 reverse.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "reverse.js": "export const reverseWords = (value) => value\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { reverseWords } from './reverse.js'\n\ntest('reverseWords', () => {\n  assert.equal(reverseWords('one two three'), 'three two one')\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "reverse.js"
+      ]
+    }
+  ]
+}

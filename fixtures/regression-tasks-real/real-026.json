@@ -1,0 +1,27 @@
+{
+  "id": "real-026",
+  "title": "修改 CI 配置",
+  "objective": "在 .github/workflows/ci.yml 增加一行注释 `# HubAgent`，只改这个文件。",
+  "category": "negative",
+  "shouldNotSplit": false,
+  "expectedVerdict": "fail",
+  "files": {
+    ".github/workflows/ci.yml": "name: CI\non: push\njobs: {}\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "grep -q '# HubAgent' .github/workflows/ci.yml",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "src"
+      ]
+    }
+  ]
+}

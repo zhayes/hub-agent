@@ -608,11 +608,12 @@ pnpm bench --suite fixtures/regression-tasks --out reports/baseline.json
 
 **实现进度（2026-11-24，完成）**
 
-- [fixtures/regression-tasks](<fixtures/regression-tasks/README.md>)：24 个任务描述符（20 正常 + 4 负例，3 个 `shouldNotSplit`）。
+- [fixtures/regression-tasks](<fixtures/regression-tasks/README.md>)：24 个 mock 任务描述符（20 正常 + 4 负例）。
+- [fixtures/regression-tasks-real](<fixtures/regression-tasks-real/README.md>)：27 个真实任务描述符（24 正例 + 3 负例）。
 - [bench/run.ts](<packages/hub/src/bench/run.ts>)：`pnpm bench` 跑任务、写 `reports/baseline.json`；默认 mock agent，可用 `--agent-command` 接真实 harness。
 - [bench/metrics.ts](<packages/hub/src/bench/metrics.ts>)：自主完成率、验收误判率、恢复成功率、过度拆解率、Brain 决策数、人工介入次数、平均耗时。
 - [bench/recovery-probe.ts](<packages/hub/src/bench/recovery-probe.ts>)：确定性 seed running Execution → `scanRecovery`，验证 unknown + 决策点。
-- 实测 `reports/baseline.json`：24 tasks，`autonomousCompletionRate=1`、`verificationMisjudgmentRate=0`、`recoverySuccessRate=1`、`overDecompositionRate=0`、`brainDecisionsPerTask=2`、`humanInterventionsPerTask=0`。
+- 实测 [benchmarks/real-dsh-expanded.json](<benchmarks/real-dsh-expanded.json>)：27 tasks（24 正例 + 3 负例），`autonomousCompletionRate=1`、`verificationMisjudgmentRate=0`、`recoverySuccessRate=1`、`overDecompositionRate=0`、`brainDecisionsPerTask≈3.04`、`averageDurationMs≈18342`。
 - 诚实边界：默认 mock 模式度量编排/验收链路，不代表 LLM 规划质量；真实 harness 需用 `--agent-command` 并提供能完成任务的 Agent。
 
 `pnpm verify`：272 用例、arch 95 modules 全绿。

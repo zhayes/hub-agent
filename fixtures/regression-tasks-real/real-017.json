@@ -1,0 +1,29 @@
+{
+  "id": "real-017",
+  "title": "修复 addAll",
+  "objective": "修复 addAll.js：返回所有参数之和；只改 add.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "add.js": "export const addAll = (...values) => values.length\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { addAll } from './add.js'\n\ntest('addAll', () => {\n  assert.equal(addAll(1,2,3), 6); assert.equal(addAll(), 0)\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "add.js"
+      ]
+    }
+  ]
+}

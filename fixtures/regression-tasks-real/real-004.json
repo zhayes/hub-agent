@@ -1,0 +1,29 @@
+{
+  "id": "real-004",
+  "title": "实现 slugify",
+  "objective": "实现 slug.js 的 slugify：转小写、空格替换为 -、去掉首尾 -；只改 slug.js。",
+  "category": "feature",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "slug.js": "export const slugify = (value) => value\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { slugify } from './slug.js'\n\ntest('slugify', () => {\n  assert.equal(slugify(' Hello World '), 'hello-world')\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "slug.js"
+      ]
+    }
+  ]
+}

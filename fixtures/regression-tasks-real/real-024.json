@@ -1,0 +1,28 @@
+{
+  "id": "real-024",
+  "title": "修复始终失败的测试",
+  "objective": "修复 code.js，让 test.js 通过；只改 code.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "code.js": "export const ok = () => false\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { ok } from './code.js'\ntest('ok',()=>assert.equal(ok(), true))\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "code.js"
+      ]
+    }
+  ]
+}

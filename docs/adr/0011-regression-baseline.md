@@ -15,8 +15,8 @@ M10 要求“把多 Agent 更好从主张变成数据”。但仓库里没有稳
 
 ## 2. 决策
 
-1. **24 个任务描述符**放在 `fixtures/regression-tasks`，含 4 个负例和 3 个 `shouldNotSplit`。
-2. **默认 bench 用确定性 mock ACP agent**，报告显式写 `mode=mock`；它度量编排、验收、恢复探针，不度量模型质量。
+1. **mock 基线 24 条**在 `fixtures/regression-tasks`；**真实基线 27 条**（24 正例 + 3 负例）在 `fixtures/regression-tasks-real`。
+2. **默认 bench 用确定性 mock ACP agent**；`--agent-command` 可跑真实 harness。报告显式写 `mode`，真实结果存 `benchmarks/real-dsh-expanded.json`。
 3. **指标公式固定在 `bench/metrics.ts`**：自主完成率、验收误判率、恢复成功率、过度拆解率、Brain 决策数、人工介入次数、平均耗时。
 4. **恢复成功率来自确定性恢复探针**：seed running Execution → `scanRecovery`，验证 unknown + 决策点；不是从 mock 任务伪造。
 5. **真实 harness 通过 `--agent-command` 接入**；任务是否完成仍只由 `checks` 判定。

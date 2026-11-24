@@ -1,0 +1,29 @@
+{
+  "id": "real-015",
+  "title": "修复 max",
+  "objective": "修复 max.js：返回数组最大值，空数组返回 null；只改 max.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "max.js": "export const max = (values) => Math.min(...values)\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { max } from './max.js'\n\ntest('max', () => {\n  assert.equal(max([1,9,3]), 9); assert.equal(max([]), null)\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "max.js"
+      ]
+    }
+  ]
+}

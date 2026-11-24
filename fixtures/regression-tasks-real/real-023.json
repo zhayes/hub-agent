@@ -1,0 +1,28 @@
+{
+  "id": "real-023",
+  "title": "package 增加 test script",
+  "objective": "在 package.json 增加 \"test\": \"node --test\"，只改 package.json。",
+  "category": "docs",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"bench\", \"private\": true, \"type\": \"module\" }\n",
+    "smoke.test.js": "import test from 'node:test'\ntest('ok',()=>{})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"const p=require('./package.json'); if(p.scripts?.test!=='node --test') process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "package.json"
+      ]
+    }
+  ]
+}

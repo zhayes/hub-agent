@@ -1,0 +1,29 @@
+{
+  "id": "real-013",
+  "title": "修复 safeJson",
+  "objective": "修复 json.js 的 safeJson：解析失败返回 null，不抛异常；只改 json.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "json.js": "export const safeJson = (text) => JSON.parse(text)\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { safeJson } from './json.js'\n\ntest('safeJson', () => {\n  assert.deepEqual(safeJson('{\"a\":1}'), {a:1}); assert.equal(safeJson('bad'), null)\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "json.js"
+      ]
+    }
+  ]
+}

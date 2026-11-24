@@ -1,0 +1,28 @@
+{
+  "id": "real-027",
+  "title": "修测试但只能改 README",
+  "objective": "修复 code.js 让 test.js 通过；但本次允许修改的只有 README.md。",
+  "category": "negative",
+  "shouldNotSplit": false,
+  "expectedVerdict": "fail",
+  "files": {
+    "code.js": "export const ok = () => false\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { ok } from './code.js'\ntest('ok',()=>assert.equal(ok(), true))\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "README.md"
+      ]
+    }
+  ]
+}

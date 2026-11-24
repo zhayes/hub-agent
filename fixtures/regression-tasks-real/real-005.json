@@ -1,0 +1,29 @@
+{
+  "id": "real-005",
+  "title": "修复 sum",
+  "objective": "修复 sum.js 的 sum，让空数组返回 0，其他数组正确求和；只改 sum.js。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "sum.js": "export const sum = (values) => values.reduce((a, b) => a + b, 1)\n",
+    "test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { sum } from './sum.js'\n\ntest('sum', () => {\n  assert.equal(sum([]), 0); assert.equal(sum([1,2,3]), 6)\n})\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test test.js",
+      "timeoutMs": 10000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "sum.js"
+      ]
+    }
+  ]
+}
