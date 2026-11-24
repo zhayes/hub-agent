@@ -16,6 +16,8 @@ Pi 的模型/认证来自它自己的配置：
 
 ```bash
 pi /login        # 或使用已有的 ~/.pi/agent/auth.json + models.json
+# 也可直接用 Pi 支持的 provider 环境变量，例如 DeepSeek：
+export DEEPSEEK_API_KEY=...
 ```
 
 没有配置 Pi 模型时，`run` 会 fail-closed，不会静默退回 ScriptedBrain。
