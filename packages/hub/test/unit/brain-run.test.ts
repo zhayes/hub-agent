@@ -99,9 +99,12 @@ describe('runGoalWithBrain', () => {
 
     expect(result.ok).toBe(true)
     expect(result.verdict).toBe('pass')
-    expect(result.decisions).toHaveLength(2)
-    expect(result.decisions[0]?.type).toBe('decompose')
-    expect(result.decisions[1]?.type).toBe('accept_result')
+    expect(result.decisions).toHaveLength(3)
+    expect(result.decisions.map((item) => item.type)).toEqual([
+      'decompose',
+      'select_agent',
+      'accept_result',
+    ])
     expect(result.decisions[0]?.rationale.length).toBeGreaterThan(0)
 
     const task = db
@@ -232,5 +235,142 @@ describe('runGoalWithBrain：多子任务', () => {
       .prepare('SELECT status FROM subtasks WHERE task_id = ? ORDER BY id')
       .all(result.taskId) as Array<{ status: string }>
     expect(subtasks.map((item) => item.status)).toEqual(['succeeded', 'succeeded'])
+  })
+})
+
+class HumanBrain implements OrchestratorBrain {
+  async step(): Promise<BrainAction[]> {
+    return [
+      {
+        type: 'revise_plan',
+        subtasks: [{ title: 'need input', description: 'need input', requiredCapabilities: [] }],
+        reason: 'plan',
+      },
+      { type: 'request_human', kind: 'decide', question: '继续吗？', options: ['继续', '停止'] },
+    ]
+  }
+  async explain(): Promise<DecisionRationale[]> {
+    return [{ type: 'decompose', rationale: 'need input' }]
+  }
+}
+
+class DelegateBrain implements OrchestratorBrain {
+  async step(input: BrainInput): Promise<BrainAction[]> {
+    const subtasks = input.tasks.flatMap((task) => task.subtasks)
+    if (subtasks.length === 0) {
+      return [
+        {
+          type: 'revise_plan',
+          subtasks: [
+            { title: 'first', description: 'first', requiredCapabilities: [] },
+            { title: 'second', description: 'second', requiredCapabilities: [] },
+          ],
+          reason: 'two',
+        },
+      ]
+    }
+    const succeeded = subtasks.filter((subtask) => subtask.status === 'succeeded')
+    if (succeeded.length === 0) {
+      const first = subtasks.find((subtask) => subtask.status === 'ready')
+      return first === undefined
+        ? []
+        : [{ type: 'delegate', request: { subtaskId: first.id, objective: first.description } }]
+    }
+    return [{ type: 'request_human', question: '还要继续第二个吗？' }]
+  }
+  async explain(): Promise<DecisionRationale[]> {
+    return []
+  }
+}
+
+class CancelBrain implements OrchestratorBrain {
+  async step(input: BrainInput): Promise<BrainAction[]> {
+    const subtasks = input.tasks.flatMap((task) => task.subtasks)
+    if (subtasks.length === 0) {
+      return [
+        {
+          type: 'revise_plan',
+          subtasks: [{ title: 'cancel me', description: 'cancel me', requiredCapabilities: [] }],
+          reason: 'plan',
+        },
+      ]
+    }
+    const subtask = subtasks[0]
+    if (subtask?.status === 'ready') {
+      return [
+        { type: 'delegate', request: { subtaskId: subtask.id, objective: subtask.description } },
+      ]
+    }
+    const executionId = subtask?.execution?.id
+    return executionId === undefined ? [] : [{ type: 'cancel', executionId, reason: 'stop' }]
+  }
+  async explain(): Promise<DecisionRationale[]> {
+    return []
+  }
+}
+
+describe('Brain actions：request_human / cancel', () => {
+  it('request_human 创 Clarification 并把 Task 停在 waiting_input', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new HumanBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'needs input',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.executions).toHaveLength(0)
+    expect(result.clarification?.status).toBe('pending')
+    expect(
+      (db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as { status: string })
+        .status,
+    ).toBe('waiting_input')
+  })
+
+  it('cancel 取消 Task，不执行', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new CancelBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'cancel',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.stopReason).toBe('canceled')
+    expect(
+      (db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as { status: string })
+        .status,
+    ).toBe('canceled')
+  })
+})
+
+describe('Brain actions：delegate', () => {
+  it('delegate 指定子任务后只执行它，后续 request_human 停住', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new DelegateBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'delegate one',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.executions).toHaveLength(1)
+    expect(result.ok).toBe(false)
+    expect(result.clarification?.status).toBe('pending')
+    const subtasks = db
+      .prepare('SELECT status FROM subtasks WHERE task_id = ? ORDER BY id')
+      .all(result.taskId) as Array<{ status: string }>
+    expect(subtasks.map((item) => item.status)).toEqual(['succeeded', 'ready'])
   })
 })

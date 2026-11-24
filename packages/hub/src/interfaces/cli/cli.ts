@@ -585,7 +585,7 @@ export function createCli(version: string): Command {
               process.stdout.write(`${JSON.stringify(outputResult, null, 2)}\n`)
             } else {
               process.stdout.write(
-                `${outputResult.ok ? '✓' : '✗'} task ${outputResult.taskId} / execution ${outputResult.executionId}\n`,
+                `${outputResult.ok ? '✓' : '✗'} task ${outputResult.taskId} / execution ${outputResult.executionId ?? '-'}\n`,
               )
               process.stdout.write(`  agent:      ${outputResult.agent.name}\n`)
               process.stdout.write(`  stopReason: ${outputResult.stopReason}\n`)
@@ -601,8 +601,8 @@ export function createCli(version: string): Command {
                 process.stdout.write(`  worktree:   ${workspace.worktreePath}\n`)
                 process.stdout.write(`  branch:     ${workspace.branch}\n`)
               }
-              process.stdout.write(`  transcript: ${outputResult.transcriptRef}\n`)
-              process.stdout.write(`  diffstat:   ${outputResult.evidence.diffstat ?? '（无）'}\n`)
+              process.stdout.write(`  transcript: ${outputResult.transcriptRef ?? '-'}\n`)
+              process.stdout.write(`  diffstat:   ${outputResult.evidence?.diffstat ?? '（无）'}\n`)
               if (outputResult.approval !== undefined) {
                 process.stdout.write(
                   `  approval:   ${outputResult.approval.id} (${outputResult.approval.reason})\n`,

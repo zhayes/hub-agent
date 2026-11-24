@@ -6,7 +6,6 @@ import { HubError } from '../../shared/errors'
 import { newId } from '../../shared/id'
 import { hubDir } from '../../shared/paths'
 import type { Db } from '../../storage/db'
-import type { RunAcpTaskResult } from '../acp-run'
 import { type DeliveryResult, executeDelivery } from './delivery'
 import { completeTaskAfterDelivery } from './finalize'
 import { addWorktree, createAgentHostGitRunner, type GitRunner, removeWorktree } from './git'
@@ -104,7 +103,7 @@ function gitWritePaths(repoRoot: string, executionId: string): string[] {
 export async function finalizeWorktreeSession(
   db: Db,
   session: WorktreeSession,
-  result: RunAcpTaskResult,
+  result: { taskId: string; goalId: string; verdict: string },
 ): Promise<DeliveryResult | undefined> {
   try {
     if (result.verdict !== 'pass') return undefined

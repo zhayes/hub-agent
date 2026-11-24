@@ -418,7 +418,7 @@ Runtime 校验（schema → 权限 → 预算 → 幂等）后才落库执行。
 
 > 这样"消息注入能否叫醒 Agent"就不再是正确性前提，只是延迟优化。
 
-**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、测试替身与动作校验；`brain/pi/{session,pi-brain,meta-tools}.ts` 用 Pi 官方 SDK 创建 in-memory session，并注册 8 个稳定元工具（工具只读/记录 intent）；`brain/create-brain.ts` 按 env 选择。`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → 顺序执行全部子任务 → accept/finish 的 Brain 驱动入口。默认 `HUBAGENT_BRAIN_MODE=pi`，Pi 模型/认证缺失时 fail-closed；`ScriptedBrain` 只在显式 `scripted` 时用于测试/离线。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
+**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、测试替身与动作校验；`brain/pi/{session,pi-brain,meta-tools}.ts` 用 Pi 官方 SDK 创建 in-memory session，并注册 8 个稳定元工具（工具只读/记录 intent）；`brain/create-brain.ts` 按 env 选择。`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → dispatch（delegate/cancel/request_human）→ accept/finish 的 Brain 驱动入口。默认 `HUBAGENT_BRAIN_MODE=pi`，Pi 模型/认证缺失时 fail-closed；`ScriptedBrain` 只在显式 `scripted` 时用于测试/离线。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
 
 ---
 

@@ -1,5 +1,5 @@
 import { createBrainFromEnv } from '../brain/create-brain'
-import type { BrainBudget, DecisionRecord, OrchestratorBrain } from '../brain/types'
+import type { BrainBudget, Clarification, DecisionRecord, OrchestratorBrain } from '../brain/types'
 import type { Goal, Subtask, Task } from '../domain/entities'
 import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../domain/ids'
 import { HubError } from '../shared/errors'
@@ -9,6 +9,8 @@ import { appendEvent } from '../storage/write/events'
 import { runAcpWithRetry } from './acp-retry'
 import type { RunAcpTaskOptions, RunAcpTaskResult } from './acp-run'
 import { runBrainRound } from './brain-loop'
+import { createClarification } from './clarify'
+import { cancelTask } from './recovery/cancel'
 
 /**
  * M6 的 Brain 驱动入口：
@@ -24,9 +26,26 @@ export interface RunGoalWithBrainOptions
   budget?: BrainBudget
 }
 
-export interface RunGoalWithBrainResult extends RunAcpTaskResult {
+export interface RunGoalWithBrainResult {
+  ok: boolean
+  goalId: string
+  taskId: string
+  subtaskId?: string
+  executionId?: string
+  sessionId?: string
+  agent: { id: string; name: string }
+  stopReason: string
+  attempt?: number
+  verdict: 'pass' | 'fail' | 'manual_required' | 'not_run'
+  verification?: RunAcpTaskResult['verification']
+  approval?: RunAcpTaskResult['approval']
+  evidence?: RunAcpTaskResult['evidence']
+  transcriptRef?: string
+  updates?: number
+  durationMs: number
   executions: RunAcpTaskResult[]
   decisions: DecisionRecord[]
+  clarification?: Clarification
 }
 
 export async function runGoalWithBrain(
@@ -126,38 +145,133 @@ export async function runGoalWithBrain(
     return subtask
   })
 
+  const decisions = [decompose.record]
   const executions: RunAcpTaskResult[] = []
-  for (const [index, subtask] of draftSubtasks.entries()) {
-    const draft = drafts[index]
-    if (draft === undefined) continue
-    const result = await runAcpWithRetry({
-      ...taskOptions,
+  let lastResult: RunAcpTaskResult | undefined
+  let roundIndex = 0
+
+  while (roundIndex < drafts.length + 3) {
+    const round = await runBrainRound({
+      db: options.db,
+      brain,
       goalId,
-      taskId,
-      subtaskId: subtask.id,
-      objective: draft.description,
+      reason: roundIndex === 0 ? 'plan_invalid' : 'subtask_terminal',
+      dedupeKey: `goal:${goalId}:dispatch:${roundIndex}`,
+      agents,
+      ...(budget === undefined ? {} : { budget }),
     })
-    executions.push(result)
-    if (!result.ok) break
+    roundIndex += 1
+    if (round === undefined) break
+    decisions.push(round.record)
+
+    const human = round.actions.find((action) => action.type === 'request_human')
+    if (human !== undefined) {
+      const clarification = createClarification(options.db, {
+        goalId,
+        kind: human.kind ?? (human.executionId === undefined ? 'decide' : 'clarify'),
+        question: human.question,
+        ...(human.options === undefined ? {} : { options: human.options }),
+        ...(human.executionId === undefined ? {} : { executionId: human.executionId }),
+      })
+      const current = loadState(options.db)
+      if (current.tasks[taskId]?.status === 'running') {
+        appendEvent(options.db, current, {
+          type: 'task.status',
+          taskId,
+          to: 'waiting_input',
+          at: asTimestamp(new Date().toISOString()),
+        })
+      }
+      return waitingResult({
+        goalId,
+        taskId,
+        agent: { id: options.agent.id, name: options.agent.name },
+        executions,
+        decisions,
+        clarification,
+        ...(lastResult === undefined ? {} : { last: lastResult }),
+      })
+    }
+
+    const cancel = round.actions.find((action) => action.type === 'cancel')
+    if (cancel !== undefined) {
+      cancelTask(options.db, taskId)
+      return waitingResult({
+        goalId,
+        taskId,
+        agent: { id: options.agent.id, name: options.agent.name },
+        executions,
+        decisions,
+        stopReason: 'canceled',
+        ...(lastResult === undefined ? {} : { last: lastResult }),
+      })
+    }
+
+    const executed = new Set(executions.map((item) => item.subtaskId))
+    const requested = new Set(
+      round.actions
+        .filter((action) => action.type === 'delegate')
+        .map((action) => action.request.subtaskId),
+    )
+    const ready = draftSubtasks.filter(
+      (subtask) => !executed.has(subtask.id) && subtask.status === 'ready',
+    )
+    const targets =
+      requested.size === 0 ? ready : ready.filter((subtask) => requested.has(subtask.id))
+    if (targets.length === 0) break
+
+    for (const subtask of targets) {
+      const result = await runAcpWithRetry({
+        ...taskOptions,
+        goalId,
+        taskId,
+        subtaskId: subtask.id,
+        objective: subtask.description,
+      })
+      executions.push(result)
+      lastResult = result
+      if (!result.ok) break
+    }
+    if (lastResult !== undefined && !lastResult.ok) break
   }
-  const result = executions[executions.length - 1]
-  if (result === undefined) {
+
+  if (lastResult === undefined) {
     throw new HubError('ACTION_REJECTED', 'Brain 计划没有可执行子任务', { goalId })
   }
+  return { ...lastResult, executions, decisions }
+}
 
-  const after = await runBrainRound({
-    db: options.db,
-    brain,
-    goalId,
-    reason: 'subtask_terminal',
-    dedupeKey: `goal:${goalId}:after-run`,
-    agents,
-    ...(budget === undefined ? {} : { budget }),
-  })
-
+function waitingResult(input: {
+  goalId: string
+  taskId: string
+  agent: { id: string; name: string }
+  executions: RunAcpTaskResult[]
+  decisions: DecisionRecord[]
+  clarification?: Clarification
+  stopReason?: string
+  last?: RunAcpTaskResult
+}): RunGoalWithBrainResult {
+  const stopReason = input.stopReason ?? 'waiting_input'
+  if (input.last !== undefined) {
+    return {
+      ...input.last,
+      ok: false,
+      stopReason,
+      executions: input.executions,
+      decisions: input.decisions,
+      ...(input.clarification === undefined ? {} : { clarification: input.clarification }),
+    }
+  }
   return {
-    ...result,
-    executions,
-    decisions: [decompose.record, ...(after === undefined ? [] : [after.record])],
+    ok: false,
+    goalId: input.goalId,
+    taskId: input.taskId,
+    agent: input.agent,
+    stopReason,
+    verdict: 'not_run',
+    durationMs: 0,
+    executions: input.executions,
+    decisions: input.decisions,
+    ...(input.clarification === undefined ? {} : { clarification: input.clarification }),
   }
 }
