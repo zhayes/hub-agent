@@ -105,8 +105,20 @@ export async function mergeNoFf(
   repoRoot: string,
   sourceRef: string,
 ): Promise<GitResult> {
+  // merge --no-ff 会创建 commit；CI 的干净环境没有全局 git identity。
   const result = await runner.run(
-    ['-C', repoRoot, 'merge', '--no-ff', '--no-edit', sourceRef],
+    [
+      '-C',
+      repoRoot,
+      '-c',
+      'user.name=HubAgent',
+      '-c',
+      'user.email=hubagent@local',
+      'merge',
+      '--no-ff',
+      '--no-edit',
+      sourceRef,
+    ],
     repoRoot,
   )
   if (!result.ok) {
