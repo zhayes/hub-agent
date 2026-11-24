@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HubAgent Console — Signal Console preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ground: #0f1114;
+    --surface: #15181d;
+    --raised: #1b1f26;
+    --line: #272c35;
+    --line-soft: #1d222a;
+    --text: #f3f5f8;
+    --muted: #9aa4b2;
+    --faint: #6f7885;
+    --accent: #ff7a45;
+    --positive: #4ade80;
+    --negative: #fb7185;
+    --warning: #fbbf24;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --rail: 56px;
+    --pad: 28px;
+    --gap: 24px;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--text);
+    font-family: var(--sans); font-size: 13px; line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); }
+
+  .shell { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 100vh; }
+
+  /* Icon rail */
+  .rail {
+    position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; padding: 14px 0;
+    background: var(--ground); z-index: 10;
+  }
+  .mark {
+    width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 7px;
+    display: grid; place-items: center; color: var(--text); font-weight: 600; font-size: 14px;
+    letter-spacing: -0.04em; margin-bottom: 18px;
+  }
+  .rail-nav { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; }
+  .rail-btn {
+    position: relative; width: 38px; height: 38px; display: grid; place-items: center;
+    background: transparent; border: 0; border-radius: 7px; color: var(--faint);
+  }
+  .rail-btn:hover { color: var(--text); background: var(--raised); }
+  .rail-btn.active { color: var(--text); background: var(--raised); }
+  .rail-btn.active::before {
+    content: ""; position: absolute; left: -9px; top: 8px; bottom: 8px; width: 2px;
+    background: var(--accent); border-radius: 2px;
+  }
+  .rail-btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.5; }
+  .rail-btn .count {
+    position: absolute; top: 2px; right: 1px; min-width: 14px; height: 14px; padding: 0 3px;
+    display: grid; place-items: center; background: var(--accent); color: #17100d;
+    border-radius: 4px; font-size: 9px; font-weight: 600;
+  }
+  .rail-bottom { margin-top: auto; display: grid; gap: 4px; }
+  .rail-btn[data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; left: 48px; top: 50%; transform: translateY(-50%);
+    background: #232831; border: 1px solid #333a45; color: var(--text); padding: 4px 8px;
+    border-radius: 5px; font-size: 11px; white-space: nowrap; z-index: 20;
+  }
+
+  /* Main */
+  .main { min-width: 0; padding: var(--pad) 32px 56px; }
+  .topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+  .eyebrow { color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  h1 { margin: 4px 0 0; font-size: 26px; line-height: 1.15; letter-spacing: -0.035em; font-weight: 600; }
+  .subline { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+  .live { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); display: inline-block; flex: 0 0 auto; }
+  .dot.ok { background: var(--positive); }
+  .dot.run { background: var(--accent); }
+  .dot.warn { background: var(--warning); }
+  .dot.bad { background: var(--negative); }
+  .top-actions { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
+  .btn {
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+    height: 32px; padding: 0 11px; border-radius: 6px; font-size: 12px;
+  }
+  .btn:hover { color: var(--text); border-color: #3a424e; }
+  .btn.primary { background: var(--text); border-color: var(--text); color: #101114; font-weight: 500; }
+  .btn.primary:hover { background: #dfe5ec; }
+  .btn.danger { color: var(--negative); border-color: #4a252e; }
+
+  .view { display: none; margin-top: 24px; }
+  .view.active { display: block; }
+
+  /* Tabs and toolbar */
+  .tabs { display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); }
+  .tab { position: relative; border: 0; background: transparent; color: var(--faint); padding: 0 0 10px; font-size: 12px; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); }
+  .tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 14px 0 14px; }
+  .search {
+    width: 260px; height: 32px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 6px; padding: 0 10px; color: var(--text); outline: none;
+  }
+  .search::placeholder { color: var(--faint); }
+  .search:focus { border-color: #3a424e; }
+  .result-count { color: var(--faint); font-size: 12px; }
+
+  /* Tasks split */
+  .split { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: var(--gap); align-items: start; }
+  .queue-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
+  .queue-label { color: var(--faint); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  .queue { border-top: 1px solid var(--line); }
+  .task-row {
+    width: 100%; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 10px;
+    align-items: start; text-align: left; padding: 13px 8px; border: 0; border-bottom: 1px solid var(--line-soft);
+    background: transparent; color: var(--text);
+  }
+  .task-row:hover { background: #13161b; }
+  .task-row.selected { background: var(--surface); box-shadow: inset 2px 0 0 var(--accent); }
+  .task-row .dot { margin-top: 5px; }
+  .task-title { font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .task-meta { margin-top: 4px; color: var(--faint); font-size: 11px; display: flex; gap: 8px; }
+  .task-meta .agent { color: var(--muted); }
+  .task-right { color: var(--faint); font-size: 11px; text-align: right; white-space: nowrap; }
+  .diff-add { color: var(--positive); }
+  .diff-del { color: var(--negative); }
+
+  /* Detail */
+  .detail { min-width: 0; }
+  .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+  .crumb { color: var(--faint); font-size: 11px; font-family: var(--mono); }
+  .detail-title { margin: 5px 0 0; font-size: 20px; line-height: 1.2; letter-spacing: -0.025em; font-weight: 600; }
+  .detail-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+  .status-line { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 13px 0 18px; color: var(--muted); font-size: 12px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px;
+    border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--raised);
+    font-size: 11px; white-space: nowrap;
+  }
+  .pill.run { color: #ffb08f; border-color: #4a2b20; background: #21150f; }
+  .pill.ok { color: #9be8b4; border-color: #1f3d2c; background: #122019; }
+  .pill.warn { color: #f9d47b; border-color: #483b1c; background: #211b0f; }
+  .pill.bad { color: #ffa3b1; border-color: #4b2430; background: #21141a; }
+
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: var(--gap); align-items: start; }
+  .section-title { margin: 0 0 10px; color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+
+  /* Run spine */
+  .spine { position: relative; padding-left: 20px; }
+  .spine::before { content: ""; position: absolute; left: 4px; top: 6px; bottom: 10px; width: 1px; background: var(--line); }
+  .node { position: relative; padding: 0 0 22px; }
+  .node:last-child { padding-bottom: 0; }
+  .node::before {
+    content: ""; position: absolute; left: -20px; top: 4px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--ground); border: 1px solid var(--faint); z-index: 1;
+  }
+  .node.done::before { border-color: var(--positive); background: var(--positive); }
+  .node.run::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px rgba(255,122,69,.12); }
+  .node.wait::before { border-color: var(--warning); background: var(--warning); }
+  .node-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .node-title { font-size: 13px; font-weight: 500; }
+  .node-time { color: var(--faint); font-family: var(--mono); font-size: 10px; }
+  .node-sub { margin-top: 4px; color: var(--muted); font-size: 12px; }
+  .node-meta { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  .exec { margin-top: 8px; border-left: 1px solid var(--line); padding-left: 12px; color: var(--faint); font-size: 11px; }
+  .exec .mono { color: var(--muted); }
+
+  /* Cards / evidence */
+  .panel { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; }
+  .panel-pad { padding: 14px; }
+  .evidence-row {
+    display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    padding: 9px 0; border-bottom: 1px solid var(--line-soft);
+  }
+  .evidence-row:last-child { border-bottom: 0; }
+  .check-kind { color: var(--faint); font-size: 11px; }
+  .cmd { color: var(--text); font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .exit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .log-link { color: var(--muted); text-decoration: none; border-bottom: 1px dotted #4a515d; }
+  .log-link:hover { color: var(--text); }
+  .decision { padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+  .decision:last-child { border-bottom: 0; }
+  .decision-top { display: flex; justify-content: space-between; gap: 12px; color: var(--faint); font-size: 10px; font-family: var(--mono); }
+  .decision p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .decision .type { color: var(--text); font-family: var(--sans); font-size: 11px; }
+
+  .approval {
+    border: 1px solid #4b3024; background: #1b1410; border-radius: 7px; padding: 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px;
+  }
+  .approval strong { font-size: 12px; font-weight: 500; color: #ffc0a5; }
+  .approval span { color: var(--muted); font-size: 11px; }
+  .approval-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+
+  /* Tables */
+  .table { width: 100%; border-collapse: collapse; }
+  .table th { text-align: left; color: var(--faint); font-size: 11px; font-weight: 400; padding: 0 10px 9px; border-bottom: 1px solid var(--line); }
+  .table td { padding: 12px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+  .table tr:last-child td { border-bottom: 0; }
+  .table .right { text-align: right; }
+  .table .name { font-weight: 500; }
+  .table .sub { color: var(--faint); font-size: 11px; margin-top: 3px; }
+  .cap { display: inline-block; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 10px; margin-right: 3px; }
+
+  .approval-queue { border-top: 1px solid var(--line); }
+  .approval-item { display: grid; grid-template-columns: 8px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 15px 8px; border-bottom: 1px solid var(--line-soft); }
+  .approval-item .why { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .approval-item .what { font-family: var(--mono); font-size: 11px; color: var(--text); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .empty { padding: 26px 0; color: var(--faint); font-size: 12px; }
+
+  @media (max-width: 1050px) {
+    .split { grid-template-columns: 320px minmax(0,1fr); }
+    .detail-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 820px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 52px; flex-direction: row;
+      justify-content: space-around; border-right: 0; border-top: 1px solid var(--line); padding: 0; z-index: 30; }
+    .mark { display: none; }
+    .rail-nav { flex-direction: row; justify-content: space-around; }
+    .rail-bottom { margin: 0; display: none; }
+    .rail-btn.active::before { left: 10px; right: 10px; top: auto; bottom: -1px; width: auto; height: 2px; }
+    .main { padding: 20px 16px 84px; }
+    h1 { font-size: 22px; }
+    .split { grid-template-columns: 1fr; }
+    .queue { max-height: 42vh; overflow: auto; }
+    .detail { border-top: 1px solid var(--line); padding-top: 18px; }
+    .detail-actions .btn.secondary { display: none; }
+    .top-actions .live { display: none; }
+    .search { width: 100%; }
+    .toolbar { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail" aria-label="Primary navigation">
+    <div class="mark" aria-label="HubAgent">H</div>
+    <nav class="rail-nav">
+      <button class="rail-btn active" data-view="tasks" data-tip="Tasks" aria-label="Tasks">
+        <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+      </button>
+      <button class="rail-btn" data-view="agents" data-tip="Agents" aria-label="Agents">
+        <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 2v3M15 2v3M8 11h.01M16 11h.01M9 16h6"/></svg>
+      </button>
+      <button class="rail-btn" data-view="approvals" data-tip="Approvals" aria-label="Approvals">
+        <svg viewBox="0 0 24 24"><path d="M7 3h10l3 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7l3-4Z"/><path d="M8 13l2.5 2.5L16 10"/></svg>
+        <span class="count" id="approval-count">2</span>
+      </button>
+    </nav>
+    <div class="rail-bottom">
+      <button class="rail-btn" data-tip="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.9 1.9-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20h-2.7v-.08A1.7 1.7 0 0 0 11.2 18.4a1.7 1.7 0 0 0-1.88.34l-.06.06-1.9-1.9.06-.06A1.7 1.7 0 0 0 7.76 15a1.7 1.7 0 0 0-1.56-1.03H6v-2.7h.2A1.7 1.7 0 0 0 7.76 10.2a1.7 1.7 0 0 0-.34-1.88l-.06-.06 1.9-1.9.06.06A1.7 1.7 0 0 0 11.2 6.76 1.7 1.7 0 0 0 12.23 5.2V5h2.7v.2a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 1.9 1.9-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03H21v2.7h-.2A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topline">
+      <div>
+        <div class="eyebrow">Local workspace</div>
+        <h1 id="page-title">Tasks</h1>
+        <p class="subline" id="page-sub">3 running · 2 waiting · 14 completed today</p>
+      </div>
+      <div class="top-actions">
+        <span class="live"><span class="dot ok"></span> Live · SSE</span>
+        <button class="btn" id="refresh">Refresh</button>
+      </div>
+    </div>
+
+    <section class="view active" id="view-tasks">
+      <div class="tabs" role="tablist" aria-label="Task filters">
+        <button class="tab active" data-filter="all">All <span class="num" id="count-all">12</span></button>
+        <button class="tab" data-filter="running">Running <span class="num" id="count-running">3</span></button>
+        <button class="tab" data-filter="waiting">Waiting <span class="num" id="count-waiting">2</span></button>
+        <button class="tab" data-filter="failed">Failed <span class="num" id="count-failed">1</span></button>
+      </div>
+      <div class="toolbar">
+        <input class="search" id="search" type="search" placeholder="Filter tasks, agents, IDs…" aria-label="Filter tasks" />
+        <span class="result-count" id="result-count">5 of 5</span>
+      </div>
+
+      <div class="split">
+        <div>
+          <div class="queue-head">
+            <span class="queue-label">Task queue</span>
+            <span class="faint mono">newest first</span>
+          </div>
+          <div class="queue" id="task-queue"></div>
+        </div>
+        <div class="detail" id="task-detail"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-agents">
+      <div class="toolbar"><span class="result-count">3 registered · local ACP</span></div>
+      <div class="panel panel-pad" id="agent-table"></div>
+    </section>
+
+    <section class="view" id="view-approvals">
+      <div class="toolbar"><span class="result-count" id="approval-summary">2 pending approvals</span></div>
+      <div class="approval-queue" id="approval-list"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const icons = {
+  check: '<svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>',
+};
+
+const tasks = [
+  {
+    id: '01K7X2Q4M8J9R6T3N5V1B0C2', short: '01K7X2Q4', title: 'Fix login redirect loop',
+    status: 'running', statusLabel: 'running', agent: 'DSH', age: '42s',
+    branch: 'hubagent/01K7X2Q4', elapsed: '00:42', diff: '+12 −3',
+    summary: 'Guard the post-login redirect so a stale returnTo cannot bounce between /login and /dashboard.',
+    approval: null,
+    spine: [
+      { state: 'done', title: 'Inspect auth middleware', time: '14:02:11', meta: 'subtask · succeeded', exec: 'Execution succ · 4c1a9e2 · 18s', checks: ['pnpm test auth · exit 0'] },
+      { state: 'run', title: 'Patch redirect guard', time: '14:02:29', meta: 'subtask · running', exec: 'Execution run · 2f7d08a · 42s' },
+      { state: '', title: 'Run auth regression', time: '—', meta: 'subtask · ready', exec: 'not started' },
+    ],
+    evidence: [
+      { kind: 'command', cmd: 'pnpm test auth', exit: 0, log: 'check-1.log' },
+      { kind: 'diffScope', cmd: 'allowed: src/auth/**', exit: 0, log: 'check-2.log' },
+      { kind: 'fileExists', cmd: 'src/auth/redirect.ts', exit: 0, log: 'check-3.log' },
+    ],
+    decisions: [
+      { type: 'decompose', time: '14:02:09', text: 'Split the task into inspect → patch → regression; keep auth changes in one worktree.' },
+      { type: 'select_agent', time: '14:02:10', text: 'DSH selected: highest recent success rate and no active load.' },
+    ],
+  },
+  {
+    id: '01K7X2P9C4H1M8N6Q3R5T7V0', short: '01K7X2P9', title: 'Add ACP session resume support',
+    status: 'waiting_approval', statusLabel: 'waiting approval', agent: 'Claude Code', age: '2m',
+    branch: 'hubagent/01K7X2P9', elapsed: '02:14', diff: '+84 −12',
+    summary: 'Handle session/resume only when initialize negotiates support; otherwise fail closed.',
+    approval: { reason: 'sandbox_denied', resource: 'read ~/.claude/session.json', risk: 'medium' },
+    spine: [
+      { state: 'done', title: 'Inspect initialize capabilities', time: '13:58:04', meta: 'subtask · succeeded', exec: 'Execution succ · 9b2e1a0 · 21s', checks: ['node --test adapter · exit 0'] },
+      { state: 'wait', title: 'Implement resume branch', time: '13:58:25', meta: 'subtask · waiting_approval', exec: 'Execution wait · 7d4c2f1' },
+      { state: '', title: 'Regression: no-resume fallback', time: '—', meta: 'subtask · ready', exec: 'not started' },
+    ],
+    evidence: [
+      { kind: 'command', cmd: 'node --test test/adapter.test.js', exit: 0, log: 'check-1.log' },
+      { kind: 'diffScope', cmd: 'allowed: src/acp/**', exit: 0, log: 'check-2.log' },
+    ],
+    decisions: [
+      { type: 'decompose', time: '13:58:01', text: 'Separate capability negotiation from resume execution so unsupported harnesses fail closed.' },
+      { type: 'select_agent', time: '13:58:03', text: 'Claude Code selected for its ACP negotiation history.' },
+      { type: 'request_human', time: '13:58:26', text: 'Session file is outside the current read allowlist; approval required before retry.' },
+    ],
+  },
+  {
+    id: '01K7X2M1A6B4D8E2F9G3H5J7', short: '01K7X2M1', title: 'Refactor verification runner',
+    status: 'completed', statusLabel: 'completed', agent: 'DSH', age: '6m',
+    branch: 'hubagent/01K7X2M1', elapsed: '06:08', diff: '+120 −44',
+    summary: 'Extract command/file/diff checks into a runner that never calls the agent under test.',
+    approval: null,
+    spine: [
+      { state: 'done', title: 'Extract check types', time: '13:51:44', meta: 'subtask · succeeded', exec: 'Execution succ · 3a1f7c9 · 2m 41s', checks: ['pnpm typecheck · exit 0', 'diffScope · pass'] },
+      { state: 'done', title: 'Wire evidence refs', time: '13:54:25', meta: 'subtask · succeeded', exec: 'Execution succ · 6b2d4e8 · 2m 11s', checks: ['pnpm test verify · exit 0'] },
+      { state: 'done', title: 'Run acceptance suite', time: '13:56:36', meta: 'subtask · succeeded', exec: 'Execution succ · 1c7e9a3 · 1m 16s', checks: ['acceptance-v1 · exit 0'] },
+    ],
+    evidence: [
+      { kind: 'command', cmd: 'pnpm test verify', exit: 0, log: 'check-1.log' },
+      { kind: 'diffScope', cmd: 'allowed: src/runtime/verify/**', exit: 0, log: 'check-2.log' },
+    ],
+    decisions: [
+      { type: 'decompose', time: '13:51:42', text: 'Three subtasks: extract, wire, acceptance. Types first so evidence cannot drift.' },
+      { type: 'accept_result', time: '13:56:37', text: 'All three subtasks passed deterministic checks; branch retained for review.' },
+    ],
+  },
+  {
+    id: '01K7X2K7H3J5L9N1P4Q6R8T0', short: '01K7X2K7', title: 'Investigate flaky merge test',
+    status: 'failed', statusLabel: 'failed', agent: 'Codex', age: '3m',
+    branch: 'hubagent/01K7X2K7', elapsed: '03:20', diff: '+4 −2',
+    summary: 'Reproduce the intermittent merge failure without editing the test fixture.',
+    approval: null,
+    spine: [
+      { state: 'done', title: 'Reproduce failure', time: '13:49:12', meta: 'subtask · failed', exec: 'Execution failed · c3e7a1b · 3m 20s', checks: ['node --test merge · exit 1'] },
+    ],
+    evidence: [
+      { kind: 'command', cmd: 'node --test merge.test.js', exit: 1, log: 'check-1.log' },
+      { kind: 'diffScope', cmd: 'allowed: test/**', exit: 1, log: 'check-2.log' },
+    ],
+    decisions: [
+      { type: 'retry', time: '13:52:32', text: 'No side-effect-free retry remained; verification failed and diffScope flagged the fixture edit.' },
+    ],
+  },
+  {
+    id: '01K7X2H5B7D9F1H3J5L7N9P1', short: '01K7X2H5', title: 'Update approval risk copy',
+    status: 'ready', statusLabel: 'ready', agent: 'unassigned', age: '8m',
+    branch: '—', elapsed: '—', diff: '—',
+    summary: 'Clarify the difference between once and policy approvals in the permission sheet.',
+    approval: null,
+    spine: [
+      { state: '', title: 'Draft copy', time: '—', meta: 'subtask · ready', exec: 'not started' },
+      { state: '', title: 'Check tone against PRD', time: '—', meta: 'subtask · ready', exec: 'not started' },
+    ],
+    evidence: [],
+    decisions: [
+      { type: 'decompose', time: '13:46:02', text: 'Two small copy subtasks; no code paths involved.' },
+    ],
+  },
+];
+
+const agents = [
+  { name: 'DSH', status: 'online', command: 'dsh --profile acp', network: 'agent-managed', load: '1 / 3', success: '94%', caps: ['code', 'test', 'git'] },
+  { name: 'Claude Code', status: 'online', command: 'claude-code-acp', network: 'agent-managed', load: '1 / 3', success: '91%', caps: ['code', 'review'] },
+  { name: 'Codex', status: 'degraded', command: 'codex-acp', network: 'allowlist', load: '0 / 3', success: '78%', caps: ['code'] },
+];
+
+let approvals = [
+  { id: 'a1', task: '01K7X2P9', reason: 'sandbox_denied', resource: 'read ~/.claude/session.json', risk: 'medium', status: 'pending' },
+  { id: 'a2', task: '01K7X2K7', reason: 'sandbox_denied', resource: 'write test/merge.test.js', risk: 'high', status: 'pending' },
+];
+
+let selectedId = tasks[0].id;
+let activeFilter = 'all';
+let query = '';
+
+const $ = (selector) => document.querySelector(selector);
+const dotClass = (status) => status === 'completed' ? 'ok' : status === 'failed' ? 'bad' : status === 'running' ? 'run' : 'warn';
+const pillClass = (status) => status === 'completed' ? 'ok' : status === 'failed' ? 'bad' : status === 'running' ? 'run' : 'warn';
+
+function renderQueue() {
+  const filtered = tasks.filter((task) => {
+    if (activeFilter === 'running' && task.status !== 'running') return false;
+    if (activeFilter === 'waiting' && !task.status.startsWith('waiting')) return false;
+    if (activeFilter === 'failed' && task.status !== 'failed') return false;
+    const haystack = `${task.title} ${task.agent} ${task.id}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+  $('#result-count').textContent = `${filtered.length} of ${tasks.length}`;
+  $('#task-queue').innerHTML = filtered.map((task) => `
+    <button class="task-row ${task.id === selectedId ? 'selected' : ''}" data-id="${task.id}">
+      <span class="dot ${dotClass(task.status)}"></span>
+      <span>
+        <span class="task-title">${task.title}</span>
+        <span class="task-meta"><span class="agent">${task.agent}</span><span>${task.age}</span></span>
+      </span>
+      <span class="task-right num">${task.diff === '—' ? '<span class="faint">—</span>' : `<span class="diff-add">${task.diff.split(' ')[0]}</span> <span class="diff-del">${task.diff.split(' ')[1]}</span>`}</span>
+    </button>
+  `).join('') || '<p class="empty">No tasks match this filter.</p>';
+
+  document.querySelectorAll('.task-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      selectedId = row.dataset.id;
+      renderQueue();
+      renderDetail();
+    });
+  });
+}
+
+function renderDetail() {
+  const task = tasks.find((item) => item.id === selectedId);
+  if (!task) return;
+  const approval = task.approval;
+  $('#task-detail').innerHTML = `
+    <div class="detail-head">
+      <div>
+        <div class="crumb">TASK / ${task.id}</div>
+        <h2 class="detail-title">${task.title}</h2>
+      </div>
+      <div class="detail-actions">
+        <button class="btn">Copy ID</button>
+        <button class="btn secondary">View diff</button>
+      </div>
+    </div>
+    <div class="status-line">
+      <span class="pill ${pillClass(task.status)}"><span class="dot ${dotClass(task.status)}"></span>${task.statusLabel}</span>
+      <span class="mono">${task.agent}</span>
+      <span>${task.elapsed}</span>
+      <span class="mono">${task.branch}</span>
+      <span class="num"><span class="diff-add">${task.diff.split(' ')[0]}</span> <span class="diff-del">${task.diff.split(' ')[1] ?? ''}</span></span>
+    </div>
+    ${approval ? `
+      <div class="approval">
+        <div>
+          <strong>Approval needed · ${approval.reason}</strong><br />
+          <span class="mono">${approval.resource}</span>
+          <span> · risk ${approval.risk}</span>
+        </div>
+        <div class="approval-actions">
+          <button class="btn primary" data-approve="task">Approve once</button>
+          <button class="btn" data-reject="task">Reject</button>
+        </div>
+      </div>
+    ` : ''}
+    <div class="detail-grid">
+      <div>
+        <h3 class="section-title">Run spine</h3>
+        <div class="spine">${task.spine.map((node) => `
+          <div class="node ${node.state}">
+            <div class="node-head"><span class="node-title">${node.title}</span><span class="node-time">${node.time}</span></div>
+            <div class="node-sub">${node.meta}</div>
+            <div class="exec">${node.exec}</div>
+            ${(node.checks || []).map((check) => `<div class="node-meta"><span class="pill ok"><span class="dot ok"></span>${check}</span></div>`).join('')}
+          </div>
+        `).join('')}</div>
+      </div>
+      <div>
+        <h3 class="section-title">Evidence</h3>
+        <div class="panel panel-pad">
+          ${task.evidence.length ? task.evidence.map((check) => `
+            <div class="evidence-row">
+              <span class="check-kind">${check.kind}</span>
+              <span class="cmd" title="${check.cmd}">${check.cmd}</span>
+              <span class="exit">${check.exit === 0 ? '<span class="pill ok">exit 0</span>' : '<span class="pill bad">exit ' + check.exit + '</span>'}<a class="log-link" href="#" onclick="return false">log</a></span>
+            </div>
+          `).join('') : '<p class="empty">No evidence yet.</p>'}
+        </div>
+        <h3 class="section-title" style="margin-top:20px">Decisions</h3>
+        <div class="panel panel-pad">
+          ${task.decisions.length ? task.decisions.map((decision) => `
+            <div class="decision">
+              <div class="decision-top"><span class="type">${decision.type}</span><span>${decision.time}</span></div>
+              <p>${decision.text}</p>
+            </div>
+          `).join('') : '<p class="empty">No decisions recorded.</p>'}
+        </div>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('[data-approve="task"]').forEach((button) => button.addEventListener('click', () => {
+    task.approval = null;
+    task.status = 'running';
+    task.statusLabel = 'running';
+    renderAll();
+  }));
+  document.querySelectorAll('[data-reject="task"]').forEach((button) => button.addEventListener('click', () => {
+    task.status = 'failed';
+    task.statusLabel = 'failed';
+    task.approval = null;
+    renderAll();
+  }));
+}
+
+function renderAgents() {
+  $('#agent-table').innerHTML = `<table class="table">
+    <thead><tr><th>Agent</th><th>Status</th><th>Network</th><th>Load</th><th class="right">Success</th><th>Capabilities</th></tr></thead>
+    <tbody>${agents.map((agent) => `
+      <tr>
+        <td><div class="name">${agent.name}</div><div class="sub mono">${agent.command}</div></td>
+        <td><span class="pill ${agent.status === 'online' ? 'ok' : 'warn'}"><span class="dot ${agent.status === 'online' ? 'ok' : 'warn'}"></span>${agent.status}</span></td>
+        <td class="muted">${agent.network}</td>
+        <td class="num">${agent.load}</td>
+        <td class="right num">${agent.success}</td>
+        <td>${agent.caps.map((cap) => `<span class="cap">${cap}</span>`).join('')}</td>
+      </tr>
+    `).join('')}</tbody>
+  </table>`;
+}
+
+function renderApprovals() {
+  const pending = approvals.filter((item) => item.status === 'pending');
+  $('#approval-count').textContent = pending.length;
+  $('#approval-summary').textContent = `${pending.length} pending approval${pending.length === 1 ? '' : 's'}`;
+  $('#approval-list').innerHTML = pending.length ? pending.map((item) => `
+    <div class="approval-item">
+      <span class="dot warn"></span>
+      <div>
+        <div><span class="pill warn">${item.reason}</span> <span class="mono faint">task ${item.task}</span></div>
+        <div class="what">${item.resource}</div>
+        <div class="why">risk ${item.risk} · waiting for a human decision</div>
+      </div>
+      <div class="approval-actions">
+        <button class="btn primary" data-approval="${item.id}">Approve once</button>
+        <button class="btn" data-reject-approval="${item.id}">Reject</button>
+      </div>
+    </div>
+  `).join('') : '<p class="empty">No pending approvals.</p>';
+
+  document.querySelectorAll('[data-approval]').forEach((button) => button.addEventListener('click', () => {
+    const item = approvals.find((entry) => entry.id === button.dataset.approval);
+    if (item) item.status = 'approved';
+    renderApprovals();
+  }));
+  document.querySelectorAll('[data-reject-approval]').forEach((button) => button.addEventListener('click', () => {
+    const item = approvals.find((entry) => entry.id === button.dataset.rejectApproval);
+    if (item) item.status = 'rejected';
+    renderApprovals();
+  }));
+}
+
+function setView(view) {
+  document.querySelectorAll('.view').forEach((section) => section.classList.remove('active'));
+  document.querySelector(`#view-${view}`).classList.add('active');
+  document.querySelectorAll('.rail-btn[data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+  const title = view === 'tasks' ? 'Tasks' : view === 'agents' ? 'Agents' : 'Approvals';
+  $('#page-title').textContent = title;
+  $('#page-sub').textContent = view === 'tasks' ? '3 running · 2 waiting · 14 completed today' : view === 'agents' ? '3 registered · local ACP' : 'Approvals waiting for a human decision';
+}
+
+function renderAll() {
+  renderQueue();
+  renderDetail();
+  renderAgents();
+  renderApprovals();
+}
+
+document.querySelectorAll('.rail-btn[data-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
+document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
+  activeFilter = tab.dataset.filter;
+  document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === tab));
+  renderQueue();
+}));
+$('#search').addEventListener('input', (event) => { query = event.currentTarget.value; renderQueue(); });
+$('#refresh').addEventListener('click', () => { $('#refresh').textContent = 'Updated just now'; setTimeout(() => { $('#refresh').textContent = 'Refresh'; }, 1600); });
+
+renderAll();
+const initial = location.hash.replace('#', '');
+if (['tasks', 'agents', 'approvals'].includes(initial)) setView(initial);
+</script>
+</body>
+</html>

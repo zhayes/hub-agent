@@ -563,6 +563,7 @@ export function createCli(version: string): Command {
                 : await runGoalWithBrain({
                     ...common,
                     availableAgents: listAgents(db),
+                    completeOnSuccess: session === undefined,
                     ...(brain === undefined ? {} : { brain }),
                   })
             let outputResult: typeof result & {

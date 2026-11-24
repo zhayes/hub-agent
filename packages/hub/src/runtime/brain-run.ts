@@ -14,6 +14,7 @@ import { runBrainRound } from './brain-loop'
 import { createClarification } from './clarify'
 import { cancelTask } from './recovery/cancel'
 import { failGoal } from './recovery/fail'
+import { completeTaskAfterDelivery } from './workspace/finalize'
 
 /**
  * M6 的 Brain 驱动入口：
@@ -29,6 +30,8 @@ export interface RunGoalWithBrainOptions
   budget?: BrainBudget
   /** 可参与自动换 Agent 的候选；默认只有 options.agent */
   availableAgents?: readonly AgentRecord[]
+  /** 共享工作区完成即落 Task completed；worktree 由交付/merge 后 finalize */
+  completeOnSuccess?: boolean
 }
 
 export interface RunGoalWithBrainResult {
@@ -56,7 +59,7 @@ export interface RunGoalWithBrainResult {
 export async function runGoalWithBrain(
   options: RunGoalWithBrainOptions,
 ): Promise<RunGoalWithBrainResult> {
-  const { brain = createBrainFromEnv(), budget, ...taskOptions } = options
+  const { brain = createBrainFromEnv(), budget, completeOnSuccess = true, ...taskOptions } = options
   const goalId = asGoalId(newId())
   const now = asTimestamp(new Date().toISOString())
   const title =
@@ -245,6 +248,9 @@ export async function runGoalWithBrain(
 
   if (lastResult === undefined) {
     throw new HubError('ACTION_REJECTED', 'Brain 计划没有可执行子任务', { goalId })
+  }
+  if (lastResult.ok && completeOnSuccess) {
+    completeTaskAfterDelivery(options.db, lastResult.taskId, lastResult.goalId)
   }
   return { ...lastResult, executions, decisions }
 }

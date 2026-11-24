@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HubAgent Chat — Signal Console preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ground: #0f1114;
+    --surface: #15181d;
+    --raised: #1b1f26;
+    --line: #272c35;
+    --line-soft: #1d222a;
+    --text: #f3f5f8;
+    --muted: #9aa4b2;
+    --faint: #6f7885;
+    --accent: #ff7a45;
+    --positive: #4ade80;
+    --negative: #fb7185;
+    --warning: #fbbf24;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --rail: 56px;
+    --pad: 20px;
+    --gap: 18px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--text); overflow: hidden;
+    font-family: var(--sans); font-size: 13px; line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); display: inline-block; flex: 0 0 auto; }
+  .dot.ok { background: var(--positive); }
+  .dot.run { background: var(--accent); }
+  .dot.warn { background: var(--warning); }
+  .dot.bad { background: var(--negative); }
+  .dot.idle { background: var(--faint); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 21px; padding: 0 7px;
+    border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--raised);
+    font-size: 10px; white-space: nowrap;
+  }
+  .pill.run { color: #ffb08f; border-color: #4a2b20; background: #21150f; }
+  .pill.ok { color: #9be8b4; border-color: #1f3d2c; background: #122019; }
+  .pill.warn { color: #f9d47b; border-color: #483b1c; background: #211b0f; }
+  .pill.bad { color: #ffa3b1; border-color: #4b2430; background: #21141a; }
+  .btn {
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+    height: 30px; padding: 0 10px; border-radius: 5px; font-size: 12px;
+  }
+  .btn:hover { color: var(--text); border-color: #3a424e; }
+  .btn.primary { background: var(--text); border-color: var(--text); color: #101114; font-weight: 500; }
+  .btn.primary:hover { background: #dfe5ec; }
+  .btn.icon { width: 30px; padding: 0; display: grid; place-items: center; }
+
+  .shell { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); height: 100vh; }
+
+  /* rail */
+  .rail {
+    border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center;
+    padding: 13px 0; background: var(--ground); z-index: 10;
+  }
+  .mark { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 7px; display: grid; place-items: center; font-weight: 600; font-size: 14px; letter-spacing: -.04em; margin-bottom: 16px; }
+  .rail-nav { display: flex; flex-direction: column; gap: 3px; width: 100%; align-items: center; }
+  .rail-btn {
+    position: relative; width: 38px; height: 38px; display: grid; place-items: center;
+    background: transparent; border: 0; border-radius: 7px; color: var(--faint);
+  }
+  .rail-btn:hover { color: var(--text); background: var(--raised); }
+  .rail-btn.active { color: var(--text); background: var(--raised); }
+  .rail-btn.active::before { content: ""; position: absolute; left: -9px; top: 8px; bottom: 8px; width: 2px; background: var(--accent); border-radius: 2px; }
+  .rail-btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.5; }
+  .rail-btn .count { position: absolute; top: 2px; right: 1px; min-width: 14px; height: 14px; padding: 0 3px; display: grid; place-items: center; background: var(--accent); color: #17100d; border-radius: 4px; font-size: 9px; font-weight: 600; }
+  .rail-btn[data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; left: 48px; top: 50%; transform: translateY(-50%);
+    background: #232831; border: 1px solid #333a45; color: var(--text); padding: 4px 8px;
+    border-radius: 5px; font-size: 11px; white-space: nowrap; z-index: 20;
+  }
+  .rail-bottom { margin-top: auto; }
+
+  /* three-pane workspace */
+  .workspace { display: grid; grid-template-columns: 256px minmax(0, 1fr) 336px; min-width: 0; height: 100vh; }
+
+  /* threads */
+  .threads { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .threads-head { padding: 18px 16px 12px; display: flex; align-items: center; justify-content: space-between; }
+  .threads-title { font-size: 15px; font-weight: 500; letter-spacing: -.015em; }
+  .threads-search { margin: 0 12px 10px; height: 30px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 0 9px; color: var(--text); outline: 0; font-size: 12px; }
+  .threads-search::placeholder { color: var(--faint); }
+  .thread-list { overflow: auto; min-height: 0; padding: 0 6px 12px; }
+  .thread-row {
+    width: 100%; display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 9px; align-items: start;
+    padding: 11px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--text); text-align: left;
+  }
+  .thread-row:hover { background: #13161b; }
+  .thread-row.active { background: var(--surface); box-shadow: inset 2px 0 0 var(--accent); }
+  .thread-row .dot { margin-top: 5px; }
+  .thread-name { font-size: 12px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .thread-preview { margin-top: 3px; color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .thread-meta { margin-top: 5px; display: flex; gap: 8px; color: var(--faint); font-size: 10px; }
+
+  /* conversation */
+  .conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ground); }
+  .conv-head { height: 64px; flex: 0 0 64px; border-bottom: 1px solid var(--line); padding: 0 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .conv-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-sub { margin-top: 3px; color: var(--faint); font-size: 11px; display: flex; gap: 9px; align-items: center; }
+  .conv-actions { display: flex; gap: 7px; align-items: center; }
+  .messages { flex: 1 1 auto; overflow: auto; padding: 22px 26px 20px; scroll-behavior: smooth; }
+  .message { max-width: 760px; margin: 0 auto 22px; }
+  .msg-head { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 10px; margin-bottom: 7px; text-transform: uppercase; letter-spacing: .07em; }
+  .msg-head .who { color: var(--muted); }
+  .msg-head .who.agent { color: var(--text); }
+  .msg-head .sep { color: #3a414c; }
+  .msg-text { color: var(--text); font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+  .msg-text p { margin: 0 0 8px; }
+  .msg-text p:last-child { margin-bottom: 0; }
+  .card { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; overflow: hidden; margin-top: 9px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--line-soft); }
+  .card-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; }
+  .card-body { padding: 4px 13px 10px; }
+  .plan-step { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 8px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+  .plan-step:last-child { border-bottom: 0; }
+  .step-num { color: var(--faint); font-family: var(--mono); font-size: 10px; padding-top: 2px; }
+  .step-title { display: block; font-size: 12px; }
+  .step-meta { display: block; margin-top: 3px; color: var(--faint); font-size: 10px; }
+  .step-state { color: var(--faint); font-size: 10px; }
+  .run-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; color: var(--muted); font-size: 11px; }
+  .run-row .mono { color: var(--faint); }
+  .progress { height: 2px; background: var(--line); position: relative; margin: 8px 0 2px; overflow: hidden; }
+  .progress span { position: absolute; left: 0; top: 0; bottom: 0; width: 46%; background: var(--accent); }
+  .approval-card { border-color: #4b3024; background: #1b1410; }
+  .approval-card .card-head { border-bottom-color: #3b251c; }
+  .approval-card .card-title { color: #ffc0a5; }
+  .approval-resource { font-family: var(--mono); color: #f2d6c8; font-size: 11px; margin: 8px 0 4px; overflow-wrap: anywhere; }
+  .approval-actions { display: flex; gap: 7px; margin-top: 10px; }
+  .result-line { display: flex; align-items: center; gap: 9px; padding: 7px 0; color: var(--muted); font-size: 11px; }
+  .result-line:last-child { padding-bottom: 0; }
+  .check-table { width: 100%; border-collapse: collapse; }
+  .check-table td { padding: 6px 0; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+  .check-table tr:last-child td { border-bottom: 0; }
+  .check-table .cmd { font-family: var(--mono); font-size: 10px; color: var(--text); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .check-table .right { text-align: right; }
+  .answer { color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .answer strong { color: var(--text); font-weight: 500; }
+  .answer code { font-family: var(--mono); font-size: 11px; color: var(--text); background: var(--raised); padding: 1px 4px; border-radius: 3px; }
+
+  /* composer */
+  .composer-wrap { flex: 0 0 auto; padding: 12px 22px 18px; border-top: 1px solid var(--line); background: var(--ground); }
+  .composer { max-width: 760px; margin: 0 auto; border: 1px solid var(--line); background: var(--surface); border-radius: 7px; }
+  .composer:focus-within { border-color: #3b424e; }
+  .composer-top { display: flex; align-items: center; gap: 3px; padding: 8px 10px 0; }
+  .mode { border: 0; background: transparent; color: var(--faint); font-size: 11px; padding: 4px 6px; border-radius: 4px; }
+  .mode:hover { color: var(--text); }
+  .mode.active { color: var(--text); background: var(--raised); }
+  .scope { margin-left: auto; color: var(--faint); font-size: 10px; display: flex; gap: 8px; }
+  .composer textarea { width: 100%; min-height: 52px; max-height: 150px; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 8px 12px 4px; font-size: 13px; line-height: 1.5; }
+  .composer textarea::placeholder { color: var(--faint); }
+  .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 10px 9px; }
+  .hint { color: var(--faint); font-size: 10px; }
+  .send { height: 28px; border-radius: 5px; border: 1px solid var(--text); background: var(--text); color: #101114; padding: 0 12px; font-size: 11px; font-weight: 500; }
+  .send:hover { background: #dfe5ec; }
+  .send:disabled { opacity: .4; cursor: default; }
+
+  /* context */
+  .context { border-left: 1px solid var(--line); background: #111419; overflow: auto; min-height: 0; }
+  .context-head { padding: 18px 16px 12px; border-bottom: 1px solid var(--line); }
+  .context-eyebrow { color: var(--faint); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .context-title { font-size: 13px; font-weight: 500; margin-top: 5px; }
+  .context-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--faint); font-size: 10px; }
+  .context-body { padding: 16px; }
+  .context-section { margin-bottom: 22px; }
+  .context-label { color: var(--faint); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
+  .spine { position: relative; padding-left: 17px; }
+  .spine::before { content: ""; position: absolute; left: 3px; top: 5px; bottom: 8px; width: 1px; background: var(--line); }
+  .node { position: relative; padding-bottom: 15px; }
+  .node:last-child { padding-bottom: 0; }
+  .node::before { content: ""; position: absolute; left: -17px; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--ground); border: 1px solid var(--faint); z-index: 1; }
+  .node.done::before { background: var(--positive); border-color: var(--positive); }
+  .node.run::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,122,69,.12); }
+  .node.wait::before { background: var(--warning); border-color: var(--warning); }
+  .node-title { font-size: 11px; color: var(--text); }
+  .node-meta { margin-top: 3px; color: var(--faint); font-size: 10px; line-height: 1.45; }
+  .evidence-mini { border-top: 1px solid var(--line); }
+  .evidence-mini-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 10px; }
+  .evidence-mini-row .cmd { color: var(--muted); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .decision-mini { padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+  .decision-mini:last-child { border-bottom: 0; }
+  .decision-mini .type { color: var(--muted); font-size: 10px; font-family: var(--mono); }
+  .decision-mini p { margin: 3px 0 0; color: var(--faint); font-size: 11px; line-height: 1.5; }
+  .context-approval { border: 1px solid #4b3024; background: #1b1410; border-radius: 6px; padding: 10px; margin-bottom: 18px; }
+  .context-approval strong { display: block; color: #ffc0a5; font-size: 11px; }
+  .context-approval .res { color: #f2d6c8; font-family: var(--mono); font-size: 10px; margin: 4px 0 8px; overflow-wrap: anywhere; }
+  .context-approval .actions { display: flex; gap: 6px; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #232831; border: 1px solid #3a424e; color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 11px; opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 50; }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 1180px) {
+    .workspace { grid-template-columns: 224px minmax(0,1fr); }
+    .context { display: none; }
+  }
+  @media (max-width: 820px) {
+    body { overflow-x: hidden; overflow-y: auto; }
+    .shell { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
+    .rail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 52px; flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--line); padding: 0; z-index: 40; }
+    .mark { display: none; }
+    .rail-nav { flex-direction: row; justify-content: space-around; }
+    .rail-bottom { margin: 0; }
+    .workspace { grid-template-columns: 1fr; height: auto; min-height: 100vh; padding-bottom: 52px; }
+    .threads { border-right: 0; border-bottom: 1px solid var(--line); width: 100%; min-width: 0; overflow: hidden; }
+    .threads-head { padding-top: 14px; }
+    .thread-list { display: flex; overflow-x: auto; gap: 4px; padding: 0 8px 10px; }
+    .thread-row { min-width: 220px; background: var(--surface); }
+    .conversation { min-height: 70vh; width: 100%; min-width: 0; max-width: 100vw; overflow: hidden; }
+    .conv-head { padding: 0 16px; min-width: 0; overflow: hidden; }
+    .conv-sub { min-width: 0; overflow: hidden; white-space: nowrap; }
+    .conv-sub .mono { max-width: 48vw; overflow: hidden; text-overflow: ellipsis; }
+    .messages { padding: 16px; overflow-x: hidden; max-width: 100vw; }
+    .message { width: 100%; max-width: 100%; min-width: 0; }
+    .msg-text { overflow-wrap: anywhere; }
+    .card { max-width: 100%; }
+    .composer-wrap { padding: 10px 12px 14px; width: 100%; }
+    .context { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail" aria-label="Primary navigation">
+    <div class="mark" aria-label="HubAgent">H</div>
+    <nav class="rail-nav">
+      <button class="rail-btn active" data-tip="Chat" aria-label="Chat">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3V5Z"/><path d="M8 9h8M8 12h5"/></svg>
+      </button>
+      <button class="rail-btn" data-href="web-console.html" data-tip="Tasks" aria-label="Tasks">
+        <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+      </button>
+      <button class="rail-btn" data-href="web-console.html#agents" data-tip="Agents" aria-label="Agents">
+        <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 2v3M15 2v3M8 11h.01M16 11h.01M9 16h6"/></svg>
+      </button>
+      <button class="rail-btn" data-href="web-console.html#approvals" data-tip="Approvals" aria-label="Approvals">
+        <svg viewBox="0 0 24 24"><path d="M7 3h10l3 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7l3-4Z"/><path d="M8 13l2.5 2.5L16 10"/></svg>
+        <span class="count" id="rail-approval-count">2</span>
+      </button>
+    </nav>
+    <div class="rail-bottom">
+      <button class="rail-btn" data-tip="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.9 1.9-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20h-2.7v-.08A1.7 1.7 0 0 0 11.2 18.4a1.7 1.7 0 0 0-1.88.34l-.06.06-1.9-1.9.06-.06A1.7 1.7 0 0 0 7.76 15a1.7 1.7 0 0 0-1.56-1.03H6v-2.7h.2A1.7 1.7 0 0 0 7.76 10.2a1.7 1.7 0 0 0-.34-1.88l-.06-.06 1.9-1.9.06.06A1.7 1.7 0 0 0 11.2 6.76 1.7 1.7 0 0 0 12.23 5.2V5h2.7v.2a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 1.9 1.9-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03H21v2.7h-.2A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <aside class="threads">
+      <div class="threads-head">
+        <div class="threads-title">Chat</div>
+        <button class="btn primary" style="height:26px;padding:0 8px;font-size:11px" id="new-thread">New</button>
+      </div>
+      <input class="threads-search" id="thread-search" type="search" placeholder="Search threads…" aria-label="Search threads" />
+      <div class="thread-list" id="thread-list"></div>
+    </aside>
+
+    <section class="conversation">
+      <header class="conv-head">
+        <div style="min-width:0">
+          <div class="conv-title" id="conv-title">Fix login redirect loop</div>
+          <div class="conv-sub"><span class="dot run" id="conv-dot"></span><span id="conv-status">running</span><span class="sep">·</span><span class="mono" id="conv-task">01K7X2Q4M8J9R6T3N5V1B0C2</span></div>
+        </div>
+        <div class="conv-actions">
+          <button class="btn icon" title="Copy task ID" aria-label="Copy task ID">⧉</button>
+          <button class="btn" id="conv-open">Open task</button>
+        </div>
+      </header>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="composer-top">
+            <button class="mode active" data-mode="run">Run</button>
+            <button class="mode" data-mode="ask">Ask</button>
+            <span class="scope"><span>agent: auto</span><span>project: hub-agent</span></span>
+          </div>
+          <textarea id="composer-input" rows="2" placeholder="描述任务，或问“现在怎么样”…"></textarea>
+          <div class="composer-bottom">
+            <span class="hint">⌘↵ send · Shift+↵ newline</span>
+            <button class="send" id="send">Run</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="context">
+      <div class="context-head">
+        <div class="context-eyebrow">Active task</div>
+        <div class="context-title" id="context-title">Fix login redirect loop</div>
+        <div class="context-meta"><span class="mono" id="context-task">01K7X2Q4</span><span id="context-agent">DSH</span><span>00:42</span></div>
+      </div>
+      <div class="context-body" id="context-body"></div>
+    </aside>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const threads = [
+  {
+    id: 't1', title: 'Fix login redirect loop', status: 'running', statusLabel: 'running', agent: 'DSH',
+    taskId: '01K7X2Q4M8J9R6T3N5V1B0C2', shortTask: '01K7X2Q4', updated: '42s',
+    preview: 'Patch redirect guard · DSH',
+    messages: [
+      { kind: 'user', time: '14:02', text: '修一下登录后的 redirect 死循环，只改 auth redirect 相关代码，别动测试。' },
+      { kind: 'plan', time: '14:02', title: 'Plan · 3 subtasks', steps: [
+        { title: 'Inspect auth middleware', meta: 'subtask · succeeded', state: 'done' },
+        { title: 'Patch redirect guard', meta: 'subtask · running · 42s', state: 'run' },
+        { title: 'Run auth regression', meta: 'subtask · ready', state: 'ready' },
+      ], note: '计划已由 DSH 执行；只允许修改 src/auth/**.', runLabel: 'Execution in progress' },
+      { kind: 'run', time: '14:02', title: 'Patch redirect guard', agent: 'DSH', branch: 'hubagent/01K7X2Q4', elapsed: '00:42', progress: 46, lines: ['subtask · running', 'execution 2f7d08a · 42s', 'verification waiting'] },
+    ],
+    context: {
+      status: 'running', title: 'Fix login redirect loop', task: '01K7X2Q4', agent: 'DSH', elapsed: '00:42',
+      spine: [
+        { state: 'done', title: 'Inspect auth middleware', meta: 'subtask · succeeded\nExecution 4c1a9e2 · 18s' },
+        { state: 'run', title: 'Patch redirect guard', meta: 'subtask · running\nExecution 2f7d08a · 42s' },
+        { state: '', title: 'Run auth regression', meta: 'subtask · ready\nnot started' },
+      ],
+      evidence: [
+        { cmd: 'pnpm test auth', state: 'exit 0' },
+        { cmd: 'diffScope auth/**', state: 'pass' },
+      ],
+      decisions: [
+        { type: 'decompose', text: 'Split inspect → patch → regression; keep auth changes in one worktree.' },
+        { type: 'select_agent', text: 'DSH selected: highest recent success rate, no active load.' },
+      ],
+      approval: null,
+    },
+  },
+  {
+    id: 't2', title: 'Add ACP session resume support', status: 'waiting_approval', statusLabel: 'waiting approval', agent: 'Claude Code',
+    taskId: '01K7X2P9C4H1M8N6Q3R5T7V0', shortTask: '01K7X2P9', updated: '2m',
+    preview: 'Approval needed · read session.json',
+    messages: [
+      { kind: 'user', time: '13:58', text: '给 ACP 加 session/resume，但只在 initialize 协商支持时用；不支持就 fail closed。' },
+      { kind: 'plan', time: '13:58', title: 'Plan · 3 subtasks', steps: [
+        { title: 'Inspect initialize capabilities', meta: 'subtask · succeeded', state: 'done' },
+        { title: 'Implement resume branch', meta: 'subtask · waiting_approval', state: 'wait' },
+        { title: 'Regression: no-resume fallback', meta: 'subtask · ready', state: 'ready' },
+      ], note: 'Claude Code selected; resume branch blocked on a sandbox denial.', runLabel: 'Waiting for approval' },
+      { kind: 'approval', time: '13:58', reason: 'sandbox_denied', resource: 'read ~/.claude/session.json', risk: 'medium' },
+    ],
+    context: {
+      status: 'waiting_approval', title: 'Add ACP session resume support', task: '01K7X2P9', agent: 'Claude Code', elapsed: '02:14',
+      spine: [
+        { state: 'done', title: 'Inspect initialize capabilities', meta: 'subtask · succeeded\nExecution 9b2e1a0 · 21s' },
+        { state: 'wait', title: 'Implement resume branch', meta: 'subtask · waiting_approval\nExecution 7d4c2f1' },
+        { state: '', title: 'Regression: no-resume fallback', meta: 'subtask · ready\nnot started' },
+      ],
+      evidence: [
+        { cmd: 'node --test adapter', state: 'exit 0' },
+        { cmd: 'diffScope acp/**', state: 'pass' },
+      ],
+      decisions: [
+        { type: 'decompose', text: 'Separate capability negotiation from resume execution.' },
+        { type: 'request_human', text: 'Session file is outside the read allowlist; approval required.' },
+      ],
+      approval: { reason: 'sandbox_denied', resource: 'read ~/.claude/session.json', risk: 'medium' },
+    },
+  },
+  {
+    id: 't3', title: 'Why did merge test fail?', status: 'failed', statusLabel: 'ask · answered', agent: 'Answer',
+    taskId: '01K7X2K7H3J5L9N1P4Q6R8T0', shortTask: '01K7X2K7', updated: '3m',
+    preview: 'Answer · diffScope flagged fixture edit',
+    messages: [
+      { kind: 'user', time: '13:52', text: '为什么 merge test 失败了？' },
+      { kind: 'answer', time: '13:52', text: '失败不是因为测试本身不稳定，而是验收拦截了修改范围。', bullets: [
+        '命令 node --test merge.test.js 退出码为 1。',
+        'diffScope 只允许 test/**，但执行同时改写了 test/merge.test.js 和 fixture。',
+        'DecisionRecord 记录为 retry；没有副作用安全重试，因此失败。',
+      ], refs: ['verification run · 8c2d', 'decision · retry'] },
+    ],
+    context: {
+      status: 'failed', title: 'Investigate flaky merge test', task: '01K7X2K7', agent: 'Codex', elapsed: '03:20',
+      spine: [
+        { state: 'done', title: 'Reproduce failure', meta: 'subtask · failed\nExecution c3e7a1b · 3m 20s' },
+      ],
+      evidence: [
+        { cmd: 'node --test merge', state: 'exit 1' },
+        { cmd: 'diffScope test/**', state: 'fail' },
+      ],
+      decisions: [
+        { type: 'retry', text: 'No side-effect-free retry remained; verification failed.' },
+      ],
+      approval: null,
+    },
+  },
+  {
+    id: 't4', title: 'Refactor verification runner', status: 'completed', statusLabel: 'completed', agent: 'DSH',
+    taskId: '01K7X2M1A6B4D8E2F9G3H5J7', shortTask: '01K7X2M1', updated: '6m',
+    preview: 'Result · pass · 3 checks',
+    messages: [
+      { kind: 'user', time: '13:51', text: '把 verification runner 拆成独立模块，不要调用被验收的 Agent。' },
+      { kind: 'result', time: '13:56', title: 'Completed · pass', summary: '3 subtasks passed deterministic checks; branch retained for review.', checks: [
+        { cmd: 'pnpm test verify', state: 'exit 0' },
+        { cmd: 'diffScope verify/**', state: 'pass' },
+        { cmd: 'acceptance-v1', state: 'exit 0' },
+      ] },
+    ],
+    context: {
+      status: 'completed', title: 'Refactor verification runner', task: '01K7X2M1', agent: 'DSH', elapsed: '06:08',
+      spine: [
+        { state: 'done', title: 'Extract check types', meta: 'subtask · succeeded\nExecution 3a1f7c9 · 2m 41s' },
+        { state: 'done', title: 'Wire evidence refs', meta: 'subtask · succeeded\nExecution 6b2d4e8 · 2m 11s' },
+        { state: 'done', title: 'Run acceptance suite', meta: 'subtask · succeeded\nExecution 1c7e9a3 · 1m 16s' },
+      ],
+      evidence: [
+        { cmd: 'pnpm test verify', state: 'exit 0' },
+        { cmd: 'diffScope verify/**', state: 'pass' },
+      ],
+      decisions: [
+        { type: 'accept_result', text: 'All subtasks passed; branch retained for review.' },
+      ],
+      approval: null,
+    },
+  },
+  {
+    id: 't5', title: 'Update approval risk copy', status: 'ready', statusLabel: 'ready', agent: 'unassigned',
+    taskId: '01K7X2H5B7D9F1H3J5L7N9P1', shortTask: '01K7X2H5', updated: '8m',
+    preview: 'Draft · no agent assigned',
+    messages: [
+      { kind: 'user', time: '13:46', text: '把审批弹窗里 once / policy 的区别写清楚，不要改代码。' },
+      { kind: 'plan', time: '13:46', title: 'Plan · 2 subtasks', steps: [
+        { title: 'Draft copy', meta: 'subtask · ready', state: 'ready' },
+        { title: 'Check tone against PRD', meta: 'subtask · ready', state: 'ready' },
+      ], note: '尚未选择 Agent；在 composer 里 Run 即可开始。', runLabel: 'Not started' },
+    ],
+    context: {
+      status: 'ready', title: 'Update approval risk copy', task: '01K7X2H5', agent: 'unassigned', elapsed: '—',
+      spine: [
+        { state: '', title: 'Draft copy', meta: 'subtask · ready\nnot started' },
+        { state: '', title: 'Check tone against PRD', meta: 'subtask · ready\nnot started' },
+      ],
+      evidence: [], decisions: [{ type: 'decompose', text: 'Two small copy subtasks; no code paths.' }], approval: null,
+    },
+  },
+];
+
+let selectedId = 't1';
+const initialThread = location.hash.replace('#', '');
+if (threads.some((thread) => thread.id === initialThread)) selectedId = initialThread;
+let mode = 'run';
+let query = '';
+const $ = (selector) => document.querySelector(selector);
+
+function toast(message) {
+  const node = $('#toast');
+  node.textContent = message;
+  node.classList.add('show');
+  setTimeout(() => node.classList.remove('show'), 1800);
+}
+
+function renderThreads() {
+  const filtered = threads.filter((thread) => `${thread.title} ${thread.preview} ${thread.agent}`.toLowerCase().includes(query.toLowerCase()));
+  $('#thread-list').innerHTML = filtered.map((thread) => `
+    <button class="thread-row ${thread.id === selectedId ? 'active' : ''}" data-thread="${thread.id}">
+      <span class="dot ${thread.status === 'running' ? 'run' : thread.status === 'waiting_approval' ? 'warn' : thread.status === 'failed' ? 'bad' : thread.status === 'completed' ? 'ok' : 'idle'}"></span>
+      <span>
+        <span class="thread-name">${thread.title}</span>
+        <span class="thread-preview">${thread.preview}</span>
+        <span class="thread-meta"><span>${thread.agent}</span><span>${thread.updated}</span></span>
+      </span>
+    </button>
+  `).join('') || '<p class="faint" style="padding:12px">No threads.</p>';
+  document.querySelectorAll('[data-thread]').forEach((button) => button.addEventListener('click', () => {
+    selectedId = button.dataset.thread;
+    renderThreads();
+    renderConversation();
+    renderContext();
+  }));
+}
+
+function planCard(message) {
+  return `<div class="card">
+    <div class="card-head"><div class="card-title"><span class="dot ${message.runLabel === 'Waiting for approval' ? 'warn' : 'run'}"></span>${message.title}</div><span class="faint" style="font-size:10px">${message.runLabel}</span></div>
+    <div class="card-body">
+      ${message.steps.map((step, index) => `<div class="plan-step">
+        <span class="step-num">${String(index + 1).padStart(2, '0')}</span>
+        <span><span class="step-title">${step.title}</span><span class="step-meta">${step.meta}</span></span>
+        <span class="step-state">${step.state === 'done' ? '<span class="pill ok">done</span>' : step.state === 'run' ? '<span class="pill run">running</span>' : step.state === 'wait' ? '<span class="pill warn">waiting</span>' : '<span class="pill">ready</span>'}</span>
+      </div>`).join('')}
+      <div class="faint" style="font-size:11px;padding-top:9px">${message.note}</div>
+    </div>
+  </div>`;
+}
+
+function approvalCard(message) {
+  return `<div class="card approval-card">
+    <div class="card-head"><div class="card-title"><span class="dot warn"></span>Approval needed · ${message.reason}</div><span class="pill warn">risk ${message.risk}</span></div>
+    <div class="card-body">
+      <div class="approval-resource">${message.resource}</div>
+      <div class="faint" style="font-size:11px">Approve once 只放行本次；policy 需要单独策略页。</div>
+      <div class="approval-actions"><button class="btn primary" data-approve="${message.id || selectedId}">Approve once</button><button class="btn" data-reject="${message.id || selectedId}">Reject</button></div>
+    </div>
+  </div>`;
+}
+
+function renderMessages(thread) {
+  $('#messages').innerHTML = thread.messages.map((message) => {
+    if (message.kind === 'user') {
+      return `<div class="message"><div class="msg-head"><span class="who">You</span><span class="sep">/</span><span>${message.time}</span></div><div class="msg-text">${message.text}</div></div>`;
+    }
+    if (message.kind === 'plan') {
+      return `<div class="message"><div class="msg-head"><span class="who agent">HubAgent</span><span class="sep">/</span><span>${message.time}</span><span class="sep">/</span><span>plan</span></div>${planCard(message)}</div>`;
+    }
+    if (message.kind === 'approval') {
+      return `<div class="message"><div class="msg-head"><span class="who agent">HubAgent</span><span class="sep">/</span><span>${message.time}</span><span class="sep">/</span><span>needs a human</span></div>${approvalCard(message)}</div>`;
+    }
+    if (message.kind === 'run') {
+      return `<div class="message"><div class="msg-head"><span class="who agent">HubAgent</span><span class="sep">/</span><span>${message.time}</span><span class="sep">/</span><span>execution</span></div>
+        <div class="card"><div class="card-head"><div class="card-title"><span class="dot run"></span>${message.title}</div><span class="pill run">running</span></div>
+        <div class="card-body"><div class="run-row"><span class="mono">${message.agent}</span><span class="sep">/</span><span class="mono">${message.branch}</span><span class="sep">/</span><span class="num">${message.elapsed}</span></div>${message.lines.map((line) => `<div class="run-row faint">${line}</div>`).join('')}<div class="progress"><span style="width:${message.progress}%"></span></div></div></div>
+      </div>`;
+    }
+    if (message.kind === 'result') {
+      return `<div class="message"><div class="msg-head"><span class="who agent">HubAgent</span><span class="sep">/</span><span>${message.time}</span><span class="sep">/</span><span>result</span></div>
+        <div class="card"><div class="card-head"><div class="card-title"><span class="dot ok"></span>${message.title}</div><span class="pill ok">pass</span></div><div class="card-body"><div class="faint" style="font-size:11px;padding:4px 0 6px">${message.summary}</div><table class="check-table">${message.checks.map((check) => `<tr><td class="cmd">${check.cmd}</td><td class="right"><span class="pill ok">${check.state}</span></td></tr>`).join('')}</table></div></div>
+      </div>`;
+    }
+    if (message.kind === 'answer') {
+      return `<div class="message"><div class="msg-head"><span class="who agent">HubAgent</span><span class="sep">/</span><span>${message.time}</span><span class="sep">/</span><span>answer</span></div>
+        <div class="card"><div class="card-body" style="padding:13px"><div class="answer"><p><strong>${message.text}</strong></p><ul style="margin:8px 0 0;padding-left:18px;color:var(--muted)">${message.bullets.map((bullet) => `<li>${bullet}</li>`).join('')}</ul><div class="faint mono" style="font-size:10px;margin-top:10px">${message.refs.join(' · ')}</div></div></div></div>
+      </div>`;
+    }
+    return '';
+  }).join('');
+  document.querySelectorAll('[data-approve]').forEach((button) => button.addEventListener('click', () => {
+    const thread = threads.find((item) => item.id === button.dataset.approve) || thread;
+    thread.context.approval = null;
+    thread.status = 'running';
+    thread.statusLabel = 'running';
+    toast('Approved once · execution will resume');
+    renderThreads();
+    renderConversation();
+    renderContext();
+  }));
+  document.querySelectorAll('[data-reject]').forEach((button) => button.addEventListener('click', () => {
+    const thread = threads.find((item) => item.id === button.dataset.reject) || thread;
+    thread.context.approval = null;
+    thread.status = 'failed';
+    thread.statusLabel = 'failed';
+    toast('Rejected · task will be paused for review');
+    renderThreads();
+    renderConversation();
+    renderContext();
+  }));
+}
+
+function renderConversation() {
+  const thread = threads.find((item) => item.id === selectedId);
+  if (!thread) return;
+  $('#conv-title').textContent = thread.title;
+  $('#conv-status').textContent = thread.statusLabel;
+  $('#conv-task').textContent = thread.taskId;
+  $('#conv-dot').className = `dot ${thread.status === 'running' ? 'run' : thread.status === 'waiting_approval' ? 'warn' : thread.status === 'failed' ? 'bad' : thread.status === 'completed' ? 'ok' : 'idle'}`;
+  renderMessages(thread);
+  const messages = $('#messages');
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function renderContext() {
+  const thread = threads.find((item) => item.id === selectedId);
+  if (!thread) return;
+  const context = thread.context;
+  $('#context-title').textContent = context.title;
+  $('#context-task').textContent = context.task;
+  $('#context-agent').textContent = context.agent;
+  $('#context-body').innerHTML = `
+    ${context.approval ? `<div class="context-approval"><strong>Approval · ${context.approval.reason}</strong><div class="res">${context.approval.resource}</div><div class="actions"><button class="btn primary" data-context-approve="${thread.id}" style="height:26px;font-size:11px">Approve once</button><button class="btn" data-context-reject="${thread.id}" style="height:26px;font-size:11px">Reject</button></div></div>` : ''}
+    <div class="context-section"><div class="context-label">Run spine</div><div class="spine">${context.spine.map((node) => `<div class="node ${node.state}"><div class="node-title">${node.title}</div><div class="node-meta">${node.meta.replace(/\n/g, '<br>')}</div></div>`).join('')}</div></div>
+    <div class="context-section"><div class="context-label">Evidence</div><div class="evidence-mini">${context.evidence.length ? context.evidence.map((item) => `<div class="evidence-mini-row"><span class="cmd">${item.cmd}</span><span class="pill ${item.state === 'exit 0' || item.state === 'pass' ? 'ok' : 'bad'}">${item.state}</span></div>`).join('') : '<div class="faint" style="font-size:11px;padding:6px 0">No evidence yet.</div>'}</div></div>
+    <div class="context-section" style="margin-bottom:0"><div class="context-label">Decisions</div>${context.decisions.map((item) => `<div class="decision-mini"><div class="type">${item.type}</div><p>${item.text}</p></div>`).join('')}</div>
+  `;
+  document.querySelectorAll('[data-context-approve]').forEach((button) => button.addEventListener('click', () => {
+    const thread = threads.find((item) => item.id === button.dataset.contextApprove);
+    if (!thread) return;
+    thread.context.approval = null;
+    thread.status = 'running'; thread.statusLabel = 'running';
+    toast('Approved once · execution will resume');
+    renderThreads(); renderConversation(); renderContext();
+  }));
+  document.querySelectorAll('[data-context-reject]').forEach((button) => button.addEventListener('click', () => {
+    const thread = threads.find((item) => item.id === button.dataset.contextReject);
+    if (!thread) return;
+    thread.context.approval = null;
+    thread.status = 'failed'; thread.statusLabel = 'failed';
+    toast('Rejected · task paused for review');
+    renderThreads(); renderConversation(); renderContext();
+  }));
+}
+
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll('.mode').forEach((button) => button.classList.toggle('active', button.dataset.mode === next));
+  $('#send').textContent = next === 'run' ? 'Run' : 'Ask';
+  $('#composer-input').placeholder = next === 'run' ? '描述任务，或问“现在怎么样”…' : '问 HubAgent：状态、证据、为什么这样决策…';
+}
+
+function sendMessage() {
+  const input = $('#composer-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const thread = threads.find((item) => item.id === selectedId);
+  if (!thread) return;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  thread.messages.push({ kind: 'user', time, text });
+  if (mode === 'run') {
+    thread.messages.push({
+      kind: 'plan', time, title: 'Planning…', steps: [{ title: 'Inspect context', meta: 'subtask · ready', state: 'ready' }], note: 'HubAgent 正在读取快照并生成计划。', runLabel: 'Planning',
+    });
+  } else {
+    thread.messages.push({
+      kind: 'answer', time, text: '已读取当前快照。', bullets: ['当前任务仍在运行，验收尚未开始。', '最近一个 DecisionRecord 是 select_agent。'], refs: ['snapshot · live'],
+    });
+  }
+  input.value = '';
+  renderConversation();
+  toast(mode === 'run' ? 'Task queued · planning' : 'Answered from snapshot');
+}
+
+document.querySelectorAll('.mode').forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode)));
+$('#send').addEventListener('click', sendMessage);
+$('#composer-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); sendMessage(); }
+});
+$('#thread-search').addEventListener('input', (event) => { query = event.currentTarget.value; renderThreads(); });
+$('#new-thread').addEventListener('click', () => toast('New thread — preview only'));
+$('#conv-open').addEventListener('click', () => toast('Open task detail — preview only'));
+document.querySelectorAll('[data-href]').forEach((button) => button.addEventListener('click', () => { window.location.href = button.dataset.href; }));
+
+renderThreads();
+renderConversation();
+renderContext();
+</script>
+</body>
+</html>

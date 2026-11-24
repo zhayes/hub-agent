@@ -113,7 +113,7 @@ describe('runGoalWithBrain', () => {
       status: string
       goal_id: string
     }
-    expect(task.status).toBe('running')
+    expect(task.status).toBe('completed')
     expect(task.goal_id).toBe(result.goalId)
   })
 })

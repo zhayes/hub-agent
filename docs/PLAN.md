@@ -340,7 +340,7 @@ pnpm hubagent run "写一个 mock-output.txt 并提交" --agent mock --worktree 
 # ok, taskId, executionId, branch=main, commitSha, diffstat, changedFiles, transcriptRef
 ```
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
+`pnpm verify`：280 用例、arch 95 modules 全绿。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
 
 **P0 网络策略收尾（2026-11-24）**
 
@@ -423,7 +423,7 @@ pnpm hubagent approval list --json        # 沙箱拦截 → 自动生成审批�
 | `task show --evidence` | 打印命令、退出码、日志引用 |
 | `approval approve` | pending → approved |
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。
+`pnpm verify`：280 用例、arch 95 modules 全绿。
 
 **不包含**：判断性评审的质量优化（先保证确定性检查可信）。
 
@@ -478,7 +478,7 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 | `hubagent run` 接 Brain | 仍完成 ACP + 验收，产出 2 条 DecisionRecord |
 | TC-018 两个并行问题 | executionId 不匹配时拒绝路由 |
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。**已知边界**：Pi SDK 已接；`runGoalWithBrain` 用 dispatch 回合执行 delegate/计划子任务（同一 worktree；并行仍属 M7）。`PiBrain` 已用 fake session factory + 真实 DeepSeek smoke 验证；元工具循环用 `meta-tools.test.ts` 覆盖。Runtime 会处理 `revise_plan / delegate / cancel / request_human`，并按 dispatch 回合继续推进。
+`pnpm verify`：280 用例、arch 95 modules 全绿。**已知边界**：Pi SDK 已接；`runGoalWithBrain` 用 dispatch 回合执行 delegate/计划子任务（同一 worktree；并行仍属 M7）。`PiBrain` 已用 fake session factory + 真实 DeepSeek smoke 验证；元工具循环用 `meta-tools.test.ts` 覆盖。Runtime 会处理 `revise_plan / delegate / cancel / request_human`，并按 dispatch 回合继续推进。
 
 **不包含**：多 Agent 并行（M7）、复杂重规划（M8）。
 
@@ -518,7 +518,7 @@ pnpm hubagent run "分析依赖风险，同时检查核心代码质量" --json  
 - 本地实测：两 Agent 改 `src/a.txt` / `src/b.txt`，两个 merge 成功，Task completed；`task clean` 删除两个 worktree。
 - `auto-merge` / `patch-export` 策略库已完成；CLI 默认 branch-only，显式项目级 auto-merge 开关留给 M9 设置页。
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。
+`pnpm verify`：280 用例、arch 95 modules 全绿。
 
 **不包含**：跨机协作、Relay。
 
@@ -555,7 +555,7 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 - `runtime/acp-retry.ts`：协议/启动重试最多 2 次；执行失败无 diff 时同 Agent 重试 1 次；有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。
 - 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2、`brain-run.test.ts` 新增 2 个自动重试用例。
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。**已接**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次）；`task retry` 对 paused 任务 resume，对 failed 任务创建新 attempt（新 Goal/Task）并执行。
+`pnpm verify`：280 用例、arch 95 modules 全绿。**已接**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次）；`task retry` 对 paused 任务 resume，对 failed 任务创建新 attempt（新 Goal/Task）并执行。
 
 ---
 
@@ -586,7 +586,7 @@ bash scripts/acceptance-v1.sh        # 串跑 TC-001~TC-005、TC-008~TC-018
 - [acceptance-v1.sh](<scripts/acceptance-v1.sh>)：`pnpm verify` + `init/doctor/config/task list/approval list/gc` 最小闭环，本机通过。
 - `task retry` 目前只对 `paused` 任务执行 resume；失败任务的自动重试循环仍待把 M8 升级链接进 Runtime（不伪造）。
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。
+`pnpm verify`：280 用例、arch 95 modules 全绿。
 
 ---
 
@@ -616,11 +616,14 @@ pnpm bench --suite fixtures/regression-tasks --out reports/baseline.json
 - 实测 [benchmarks/real-dsh-expanded.json](<benchmarks/real-dsh-expanded.json>)：27 tasks（24 正例 + 3 负例），`autonomousCompletionRate=1`、`verificationMisjudgmentRate=0`、`recoverySuccessRate=1`、`overDecompositionRate=0`、`brainDecisionsPerTask≈3.04`、`averageDurationMs≈18342`。
 - 诚实边界：默认 mock 模式度量编排/验收链路，不代表 LLM 规划质量；真实 harness 需用 `--agent-command` 并提供能完成任务的 Agent。
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。
+`pnpm verify`：280 用例、arch 95 modules 全绿。
 
 ---
 
-### M11 · Web Console（首个可用切片，不计入 V1.0 门禁）
+### M11 · Web Console（P1 生产基础，不计入 V1.0 门禁）
+
+**完整 Console Web 实施计划：** [WEB-CONSOLE-PLAN.md](<WEB-CONSOLE-PLAN.md>)
+
 
 **交付**
 
@@ -642,13 +645,15 @@ pnpm verify   # 已包含 web typecheck + build
 
 - `packages/hub/src/interfaces/http/app.ts`：tasks/task/plan/evidence/decisions/agents/approvals/SSE；Bearer token；`POST approvals/:id/approve|reject`
 - `packages/hub/src/bin/hubagentd.ts`：真正起 HTTP，默认 `127.0.0.1:7788`，token 写入 `$HUBAGENT_HOME/token`（0600）
-- `packages/web`：Solid 2 控制台；同源 API；SSE 事件流；任务证据/决策/审批视图
-- 实测：daemon `/api/v1/health` 200、`/` 200 且注入 token、Web build 通过
+- `packages/web`：Solid 2 + `@solidjs/router@2.0.1`；`/tasks`、`/tasks/:id`、`/agents`、`/approvals`、`/settings` 真实路由，不再用 `<Show>` 切页
+- 三态主题（system/light/dark）、`light-dark()` token、FOUC 防护、中英文 typed dictionary、图标按钮、无边框选中
+- 同源 API；SSE 事件流；任务证据/决策/审批视图
+- 实测：daemon `/api/v1/health` 200、`/tasks` 200 且注入 token；P1 页面截图通过
 
 **边界**
 
-- 目前是可用切片，不是完整设计系统：没有任务图/成本图表/虚拟滚动；
-- 没有引入 `@ui-sdk/solid`，组件使用轻量原生 CSS；后续 UI SDK 接入需要单独 spike；
+- Chat 页面和 `chat_threads/chat_messages` 尚未接；P2/P3 完成
+- 折叠左右栏、长任务窗口化、动效在 P3/P5 完成
 - token 注入同源 HTML，适合 localhost 单用户；远程/V1.1 必须改 cookie/短期 token。
 
 ---
