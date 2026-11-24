@@ -31,7 +31,7 @@ M8 已有升级链判定库，但 `runAcpTask` 仍在第一次失败时直接把
 
 ### 负面（已接受）
 
-- 换 Agent/重规划仍未自动化；达到阈值直接失败。
+- 换 Agent 与自动重规划已接；CLI `task retry` 对 failed 任务仍未自动化。
 - `task retry` 仍只支持 paused 任务 resume；失败任务无法从 CLI 自动重跑。
 - 重试仍然复用同一 worktree；有 diff 时不会自动回滚。
 

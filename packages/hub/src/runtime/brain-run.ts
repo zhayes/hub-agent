@@ -1,9 +1,10 @@
 import { createBrainFromEnv } from '../brain/create-brain'
 import type { BrainBudget, Clarification, DecisionRecord, OrchestratorBrain } from '../brain/types'
 import type { Goal, Subtask, Task } from '../domain/entities'
-import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../domain/ids'
+import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp, type TaskId } from '../domain/ids'
 import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
+import type { Db } from '../storage/db'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
 import { runAcpWithRetry } from './acp-retry'
@@ -12,6 +13,7 @@ import type { AgentRecord } from './agent-registry'
 import { runBrainRound } from './brain-loop'
 import { createClarification } from './clarify'
 import { cancelTask } from './recovery/cancel'
+import { failGoal } from './recovery/fail'
 
 /**
  * M6 的 Brain 驱动入口：
@@ -91,7 +93,7 @@ export async function runGoalWithBrain(
   if (decompose === undefined) {
     throw new HubError('ACTION_REJECTED', '初始计划决策点已被处理', { goalId })
   }
-  const drafts = decompose.actions
+  let drafts = decompose.actions
     .filter((action) => action.type === 'revise_plan')
     .flatMap((action) => action.subtasks)
   if (drafts.length === 0) {
@@ -101,56 +103,24 @@ export async function runGoalWithBrain(
     })
   }
 
-  const taskId = asTaskId(newId())
-  state = loadState(options.db)
-  state = appendEvent(options.db, state, {
-    type: 'task.created',
-    task: {
-      id: taskId,
-      goalId,
-      title: drafts[0]?.title ?? title,
-      description: options.objective,
-      status: 'draft',
-      priority: 0,
-      acceptanceCriteria: ['每个子任务执行完成并产出可核验的 diff'],
-      createdAt: now,
-      updatedAt: now,
-    } satisfies Task,
-  }).state
-  for (const to of ['planning', 'ready', 'running'] as const) {
-    state = appendEvent(options.db, state, {
-      type: 'task.status',
-      taskId,
-      to,
-      at: asTimestamp(new Date().toISOString()),
-    }).state
-  }
-  const draftSubtasks = drafts.map((draft) => {
-    const subtask: Subtask = {
-      id: asSubtaskId(newId()),
-      taskId,
-      title: draft.title,
-      description: draft.description,
-      status: 'ready',
-      required: true,
-      dependencies: [],
-      requiredCapabilities: draft.requiredCapabilities,
-      assignedAgentId: asAgentId(options.agent.id),
-      priority: 0,
-      maxAttempts: draft.maxAttempts ?? 1,
-      createdAt: now,
-      updatedAt: now,
-    }
-    state = appendEvent(options.db, state, { type: 'subtask.created', subtask }).state
-    return subtask
+  let createdPlan = createTaskPlan({
+    db: options.db,
+    goalId,
+    objective: options.objective,
+    drafts,
+    agentId: options.agent.id,
+    at: now,
   })
+  let taskId = createdPlan.taskId
+  let draftSubtasks = createdPlan.subtasks
 
   const decisions = [decompose.record]
   const executions: RunAcpTaskResult[] = []
   let lastResult: RunAcpTaskResult | undefined
   let roundIndex = 0
+  let replans = 0
 
-  while (roundIndex < drafts.length + 3) {
+  while (roundIndex < 20) {
     const round = await runBrainRound({
       db: options.db,
       brain,
@@ -232,13 +202,110 @@ export async function runGoalWithBrain(
       lastResult = result
       if (!result.ok) break
     }
-    if (lastResult !== undefined && !lastResult.ok) break
+    if (lastResult !== undefined && !lastResult.ok) {
+      if (lastResult.replanRequired === true && replans < 2) {
+        replans += 1
+        const replan = await runBrainRound({
+          db: options.db,
+          brain,
+          goalId,
+          reason: 'plan_invalid',
+          dedupeKey: `goal:${goalId}:replan:${replans}`,
+          agents,
+          ...(budget === undefined ? {} : { budget }),
+        })
+        if (replan !== undefined) decisions.push(replan.record)
+        const revised =
+          replan?.actions
+            .filter((action) => action.type === 'revise_plan')
+            .flatMap((action) => action.subtasks) ?? []
+        drafts =
+          revised.length > 0
+            ? revised
+            : drafts.map((draft) => ({
+                ...draft,
+                title: `${draft.title} [retry ${replans}]`,
+              }))
+        createdPlan = createTaskPlan({
+          db: options.db,
+          goalId,
+          objective: options.objective,
+          drafts,
+          agentId: options.agent.id,
+          at: asTimestamp(new Date().toISOString()),
+        })
+        taskId = createdPlan.taskId
+        draftSubtasks = createdPlan.subtasks
+        continue
+      }
+      failGoal(options.db, goalId)
+      break
+    }
   }
 
   if (lastResult === undefined) {
     throw new HubError('ACTION_REJECTED', 'Brain 计划没有可执行子任务', { goalId })
   }
   return { ...lastResult, executions, decisions }
+}
+
+function createTaskPlan(input: {
+  db: Db
+  goalId: string
+  objective: string
+  drafts: readonly {
+    title: string
+    description: string
+    requiredCapabilities: string[]
+    maxAttempts?: number
+  }[]
+  agentId: string
+  at: string
+}): { taskId: TaskId; subtasks: Subtask[] } {
+  let state = loadState(input.db)
+  const taskId = asTaskId(newId())
+  state = appendEvent(input.db, state, {
+    type: 'task.created',
+    task: {
+      id: taskId,
+      goalId: asGoalId(input.goalId),
+      title: input.drafts[0]?.title ?? input.objective,
+      description: input.objective,
+      status: 'draft',
+      priority: 0,
+      acceptanceCriteria: ['每个子任务执行完成并产出可核验的 diff'],
+      createdAt: asTimestamp(input.at),
+      updatedAt: asTimestamp(input.at),
+    } satisfies Task,
+  }).state
+  for (const to of ['planning', 'ready', 'running'] as const) {
+    state = appendEvent(input.db, state, {
+      type: 'task.status',
+      taskId,
+      to,
+      at: asTimestamp(new Date().toISOString()),
+    }).state
+  }
+  const subtasks = input.drafts.map((draft) => {
+    const subtask: Subtask = {
+      id: asSubtaskId(newId()),
+      taskId,
+      title: draft.title,
+      description: draft.description,
+      status: 'ready',
+      required: true,
+      dependencies: [],
+      requiredCapabilities: draft.requiredCapabilities,
+      assignedAgentId: asAgentId(input.agentId),
+      priority: 0,
+      maxAttempts: draft.maxAttempts ?? 1,
+      createdAt: asTimestamp(input.at),
+      updatedAt: asTimestamp(input.at),
+    }
+    state = appendEvent(input.db, state, { type: 'subtask.created', subtask }).state
+    return subtask
+  })
+  return { taskId, subtasks }
 }
 
 function waitingResult(input: {

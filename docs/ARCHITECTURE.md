@@ -567,7 +567,7 @@ COMMIT
   5. 写入恢复决策点，交由 Brain 决定继续/回滚/放弃
 ```
 
-**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause,fail}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复与最终失败收敛。`runtime/acp-retry.ts` 已接自动重试：协议/启动最多 2 次、无 diff 同 Agent 重试 1 次、有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。`hubagentd` 启动时执行 `scanRecovery`；`runAcpTask` 创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。换 Agent/重规划仍需 Selection Engine，`task retry` 只支持 paused 任务 resume。
+**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause,fail}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复与最终失败收敛。`runtime/acp-retry.ts` 已接自动重试：协议/启动最多 2 次、无 diff 同 Agent 重试 1 次、无候选时交给 Brain 自动重规划（最多 2 次，新 Task 计划）；有 diff/审批/人工输入不静默重试。`hubagentd` 启动时执行 `scanRecovery`；`runAcpTask` 创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。换 Agent/重规划仍需 Selection Engine，`task retry` 只支持 paused 任务 resume。
 
 ---
 

@@ -108,6 +108,7 @@ export interface RunAcpTaskResult {
   stopReason: string
   attempt: number
   verdict: VerificationVerdict | 'not_run'
+  replanRequired?: boolean
   verification?: VerificationRun
   approval?: Approval
   evidence: ExecutionEvidence

@@ -166,7 +166,7 @@ describe('runGoalWithBrain：M8 自动重试', () => {
     })
     expect(result.ok).toBe(false)
     const executions = db.prepare('SELECT COUNT(*) AS n FROM executions').get() as { n: number }
-    expect(executions.n).toBe(2)
+    expect(executions.n).toBe(6)
     expect(
       (db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as { status: string })
         .status,
@@ -420,5 +420,32 @@ describe('Selection Engine：自动换 Agent', () => {
       .all() as Array<{ agent_id: string; status: string }>
     expect(executions.map((item) => item.status)).toEqual(['failed', 'failed', 'succeeded'])
     expect(executions[2]?.agent_id).not.toBe(executions[0]?.agent_id)
+  })
+})
+
+describe('M8：自动重规划', () => {
+  it('换 Agent 无候选时创建新计划，最多 2 次后失败', async () => {
+    const db = database()
+    const dir = repo()
+    const provider = new MockProvider()
+    provider.env = { ...process.env, MOCK_ACP_DELAY_MS: '0', MOCK_ACP_ALWAYS_FAIL: '1' }
+    const result = await runGoalWithBrain({
+      db,
+      provider,
+      brain: new ScriptedBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'replan',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(false)
+    const tasks = db.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }
+    expect(tasks.n).toBe(3)
+    const executions = db.prepare('SELECT COUNT(*) AS n FROM executions').get() as { n: number }
+    expect(executions.n).toBe(6)
+    expect(
+      (db.prepare('SELECT status FROM goals WHERE id = ?').get(result.goalId) as { status: string })
+        .status,
+    ).toBe('failed')
   })
 })

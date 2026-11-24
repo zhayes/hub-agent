@@ -9,7 +9,7 @@ import { appendEvent } from '../../storage/write/events'
  */
 export function failTask(
   db: Db,
-  input: { taskId: string; goalId: string; subtaskId?: string },
+  input: { taskId: string; goalId: string; subtaskId?: string; failGoal?: boolean },
 ): void {
   let state = loadState(db)
   const task = state.tasks[input.taskId]
@@ -42,6 +42,7 @@ export function failTask(
       at: asTimestamp(new Date().toISOString()),
     }).state
   }
+  if (input.failGoal === false) return
   const goal = state.goals[input.goalId]
   if (goal !== undefined && goal.status === 'active') {
     appendEvent(db, state, {

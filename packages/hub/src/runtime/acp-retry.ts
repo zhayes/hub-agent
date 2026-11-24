@@ -94,14 +94,15 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
             taskId: result.taskId,
             goalId: result.goalId,
             subtaskId: result.subtaskId,
+            failGoal: false,
           })
           recordDecision(options.db, {
             goalId: options.goalId,
-            type: 'abort',
-            rationale: '没有可切换的 Agent，停止重试',
+            type: 'replan',
+            rationale: '没有可切换的 Agent，交给 Brain 重新规划',
             inputs: { attempt, error: error instanceof Error ? error.message : String(error) },
           })
-          return result
+          return { ...result, replanRequired: true }
         }
         currentAgent = next
         agentSwitches += 1
