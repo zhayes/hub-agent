@@ -6,8 +6,8 @@ import { asGoalId, asTimestamp } from '../../src/domain/ids'
 import { applyEvent, emptyState } from '../../src/domain/machine'
 
 /**
- * 真实 Brain smoke（需要 key，不进 CI）：
- *   HUBAGENT_BRAIN_API_KEY=... pnpm test:brain-real
+ * 真实 Pi Brain smoke（需要先 `pi /login`，不进 CI）：
+ *   pnpm test:brain-real
  */
 function snapshot(): BrainInput {
   const at = asTimestamp(new Date().toISOString())
@@ -35,12 +35,6 @@ function snapshot(): BrainInput {
 }
 
 async function main(): Promise<void> {
-  if (!process.env.HUBAGENT_BRAIN_API_KEY?.trim()) {
-    process.stdout.write(
-      'SKIP: 需要 HUBAGENT_BRAIN_API_KEY；可选 HUBAGENT_BRAIN_BASE_URL / MODEL\n',
-    )
-    return
-  }
   const input = snapshot()
   const brain = createBrainFromEnv()
   const actions = await brain.step(input)

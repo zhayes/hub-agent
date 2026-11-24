@@ -1,45 +1,59 @@
 import { HubError } from '../../shared/errors'
 import type { BrainAction, BrainInput, DecisionRationale, OrchestratorBrain } from '../types'
-import type { LlmClient } from './llm-client'
 import { buildBrainSystemPrompt, buildBrainUserPrompt } from './prompt'
+import type { PiSessionFactory } from './session'
 
-export interface LlmBrainOptions {
-  client: LlmClient
-  maxTokens?: number
-  timeoutMs?: number
+export interface PiBrainOptions {
+  factory: PiSessionFactory
+  cwd?: string
+  agentDir?: string
 }
 
 /**
- * 真实 LLM Brain。step() 只做一次模型调用；explain() 复用同一 snapshot 的动作缓存，
- * 不额外烧一次 token。输出最终仍由 runtime/validate.ts 做 schema/权限/预算/幂等校验。
+ * PiBrain：用 Pi 官方 SDK 的模型配置/认证/session 跑 Brain 回合。
+ * session 无工具、in-memory；模型只输出 intent，副作用由 Runtime 执行。
  */
-export class LlmBrain implements OrchestratorBrain {
-  private readonly client: LlmClient
-  private readonly maxTokens: number
-  private readonly timeoutMs: number
+export class PiBrain implements OrchestratorBrain {
+  private readonly factory: PiSessionFactory
+  private readonly cwd: string
+  private readonly agentDir: string | undefined
   private cache: { stateVersion: number; actions: BrainAction[] } | undefined
 
-  constructor(options: LlmBrainOptions) {
-    this.client = options.client
-    this.maxTokens = options.maxTokens ?? 4096
-    this.timeoutMs = options.timeoutMs ?? 90_000
+  constructor(options: PiBrainOptions) {
+    this.factory = options.factory
+    this.cwd = options.cwd ?? process.cwd()
+    this.agentDir = options.agentDir
   }
 
   async step(input: BrainInput): Promise<BrainAction[]> {
-    const content = await this.client.complete({
-      system: buildBrainSystemPrompt(),
-      user: buildBrainUserPrompt(input),
-      maxTokens: this.maxTokens,
-      timeoutMs: this.timeoutMs,
+    const session = await this.factory.create({
+      cwd: this.cwd,
+      systemPrompt: buildBrainSystemPrompt(),
+      ...(this.agentDir === undefined ? {} : { agentDir: this.agentDir }),
     })
-    const actions = parseActions(content)
-    this.cache = { stateVersion: input.stateVersion, actions }
-    return actions
+    try {
+      try {
+        await session.prompt(buildBrainUserPrompt(input))
+      } catch (error) {
+        throw new HubError('BRAIN_UNAVAILABLE', 'Pi 模型调用失败', {
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+      const content = session.getLastAssistantText()
+      if (content === undefined || content.trim().length === 0) {
+        throw new HubError('BRAIN_UNAVAILABLE', 'Pi 没有返回 assistant 文本')
+      }
+      const actions = parseActions(content)
+      this.cache = { stateVersion: input.stateVersion, actions }
+      return actions
+    } finally {
+      session.dispose()
+    }
   }
 
   async explain(input: BrainInput): Promise<DecisionRationale[]> {
     if (this.cache === undefined || this.cache.stateVersion !== input.stateVersion) {
-      return [{ type: 'accept_result', rationale: 'LLM Brain 未提供缓存理由' }]
+      return [{ type: 'accept_result', rationale: 'PiBrain 未提供缓存理由' }]
     }
     return this.cache.actions.map(toRationale)
   }
@@ -54,7 +68,7 @@ function parseActions(content: string): BrainAction[] {
   try {
     parsed = JSON.parse(text)
   } catch (error) {
-    throw new HubError('BRAIN_UNAVAILABLE', 'Brain 返回的不是合法 JSON', {
+    throw new HubError('BRAIN_UNAVAILABLE', 'Pi 返回的不是合法 JSON', {
       reason: error instanceof Error ? error.message : String(error),
       preview: text.slice(0, 500),
     })
@@ -68,7 +82,7 @@ function parseActions(content: string): BrainAction[] {
   ) {
     return (parsed as { actions: BrainAction[] }).actions
   }
-  throw new HubError('BRAIN_UNAVAILABLE', 'Brain JSON 缺少 actions 数组', {
+  throw new HubError('BRAIN_UNAVAILABLE', 'Pi JSON 缺少 actions 数组', {
     preview: text.slice(0, 500),
   })
 }

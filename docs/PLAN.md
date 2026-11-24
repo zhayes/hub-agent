@@ -340,7 +340,7 @@ pnpm hubagent run "写一个 mock-output.txt 并提交" --agent mock --worktree 
 # ok, taskId, executionId, branch=main, commitSha, diffstat, changedFiles, transcriptRef
 ```
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
+`pnpm verify`：256 用例、arch 89 modules 全绿。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
 
 **P0 网络策略收尾（2026-11-24）**
 
@@ -423,7 +423,7 @@ pnpm hubagent approval list --json        # 沙箱拦截 → 自动生成审批�
 | `task show --evidence` | 打印命令、退出码、日志引用 |
 | `approval approve` | pending → approved |
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。
+`pnpm verify`：256 用例、arch 89 modules 全绿。
 
 **不包含**：判断性评审的质量优化（先保证确定性检查可信）。
 
@@ -458,9 +458,9 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 - `brain/types.ts`：`OrchestratorBrain`、`BrainInput`、`BrainAction`、`BrainBudget`、`DecisionRecord`、`Clarification`。
 - `brain/snapshot.ts`：从 DomainState 折叠派生视图，不含原始事件流/工具流水/完整日志。
 - `brain/scripted-brain.ts`：确定性测试替身，只在 `HUBAGENT_BRAIN_MODE=scripted` 时使用；不再作为默认产品 Brain。
-- `brain/pi/llm-client.ts` / `llm-brain.ts`：OpenAI-compatible chat client + `OrchestratorBrain` 实现；`brain/create-brain.ts` 负责 env 选择。
-- 默认 `HUBAGENT_BRAIN_MODE=llm`；无 `HUBAGENT_BRAIN_API_KEY` 时 fail-closed，不静默退回 scripted。
-- CLI `run` 支持 `--brain-mode llm|pi|scripted`；`--no-brain` 仍保留为 M4 固定脚本排障。
+- `brain/pi/session.ts` / `pi-brain.ts`：Pi SDK 的 in-memory、无工具 session + `OrchestratorBrain` 实现；`brain/create-brain.ts` 负责 env 选择。
+- 默认 `HUBAGENT_BRAIN_MODE=pi`；Pi 模型/认证缺失时 fail-closed，不静默退回 scripted。
+- CLI `run` 支持 `--brain-mode pi|scripted`；`--no-brain` 仍保留为 M4 固定脚本排障。
 - `brain/validate.ts`：schema → 权限/引用 → 预算 → 幂等；返回可执行动作与错误，不产生副作用。
 - `runtime/decision-queue.ts`：`dedupe_key UNIQUE` + 条件 claim；重复投递只派发一次；重启可续。
 - `runtime/decision-record.ts`：每次回合写 `DecisionRecord`（type / rationale / inputs / alternatives）。
@@ -478,7 +478,7 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 | `hubagent run` 接 Brain | 仍完成 ACP + 验收，产出 2 条 DecisionRecord |
 | TC-018 两个并行问题 | executionId 不匹配时拒绝路由 |
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。**已知边界**：适配器是 OpenAI-compatible，不是 Pi SDK 集成；`runGoalWithBrain` 当前只执行 `revise_plan` 的第一个子任务，多子任务执行器仍需补。`brain/llm-brain` 已用 fake client 与本地 HTTP server 验证，真实 key smoke 见 `pnpm test:brain-real`。
+`pnpm verify`：256 用例、arch 89 modules 全绿。**已知边界**：Pi SDK 已接；`runGoalWithBrain` 当前只执行 `revise_plan` 的第一个子任务，多子任务执行器仍需补。`PiBrain` 已用 fake session factory 验证，真实 Pi smoke 见 `pnpm test:brain-real`。
 
 **不包含**：多 Agent 并行（M7）、复杂重规划（M8）。
 
@@ -518,7 +518,7 @@ pnpm hubagent run "分析依赖风险，同时检查核心代码质量" --json  
 - 本地实测：两 Agent 改 `src/a.txt` / `src/b.txt`，两个 merge 成功，Task completed；`task clean` 删除两个 worktree。
 - `auto-merge` / `patch-export` 策略库已完成；CLI 默认 branch-only，显式项目级 auto-merge 开关留给 M9 设置页。
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。
+`pnpm verify`：256 用例、arch 89 modules 全绿。
 
 **不包含**：跨机协作、Relay。
 
@@ -555,7 +555,7 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 - `runtime/acp-retry.ts`：协议/启动重试最多 2 次；执行失败无 diff 时同 Agent 重试 1 次；有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。
 - 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2、`brain-run.test.ts` 新增 2 个自动重试用例。
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。**已知边界**：换 Agent/重规划没有 Selection Engine，达到该阈值时收敛失败并记录原因；`task retry` 仍只支持 paused 任务 resume。
+`pnpm verify`：256 用例、arch 89 modules 全绿。**已知边界**：换 Agent/重规划没有 Selection Engine，达到该阈值时收敛失败并记录原因；`task retry` 仍只支持 paused 任务 resume。
 
 ---
 
@@ -586,7 +586,7 @@ bash scripts/acceptance-v1.sh        # 串跑 TC-001~TC-005、TC-008~TC-018
 - [acceptance-v1.sh](<scripts/acceptance-v1.sh>)：`pnpm verify` + `init/doctor/config/task list/approval list/gc` 最小闭环，本机通过。
 - `task retry` 目前只对 `paused` 任务执行 resume；失败任务的自动重试循环仍待把 M8 升级链接进 Runtime（不伪造）。
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。
+`pnpm verify`：256 用例、arch 89 modules 全绿。
 
 ---
 
@@ -615,7 +615,7 @@ pnpm bench --suite fixtures/regression-tasks --out reports/baseline.json
 - 实测 `reports/baseline.json`：24 tasks，`autonomousCompletionRate=1`、`verificationMisjudgmentRate=0`、`recoverySuccessRate=1`、`overDecompositionRate=0`、`brainDecisionsPerTask=2`、`humanInterventionsPerTask=0`。
 - 诚实边界：默认 mock 模式度量编排/验收链路，不代表 LLM 规划质量；真实 harness 需用 `--agent-command` 并提供能完成任务的 Agent。
 
-`pnpm verify`：259 用例、arch 89 modules 全绿。
+`pnpm verify`：256 用例、arch 89 modules 全绿。
 
 ---
 

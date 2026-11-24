@@ -14,7 +14,7 @@ import { runBrainRound } from './brain-loop'
  * M6 的 Brain 驱动入口：
  *   建 Goal → Brain 拆计划 → Brain 选 Agent → 执行 → Brain 接收结果。
  *
- * 默认走真实 LLM（HUBAGENT_BRAIN_MODE=llm）；显式 scripted 才用测试替身。
+ * 默认走 Pi SDK Brain（HUBAGENT_BRAIN_MODE=pi）；显式 scripted 才用测试替身。
  * LLM 输出仍由 brain-loop/validate 做 schema/权限/预算/幂等校验。
  */
 

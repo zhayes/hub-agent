@@ -3,7 +3,7 @@
 ## 先说清楚两件事
 
 1. **`fixtures/regression-tasks` 是 mock 基线**：它的 checks 绑定 `mock-output.txt`，换成真实 harness 会全部 fail。真实 harness 用 `fixtures/regression-tasks-real`（checks 针对真实文件/测试）。
-2. **bench 刻意注入 `ScriptedBrain`**：它测的是“真实执行 Agent + 验收”链路，而不是 Brain；所以 `brainDecisionsPerTask` / 过度拆解率不是 LLM Brain 指标。生产 `hubagent run` 默认已走真实 LLM（ADR 0012）。
+2. **bench 刻意注入 `ScriptedBrain`**：它测的是“真实执行 Agent + 验收”链路，而不是 Brain；所以 `brainDecisionsPerTask` / 过度拆解率不是 LLM Brain 指标。生产 `hubagent run` 默认已走 Pi SDK Brain（ADR 0012）。
 
 ## Claude Code
 
