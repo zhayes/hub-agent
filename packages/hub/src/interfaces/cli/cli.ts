@@ -11,6 +11,7 @@ import { answerClarification } from '../../runtime/clarify'
 import { listDecisions } from '../../runtime/decision-record'
 import { cancelTask } from '../../runtime/recovery/cancel'
 import { pauseTask, resumeTask } from '../../runtime/recovery/pause'
+import { leasesForExecution } from '../../runtime/workspace/lease'
 import { runParallelAgents } from '../../runtime/workspace/parallel'
 import {
   abortWorktreeSession,
@@ -746,35 +747,106 @@ export function createCli(version: string): Command {
 
   task
     .command('retry <id>')
-    .description('重试任务（当前支持 paused 任务 resume；失败任务走升级链）')
+    .description('重试任务：paused 任务 resume；failed 任务创建新 attempt 并执行')
+    .option('--agent <name>', 'failed 任务重试使用的 Agent；默认沿用最后一次执行')
+    .option('--worktree <path>', '重试工作区；默认沿用失败任务的 lease 路径或当前目录')
+    .option('--brain-mode <mode>', 'Brain 模式：pi | scripted（默认 llm 环境配置）')
+    .option(
+      '--verify-command <cmd>',
+      '新 attempt 的验收命令（可重复）',
+      (value: string, previous: string[]) => [...previous, value],
+      [],
+    )
+    .option(
+      '--allowed-path <path>',
+      'diffScope 允许路径（可重复；默认 .）',
+      (value: string, previous: string[]) => [...previous, value],
+      [],
+    )
     .option('--json', '输出机器可读 JSON')
-    .action((id: string, options: { json?: boolean }) => {
-      const db = openDatabase(dbPath(hubDir()))
-      try {
-        migrate(db)
-        const view = getTaskEvidence(db, id)
-        if (view === undefined) {
-          throw new HubError('NOT_FOUND', `任务不存在：${id}`, { taskId: id })
+    .action(
+      async (
+        id: string,
+        options: {
+          agent?: string
+          worktree?: string
+          brainMode?: string
+          verifyCommand?: string[]
+          allowedPath?: string[]
+          json?: boolean
+        },
+      ) => {
+        const db = openDatabase(dbPath(hubDir()))
+        let provider: ReturnType<typeof createSrtProvider> | undefined
+        try {
+          migrate(db)
+          const view = getTaskEvidence(db, id)
+          if (view === undefined) {
+            throw new HubError('NOT_FOUND', `任务不存在：${id}`, { taskId: id })
+          }
+          if (view.task.status === 'paused') {
+            const result = resumeTask(db, id)
+            if (options.json === true) {
+              process.stdout.write(`${JSON.stringify({ ok: true, ...result }, null, 2)}\n`)
+            } else {
+              process.stdout.write(`✓ resumed ${id}\n`)
+            }
+            return
+          }
+          if (view.task.status !== 'failed') {
+            throw new HubError(
+              'ACTION_REJECTED',
+              `任务当前是 ${view.task.status}；只有 paused/failed 可以 retry`,
+              { taskId: id, status: view.task.status },
+            )
+          }
+
+          const lastExecution = [...view.executions]
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            .at(-1)
+          const agents = listAgents(db)
+          const lastAgent = agents.find((agent) => agent.id === lastExecution?.agentId)
+          const agent =
+            options.agent === undefined
+              ? (lastAgent ?? resolveAgent(db))
+              : resolveAgent(db, options.agent)
+          const lease =
+            lastExecution === undefined
+              ? undefined
+              : leasesForExecution(db, lastExecution.id).at(-1)
+          const worktree = options.worktree ?? lease?.path ?? process.cwd()
+          const checks = buildVerificationChecks(options)
+          const brain = createBrainFromEnv({
+            ...process.env,
+            ...(options.brainMode === undefined ? {} : { HUBAGENT_BRAIN_MODE: options.brainMode }),
+          })
+          provider = createSrtProvider()
+          const result = await runGoalWithBrain({
+            db,
+            provider,
+            brain,
+            agent,
+            availableAgents: agents,
+            objective: view.task.description,
+            worktree,
+            checks,
+            clientVersion: version,
+          })
+          const payload = { retryOf: id, ...result }
+          if (options.json === true) {
+            process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+          } else {
+            process.stdout.write(`✓ retry ${id} -> task ${result.taskId}\n`)
+          }
+          process.exitCode = result.ok ? 0 : 1
+        } catch (error) {
+          writeCliError(error, options.json === true)
+        } finally {
+          await provider?.dispose().catch(() => undefined)
+          db.close()
         }
-        if (view.task.status !== 'paused') {
-          throw new HubError(
-            'ACTION_REJECTED',
-            `任务当前是 ${view.task.status}；失败任务的自动 retry 需要升级链接线（M8/M9）`,
-            { taskId: id, status: view.task.status },
-          )
-        }
-        const result = resumeTask(db, id)
-        if (options.json === true) {
-          process.stdout.write(`${JSON.stringify({ ok: true, ...result }, null, 2)}\n`)
-        } else {
-          process.stdout.write(`✓ retry ${id}\n`)
-        }
-      } catch (error) {
-        writeCliError(error, options.json === true)
-      } finally {
-        db.close()
-      }
-    })
+      },
+    )
 
   task
     .command('answer <questionId>')

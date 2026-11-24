@@ -555,7 +555,7 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 - `runtime/acp-retry.ts`：协议/启动重试最多 2 次；执行失败无 diff 时同 Agent 重试 1 次；有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。
 - 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2、`brain-run.test.ts` 新增 2 个自动重试用例。
 
-`pnpm verify`：272 用例、arch 95 modules 全绿。**已知边界**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次，失败后创建新 Task 计划）已接；`task retry` 仍只支持 paused 任务 resume，failed 任务的 CLI 手动 retry 仍是下一步。
+`pnpm verify`：272 用例、arch 95 modules 全绿。**已接**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次）；`task retry` 对 paused 任务 resume，对 failed 任务创建新 attempt（新 Goal/Task）并执行。
 
 ---
 
