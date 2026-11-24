@@ -4,6 +4,10 @@
 
 默认 `pnpm bench` 使用确定性 mock ACP agent 跑编排/验收链路，报告里 `mode=mock`。这**不是 LLM 规划质量基准**，而是回归基线：验证任务创建、Brain 决策、ACP 执行、验收、恢复探针不漂移。
 
+真实 harness 请用 `fixtures/regression-tasks-real`（checks 针对真实文件/测试）；当前目录的 checks 绑定 mock agent，只用于编排基线。
+
+完整操作见 [REAL-HARNESS-BENCH.md](../../docs/REAL-HARNESS-BENCH.md)。
+
 接真实 harness：
 
 ```bash

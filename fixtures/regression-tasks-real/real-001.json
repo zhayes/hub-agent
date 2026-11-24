@@ -1,0 +1,20 @@
+{
+  "id": "real-001",
+  "title": "修改 README 标题",
+  "objective": "把 README.md 的第一行改成 `# HubAgent Real Bench`，不要改其他文件。",
+  "category": "docs",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "grep -qx '# HubAgent Real Bench' README.md",
+      "timeoutMs": 5000,
+      "expect": { "exitCode": 0 }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": ["README.md"]
+    }
+  ]
+}

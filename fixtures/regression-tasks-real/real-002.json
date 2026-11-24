@@ -1,0 +1,25 @@
+{
+  "id": "real-002",
+  "title": "修复 add 函数",
+  "objective": "修复 math.js 里的 add 函数，让 `node --test math.test.js` 通过；只改 math.js，不要改测试。",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "files": {
+    "package.json": "{ \"name\": \"real-bench\", \"private\": true, \"type\": \"module\" }\n",
+    "math.js": "export const add = (a, b) => a - b\n",
+    "math.test.js": "import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { add } from './math.js'\n\ntest('add', () => assert.equal(add(1, 2), 3))\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node --test math.test.js",
+      "timeoutMs": 10000,
+      "expect": { "exitCode": 0 }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": ["math.js"]
+    }
+  ]
+}

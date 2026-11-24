@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { AgentHost } from '../agent-host/agent-host'
 import type { VerificationCheck } from '../domain/entities'
 import { addAgent, resolveAgent } from '../runtime/agent-registry'
@@ -25,24 +25,51 @@ interface TaskSpec {
   category: string
   shouldNotSplit: boolean
   expectedVerdict: 'pass' | 'fail'
+  /** 任务开始前写入临时仓库的文件（相对路径） */
+  files?: Record<string, string>
   checks: VerificationCheck[]
 }
 
-function args(): { suite: string; out?: string; agentCommand?: string } {
+interface BenchOptions {
+  suite: string
+  out?: string
+  agentCommand?: string
+  agentAllowWrite: string[]
+  agentNetwork?: 'agent-managed' | 'allowlist' | 'deny'
+  allowDomains: string[]
+}
+
+function args(): BenchOptions {
   const values = process.argv.slice(2)
   let suite = 'fixtures/regression-tasks'
   let out: string | undefined
   let agentCommand: string | undefined
+  let agentNetwork: BenchOptions['agentNetwork']
+  const agentAllowWrite: string[] = []
+  const allowDomains: string[] = []
   for (let i = 0; i < values.length; i += 1) {
     const value = values[i]
     if (value === '--suite') suite = values[++i] ?? suite
     else if (value === '--out') out = values[++i]
     else if (value === '--agent-command') agentCommand = values[++i]
+    else if (value === '--agent-allow-write') {
+      const path = values[++i]
+      if (path !== undefined) agentAllowWrite.push(resolve(path))
+    } else if (value === '--agent-network') {
+      const mode = values[++i]
+      if (mode === 'agent-managed' || mode === 'allowlist' || mode === 'deny') agentNetwork = mode
+    } else if (value === '--allow-domain') {
+      const domain = values[++i]
+      if (domain !== undefined) allowDomains.push(domain)
+    }
   }
   return {
     suite,
     ...(out === undefined ? {} : { out }),
     ...(agentCommand === undefined ? {} : { agentCommand }),
+    agentAllowWrite,
+    ...(agentNetwork === undefined ? {} : { agentNetwork }),
+    allowDomains,
   }
 }
 
@@ -53,14 +80,22 @@ function loadSuite(dir: string): TaskSpec[] {
     .map((file) => JSON.parse(readFileSync(join(dir, file), 'utf8')) as TaskSpec)
 }
 
-async function repo(provider: ReturnType<typeof createSrtProvider>): Promise<string> {
+async function repo(
+  provider: ReturnType<typeof createSrtProvider>,
+  files: Record<string, string>,
+): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'hubagent-bench-'))
   const host = new AgentHost({ provider })
   const runner = createAgentHostGitRunner(host, { allowedWrite: [dir] })
   try {
     await runner.run(['init', '-q'], dir)
     writeFileSync(join(dir, 'README.md'), '# bench repo\n', 'utf8')
-    await runner.run(['add', 'README.md'], dir)
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(dir, path)
+      mkdirSync(dirname(full), { recursive: true })
+      writeFileSync(full, content, 'utf8')
+    }
+    await runner.run(['add', '-A'], dir)
     await runner.run(
       ['-c', 'user.name=Bench', '-c', 'user.email=bench@local', 'commit', '-qm', 'init'],
       dir,
@@ -80,12 +115,20 @@ async function main(): Promise<void> {
 
   try {
     for (const task of suite) {
-      const dir = await repo(provider)
+      const dir = await repo(provider, task.files ?? {})
       const db = openDatabase(':memory:')
       const started = Date.now()
       try {
         migrate(db)
-        addAgent(db, { name: 'bench', command: agentCommand })
+        addAgent(db, {
+          name: 'bench',
+          command: agentCommand,
+          ...(options.agentNetwork === undefined ? {} : { networkMode: options.agentNetwork }),
+          ...(options.allowDomains.length === 0 ? {} : { allowedDomains: options.allowDomains }),
+          ...(options.agentAllowWrite.length === 0
+            ? {}
+            : { allowedWrite: options.agentAllowWrite }),
+        })
         const result = await runGoalWithBrain({
           db,
           provider,
@@ -94,6 +137,11 @@ async function main(): Promise<void> {
           worktree: dir,
           clientVersion: 'bench',
           checks: task.checks,
+          ...(options.agentAllowWrite.length === 0
+            ? {}
+            : { allowedWrite: options.agentAllowWrite }),
+          ...(options.agentNetwork === undefined ? {} : { networkMode: options.agentNetwork }),
+          ...(options.allowDomains.length === 0 ? {} : { allowedDomains: options.allowDomains }),
         })
         const subtasks = db
           .prepare('SELECT COUNT(*) AS n FROM subtasks WHERE task_id = ?')

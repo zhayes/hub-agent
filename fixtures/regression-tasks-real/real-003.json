@@ -1,0 +1,23 @@
+{
+  "id": "real-003",
+  "title": "修复端口类型",
+  "objective": "把 config.json 的 port 从字符串 \"3000\" 改成数字 3000；只改 config.json。",
+  "category": "bugfix",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "files": {
+    "config.json": "{ \"port\": \"3000\" }\n"
+  },
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"const c=require('./config.json'); if(c.port!==3000) process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": { "exitCode": 0 }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": ["config.json"]
+    }
+  ]
+}
