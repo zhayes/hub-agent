@@ -22,10 +22,12 @@
     "bench": "tsx packages/hub/src/bench/run.ts",
     "test:brain-real": "tsx packages/hub/test/manual/real-brain-smoke.ts",
     "build:web": "pnpm --filter @hubagent/web build",
-    "dev:web": "pnpm --filter @hubagent/web dev"
+    "dev:web": "pnpm --filter @hubagent/web dev",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
+    "@playwright/test": "1.65.1",
     "@swc/core": "^1.16.22",
     "@types/node": "^26.6.6",
     "dependency-cruiser": "^18.9.0",

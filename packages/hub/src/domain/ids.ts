@@ -17,6 +17,8 @@ export type ApprovalId = Brand<string, 'ApprovalId'>
 export type ContractId = Brand<string, 'ContractId'>
 export type AgentId = Brand<string, 'AgentId'>
 export type SessionId = Brand<string, 'SessionId'>
+export type ChatThreadId = Brand<string, 'ChatThreadId'>
+export type ChatMessageId = Brand<string, 'ChatMessageId'>
 export type Timestamp = Brand<string, 'Timestamp'>
 
 export const asGoalId = (value: string): GoalId => value as GoalId
@@ -28,4 +30,6 @@ export const asApprovalId = (value: string): ApprovalId => value as ApprovalId
 export const asContractId = (value: string): ContractId => value as ContractId
 export const asAgentId = (value: string): AgentId => value as AgentId
 export const asSessionId = (value: string): SessionId => value as SessionId
+export const asChatThreadId = (value: string): ChatThreadId => value as ChatThreadId
+export const asChatMessageId = (value: string): ChatMessageId => value as ChatMessageId
 export const asTimestamp = (value: string): Timestamp => value as Timestamp

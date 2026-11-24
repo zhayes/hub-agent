@@ -98,3 +98,57 @@ export const api = {
   approve: (id: string) => request(`/api/v1/approvals/${id}/approve`, { method: 'POST' }),
   reject: (id: string) => request(`/api/v1/approvals/${id}/reject`, { method: 'POST' }),
 }
+
+export interface ChatThread {
+  id: string
+  title: string
+  goalId?: string
+  taskId?: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatThreadSummary extends ChatThread {
+  messageCount: number
+  lastMessage?: string
+}
+
+export interface ChatMessage {
+  id: string
+  threadId: string
+  role: 'user' | 'assistant' | 'system'
+  kind: 'text' | 'plan' | 'task' | 'result' | 'error' | 'approval' | 'clarification'
+  content: string
+  goalId?: string
+  taskId?: string
+  approvalId?: string
+  createdAt: string
+}
+
+export interface ChatThreadDetail {
+  thread: ChatThread
+  messages: ChatMessage[]
+}
+
+export const chatApi = {
+  threads: () => request<{ threads: ChatThreadSummary[] }>('/api/v1/chat/threads'),
+  create: (title?: string) =>
+    request<{ thread: ChatThread }>('/api/v1/chat/threads', {
+      method: 'POST',
+      body: JSON.stringify(title === undefined ? {} : { title }),
+    }),
+  thread: (id: string) => request<ChatThreadDetail & { ok: boolean }>(`/api/v1/chat/threads/${id}`),
+  resume: (id: string) =>
+    request<{ thread: ChatThread; messages: ChatMessage[] }>(`/api/v1/chat/threads/${id}/resume`, {
+      method: 'POST',
+    }),
+  post: (id: string, text: string, mode: 'run' | 'ask') =>
+    request<{ thread: ChatThread; messages: ChatMessage[] }>(
+      `/api/v1/chat/threads/${id}/messages`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ text, mode }),
+      },
+    ),
+}

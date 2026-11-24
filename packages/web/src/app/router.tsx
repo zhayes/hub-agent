@@ -1,6 +1,7 @@
 import { createRouter } from '@solidjs/router'
 import { AgentsRoute } from '../routes/AgentsRoute'
 import { ApprovalsRoute } from '../routes/ApprovalsRoute'
+import { ChatRoute } from '../routes/ChatRoute'
 import { NotFoundRoute } from '../routes/NotFoundRoute'
 import { SettingsRoute } from '../routes/SettingsRoute'
 import { TasksRoute } from '../routes/TasksRoute'
@@ -12,7 +13,9 @@ export const Router = createRouter({
       path: '/',
       component: AppLayout,
       children: [
-        { path: '/', component: TasksRoute },
+        { path: '/', component: ChatRoute },
+        { path: '/chat', component: ChatRoute },
+        { path: '/chat/:id', component: ChatRoute },
         { path: '/tasks', component: TasksRoute },
         { path: '/tasks/:id', component: TasksRoute },
         { path: '/agents', component: AgentsRoute },

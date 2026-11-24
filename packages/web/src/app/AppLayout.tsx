@@ -14,6 +14,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
     if (path().startsWith('/agents')) return app.t('agents')
     if (path().startsWith('/approvals')) return app.t('approvals')
     if (path().startsWith('/settings')) return app.t('settings')
+    if (path().startsWith('/chat') || path() === '/') return app.t('chat')
     return app.t('tasks')
   }
 
@@ -37,7 +38,16 @@ export function AppLayout(props: { children?: JSX.Element }) {
         <div class="brand-mark" aria-hidden="true">
           H
         </div>
-        <nav class="rail-nav">
+        <nav class="rail-nav" aria-label={app.t('primaryNavigation')}>
+          <a
+            href="/chat"
+            class={`rail-button${isActive('/chat') ? ' active' : ''}`}
+            aria-current={isActive('/chat') ? 'page' : undefined}
+            aria-label={app.t('navChat')}
+            title={app.t('navChat')}
+          >
+            <Icon name="message" size={17} />
+          </a>
           <a
             href="/tasks"
             class={`rail-button${isActive('/tasks') ? ' active' : ''}`}

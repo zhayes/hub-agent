@@ -32,6 +32,9 @@ export interface RunGoalWithBrainOptions
   availableAgents?: readonly AgentRecord[]
   /** 共享工作区完成即落 Task completed；worktree 由交付/merge 后 finalize */
   completeOnSuccess?: boolean
+  /** Chat/HTTP 需要尽早拿到 goal/task id；回调不得抛错影响执行 */
+  onGoalCreated?: (goalId: string) => void
+  onTaskCreated?: (input: { goalId: string; taskId: string }) => void
 }
 
 export interface RunGoalWithBrainResult {
@@ -59,7 +62,14 @@ export interface RunGoalWithBrainResult {
 export async function runGoalWithBrain(
   options: RunGoalWithBrainOptions,
 ): Promise<RunGoalWithBrainResult> {
-  const { brain = createBrainFromEnv(), budget, completeOnSuccess = true, ...taskOptions } = options
+  const {
+    brain = createBrainFromEnv(),
+    budget,
+    completeOnSuccess = true,
+    onGoalCreated,
+    onTaskCreated,
+    ...taskOptions
+  } = options
   const goalId = asGoalId(newId())
   const now = asTimestamp(new Date().toISOString())
   const title =
@@ -75,6 +85,7 @@ export async function runGoalWithBrain(
   }
   let state = loadState(options.db)
   state = appendEvent(options.db, state, { type: 'goal.created', goal }).state
+  onGoalCreated?.(goalId)
 
   const availableAgents = options.availableAgents ?? [options.agent]
   const agents = availableAgents.map((agent) => ({
@@ -116,6 +127,7 @@ export async function runGoalWithBrain(
   })
   let taskId = createdPlan.taskId
   let draftSubtasks = createdPlan.subtasks
+  onTaskCreated?.({ goalId, taskId })
 
   const decisions = [decompose.record]
   const executions: RunAcpTaskResult[] = []
@@ -206,6 +218,9 @@ export async function runGoalWithBrain(
       if (!result.ok) break
     }
     if (lastResult !== undefined && !lastResult.ok) {
+      if (lastResult.approval !== undefined || lastResult.stopReason === 'waiting_approval') {
+        return { ...lastResult, executions, decisions }
+      }
       if (lastResult.replanRequired === true && replans < 2) {
         replans += 1
         const replan = await runBrainRound({
@@ -239,6 +254,7 @@ export async function runGoalWithBrain(
         })
         taskId = createdPlan.taskId
         draftSubtasks = createdPlan.subtasks
+        onTaskCreated?.({ goalId, taskId })
         continue
       }
       failGoal(options.db, goalId)

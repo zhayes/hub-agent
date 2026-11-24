@@ -55,26 +55,27 @@ export function createTheme(): ThemeController {
     writeStoredTheme(value)
   }
 
+  const media = globalThis.matchMedia?.('(prefers-color-scheme: dark)')
+  const onChange = (): void => {
+    // CSS follows the system when preference is "system"; no class is needed.
+    if (theme() === 'system') applyTheme('system')
+  }
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key === STORAGE_KEY) {
+      const next = normalizeTheme(event.newValue)
+      setThemeSignal(next)
+      applyTheme(next)
+    }
+  }
+
   onSettled(() => {
     applyTheme(theme())
-    const media = globalThis.matchMedia?.('(prefers-color-scheme: dark)')
-    const onChange = (): void => {
-      // CSS follows the system when preference is "system"; no class is needed.
-      if (theme() === 'system') applyTheme('system')
-    }
     media?.addEventListener('change', onChange)
-    const onStorage = (event: StorageEvent): void => {
-      if (event.key === STORAGE_KEY) {
-        const next = normalizeTheme(event.newValue)
-        setThemeSignal(next)
-        applyTheme(next)
-      }
-    }
     globalThis.addEventListener('storage', onStorage)
-    onCleanup(() => {
-      media?.removeEventListener('change', onChange)
-      globalThis.removeEventListener('storage', onStorage)
-    })
+  })
+  onCleanup(() => {
+    media?.removeEventListener('change', onChange)
+    globalThis.removeEventListener('storage', onStorage)
   })
 
   return {

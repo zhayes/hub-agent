@@ -5,6 +5,7 @@ export type IconName =
   | 'agents'
   | 'alert'
   | 'approvals'
+  | 'arrowUp'
   | 'check'
   | 'clock'
   | 'chevronDown'
@@ -32,6 +33,7 @@ const paths: Record<IconName, readonly string[]> = {
   activity: ['M3 12h4l2.5-7 5 14 2.5-7H21'],
   agents: ['M5 5h14v14H5z', 'M9 2v3M15 2v3M8 12h.01M16 12h.01M9 16h6'],
   alert: ['M12 3 2.5 20h19L12 3Z', 'M12 9v4M12 17h.01'],
+  arrowUp: ['M12 19V5M6 11l6-6 6 6'],
   approvals: ['M7 3h10l3 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7l3-4Z', 'M8 13l2.5 2.5L16 10'],
   check: ['m5 12 4 4L19 6'],
   chevronDown: ['m6 9 6 6 6-6'],

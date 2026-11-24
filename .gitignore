@@ -8,3 +8,6 @@ reports/
 # 本地运行时状态（doctor / daemon 会写）
 .hubagent/
 .taste-skill/
+
+test-results/
+playwright-report/

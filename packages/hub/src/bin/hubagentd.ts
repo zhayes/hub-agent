@@ -3,7 +3,9 @@ import { resolve } from 'node:path'
 import { serve } from '@hono/node-server'
 import { createHttpApp } from '../interfaces/http/app'
 import { ensureHttpToken } from '../interfaces/http/token'
+import { createChatService } from '../runtime/chat/chat-service'
 import { scanRecovery } from '../runtime/recovery/scan'
+import { createSrtProvider } from '../sandbox/srt-driver'
 import { acquireLock } from '../shared/lock'
 import { dbPath, hubDir, lockPath, tokenPath } from '../shared/paths'
 import { openDatabase } from '../storage/db'
@@ -32,7 +34,14 @@ async function main(): Promise<void> {
   const token = ensureHttpToken(dir)
   const port = Number.parseInt(process.env['HUBAGENT_PORT'] ?? '7788', 10)
   const webDist = process.env['HUBAGENT_WEB_DIST'] ?? resolve('packages/web/dist')
-  const app = createHttpApp({ db, token: token.token, version: '0.0.0-m0', webDist })
+  const provider = createSrtProvider()
+  const chat = createChatService({
+    db,
+    provider,
+    clientVersion: '0.0.0-m0',
+    worktree: process.cwd(),
+  })
+  const app = createHttpApp({ db, token: token.token, version: '0.0.0-m0', webDist, chat })
   const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port })
 
   process.stdout.write(
@@ -49,6 +58,7 @@ async function main(): Promise<void> {
 
   if (checkOnly) {
     server.close()
+    await provider.dispose().catch(() => undefined)
     db.close()
     await lock.release()
     return
@@ -69,6 +79,7 @@ async function main(): Promise<void> {
     shuttingDown = true
     stop()
     server.close()
+    await provider.dispose().catch(() => undefined)
     db.close()
     await lock.release()
     process.stdout.write(`${JSON.stringify({ ok: true, stopped: signal })}\n`)

@@ -4,6 +4,8 @@ import { MIGRATION_002_AGENTS } from './migrations/002-agents'
 import { MIGRATION_003_AGENT_PROFILE } from './migrations/003-agent-profile'
 import { MIGRATION_004_BRAIN } from './migrations/004-brain'
 import { MIGRATION_005_WORKSPACE } from './migrations/005-workspace'
+import { MIGRATION_006_CHAT } from './migrations/006-chat'
+import { MIGRATION_007_CHAT_APPROVAL } from './migrations/007-chat-approval'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -12,6 +14,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_003_AGENT_PROFILE,
   MIGRATION_004_BRAIN,
   MIGRATION_005_WORKSPACE,
+  MIGRATION_006_CHAT,
+  MIGRATION_007_CHAT_APPROVAL,
 ]
 
 export interface MigrateResult {

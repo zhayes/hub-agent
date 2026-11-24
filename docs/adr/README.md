@@ -19,6 +19,7 @@
 | 0015 | 本地 HTTP + SSE + 同源 Web，token 由 daemon 注入 | 已接受 | 2026-11-24 |
 | 0016 | Console Web 采用自有 UI 基元、双主题与 typed i18n | 已接受 | 2026-11-24 |
 | 0017 | Console Web 使用 @solidjs/router 2，不使用显示/隐藏切页 | 已接受 | 2026-11-24 |
+| 0018 | Chat 使用异步 thread + task，不阻塞 HTTP 请求 | 已接受 | 2026-11-24 |
 
 ## 约定
 

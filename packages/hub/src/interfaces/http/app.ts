@@ -3,6 +3,7 @@ import { extname, join, normalize, resolve } from 'node:path'
 import { Hono } from 'hono'
 import { listAgents } from '../../runtime/agent-registry'
 import { decideApproval, listApprovals } from '../../runtime/approval'
+import type { ChatService } from '../../runtime/chat/chat-service'
 import { listDecisions } from '../../runtime/decision-record'
 import type { Db } from '../../storage/db'
 import { listEventsSince } from '../../storage/queries/events'
@@ -15,6 +16,8 @@ export interface HttpAppOptions {
   version?: string
   /** 构建后的 Web Console 目录；不传则不托管静态资源 */
   webDist?: string
+  /** Chat 需要 provider；测试可注入 fake，未注入时端点 501 */
+  chat?: ChatService
 }
 
 export function createHttpApp(options: HttpAppOptions): Hono {
@@ -70,6 +73,80 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     return view === undefined
       ? context.json({ code: 'NOT_FOUND', message: 'task not found' }, 404)
       : context.json({ ok: true, decisions: listDecisions(db, view.task.goalId) })
+  })
+
+  app.post('/api/v1/chat/threads', async (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const body = await context.req.json<{ title?: string }>().catch((): { title?: string } => ({}))
+    const thread = options.chat.createThread({
+      ...(body.title === undefined ? {} : { title: body.title }),
+    })
+    return context.json({ ok: true, thread }, 201)
+  })
+
+  app.get('/api/v1/chat/threads', (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const limit = Number.parseInt(context.req.query('limit') ?? '50', 10)
+    return context.json({
+      ok: true,
+      threads: options.chat.listThreads(Number.isFinite(limit) ? limit : 50),
+    })
+  })
+
+  app.get('/api/v1/chat/threads/:id', (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const value = options.chat.getThread(context.req.param('id'))
+    return value === undefined
+      ? context.json({ code: 'NOT_FOUND', message: 'thread not found' }, 404)
+      : context.json({ ok: true, ...value })
+  })
+
+  app.post('/api/v1/chat/threads/:id/messages', async (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const body = await context.req
+      .json<{ text?: string; mode?: 'run' | 'ask'; agentName?: string }>()
+      .catch((): { text?: string; mode?: 'run' | 'ask'; agentName?: string } => ({}))
+    if (typeof body.text !== 'string' || body.text.trim().length === 0) {
+      return context.json({ code: 'INVALID_INPUT', message: 'text is required' }, 400)
+    }
+    try {
+      const thread = await options.chat.postMessage(context.req.param('id'), {
+        text: body.text,
+        ...(body.mode === 'run' || body.mode === 'ask' ? { mode: body.mode } : {}),
+        ...(body.agentName === undefined ? {} : { agentName: body.agentName }),
+      })
+      return context.json(
+        { ok: true, thread, messages: options.chat.getThread(thread.id)?.messages ?? [] },
+        202,
+      )
+    } catch (error) {
+      return context.json(
+        {
+          code: 'CHAT_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
+  })
+
+  app.post('/api/v1/chat/threads/:id/resume', async (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    try {
+      const thread = await options.chat.resume(context.req.param('id'))
+      return context.json(
+        { ok: true, thread, messages: options.chat.getThread(thread.id)?.messages ?? [] },
+        202,
+      )
+    } catch (error) {
+      return context.json(
+        {
+          code: 'CHAT_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
   })
 
   app.get('/api/v1/agents', (context) => context.json({ ok: true, agents: listAgents(db) }))
