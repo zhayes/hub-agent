@@ -40,5 +40,5 @@ pnpm test:brain-real
 
 - `PiBrain` 只实现 `OrchestratorBrain.step/explain`；模型输出仍由 Runtime 做 schema/权限/预算/幂等校验。
 - Pi session 使用 `noTools: "all"` + `DefaultResourceLoader(noExtensions/noSkills/noContextFiles)`；Brain 不拿文件、shell、数据库句柄。
-- 当前 `runGoalWithBrain` 只执行 `revise_plan` 的第一个子任务；多子任务执行器仍需补。
+- `runGoalWithBrain` 会按 `revise_plan` 顺序执行全部子任务；同一 worktree，不并行。
 - 不再维护手写 OpenAI-compatible client；模型配置/认证/provider 由 Pi 负责。

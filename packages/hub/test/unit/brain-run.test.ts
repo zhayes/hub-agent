@@ -5,6 +5,12 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ScriptedBrain } from '../../src/brain/scripted-brain'
+import type {
+  BrainAction,
+  BrainInput,
+  DecisionRationale,
+  OrchestratorBrain,
+} from '../../src/brain/types'
 import { addAgent, resolveAgent } from '../../src/runtime/agent-registry'
 import { runGoalWithBrain } from '../../src/runtime/brain-run'
 import type {
@@ -166,5 +172,65 @@ describe('runGoalWithBrain：M8 自动重试', () => {
       (db.prepare('SELECT status FROM goals WHERE id = ?').get(result.goalId) as { status: string })
         .status,
     ).toBe('failed')
+  })
+})
+
+class TwoTaskBrain implements OrchestratorBrain {
+  async step(input: BrainInput): Promise<BrainAction[]> {
+    const subtasks = input.tasks.flatMap((task) => task.subtasks)
+    if (subtasks.length === 0) {
+      return [
+        {
+          type: 'revise_plan',
+          subtasks: [
+            { title: 'first', description: 'first', requiredCapabilities: [] },
+            { title: 'second', description: 'second', requiredCapabilities: [] },
+          ],
+          reason: 'two subtasks',
+        },
+      ]
+    }
+    return [
+      ...subtasks
+        .filter((subtask) => subtask.status === 'succeeded')
+        .map(
+          (subtask): BrainAction => ({
+            type: 'accept',
+            subtaskId: subtask.id,
+            rationale: 'done',
+          }),
+        ),
+      { type: 'finish', summary: 'done' },
+    ]
+  }
+
+  async explain(input: BrainInput): Promise<DecisionRationale[]> {
+    return [{ type: 'decompose', rationale: input.tasks.length === 0 ? 'two subtasks' : 'done' }]
+  }
+}
+
+describe('runGoalWithBrain：多子任务', () => {
+  it('执行 revise_plan 的全部子任务，而不是只跑第一个', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new TwoTaskBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'two subtasks',
+      worktree: dir,
+      checks: [
+        { kind: 'command', cmd: 'true', timeoutMs: 5_000, expect: { exitCode: 0 } },
+        { kind: 'diffScope', allowedPaths: ['.'] },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.executions).toHaveLength(2)
+    const subtasks = db
+      .prepare('SELECT status FROM subtasks WHERE task_id = ? ORDER BY id')
+      .all(result.taskId) as Array<{ status: string }>
+    expect(subtasks.map((item) => item.status)).toEqual(['succeeded', 'succeeded'])
   })
 })

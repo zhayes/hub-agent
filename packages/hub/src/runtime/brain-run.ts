@@ -1,7 +1,7 @@
 import { createBrainFromEnv } from '../brain/create-brain'
 import type { BrainBudget, DecisionRecord, OrchestratorBrain } from '../brain/types'
-import type { Goal } from '../domain/entities'
-import { asGoalId, asTimestamp } from '../domain/ids'
+import type { Goal, Subtask, Task } from '../domain/entities'
+import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../domain/ids'
 import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
 import { loadState } from '../storage/queries/state'
@@ -18,12 +18,14 @@ import { runBrainRound } from './brain-loop'
  * LLM 输出仍由 brain-loop/validate 做 schema/权限/预算/幂等校验。
  */
 
-export interface RunGoalWithBrainOptions extends Omit<RunAcpTaskOptions, 'goalId' | 'plan'> {
+export interface RunGoalWithBrainOptions
+  extends Omit<RunAcpTaskOptions, 'goalId' | 'plan' | 'taskId' | 'subtaskId'> {
   brain?: OrchestratorBrain
   budget?: BrainBudget
 }
 
 export interface RunGoalWithBrainResult extends RunAcpTaskResult {
+  executions: RunAcpTaskResult[]
   decisions: DecisionRecord[]
 }
 
@@ -44,8 +46,8 @@ export async function runGoalWithBrain(
     createdAt: now,
     updatedAt: now,
   }
-  const state = loadState(options.db)
-  appendEvent(options.db, state, { type: 'goal.created', goal })
+  let state = loadState(options.db)
+  state = appendEvent(options.db, state, { type: 'goal.created', goal }).state
 
   const agents = [
     {
@@ -70,28 +72,78 @@ export async function runGoalWithBrain(
   if (decompose === undefined) {
     throw new HubError('ACTION_REJECTED', '初始计划决策点已被处理', { goalId })
   }
-  const revise = decompose.actions.find((action) => action.type === 'revise_plan')
-  if (revise === undefined || revise.type !== 'revise_plan') {
+  const drafts = decompose.actions
+    .filter((action) => action.type === 'revise_plan')
+    .flatMap((action) => action.subtasks)
+  if (drafts.length === 0) {
     throw new HubError('ACTION_REJECTED', 'Brain 未产出 revise_plan', {
       goalId,
       actions: decompose.actions,
     })
   }
-  const draft = revise.subtasks[0]
-  if (draft === undefined) {
-    throw new HubError('ACTION_REJECTED', 'Brain 的 revise_plan 为空', { goalId })
-  }
 
-  const result = await runAcpWithRetry({
-    ...taskOptions,
-    goalId,
-    plan: {
-      taskTitle: draft.title,
-      taskDescription: draft.description,
-      subtaskTitle: draft.title,
-      subtaskDescription: draft.description,
-    },
+  const taskId = asTaskId(newId())
+  state = loadState(options.db)
+  state = appendEvent(options.db, state, {
+    type: 'task.created',
+    task: {
+      id: taskId,
+      goalId,
+      title: drafts[0]?.title ?? title,
+      description: options.objective,
+      status: 'draft',
+      priority: 0,
+      acceptanceCriteria: ['每个子任务执行完成并产出可核验的 diff'],
+      createdAt: now,
+      updatedAt: now,
+    } satisfies Task,
+  }).state
+  for (const to of ['planning', 'ready', 'running'] as const) {
+    state = appendEvent(options.db, state, {
+      type: 'task.status',
+      taskId,
+      to,
+      at: asTimestamp(new Date().toISOString()),
+    }).state
+  }
+  const draftSubtasks = drafts.map((draft) => {
+    const subtask: Subtask = {
+      id: asSubtaskId(newId()),
+      taskId,
+      title: draft.title,
+      description: draft.description,
+      status: 'ready',
+      required: true,
+      dependencies: [],
+      requiredCapabilities: draft.requiredCapabilities,
+      assignedAgentId: asAgentId(options.agent.id),
+      priority: 0,
+      maxAttempts: draft.maxAttempts ?? 1,
+      createdAt: now,
+      updatedAt: now,
+    }
+    state = appendEvent(options.db, state, { type: 'subtask.created', subtask }).state
+    return subtask
   })
+
+  const executions: RunAcpTaskResult[] = []
+  for (const [index, subtask] of draftSubtasks.entries()) {
+    const draft = drafts[index]
+    if (draft === undefined) continue
+    const result = await runAcpWithRetry({
+      ...taskOptions,
+      goalId,
+      taskId,
+      subtaskId: subtask.id,
+      objective: draft.description,
+    })
+    executions.push(result)
+    if (!result.ok) break
+  }
+  const result = executions[executions.length - 1]
+  if (result === undefined) {
+    throw new HubError('ACTION_REJECTED', 'Brain 计划没有可执行子任务', { goalId })
+  }
 
   const after = await runBrainRound({
     db: options.db,
@@ -105,6 +157,7 @@ export async function runGoalWithBrain(
 
   return {
     ...result,
+    executions,
     decisions: [decompose.record, ...(after === undefined ? [] : [after.record])],
   }
 }

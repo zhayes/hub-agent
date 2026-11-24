@@ -8,13 +8,7 @@ import { decideEscalation } from './recovery/failure'
 export interface RunAcpWithRetryOptions
   extends Omit<
     RunAcpTaskOptions,
-    | 'goalId'
-    | 'taskId'
-    | 'subtaskId'
-    | 'executionId'
-    | 'idempotencyKey'
-    | 'retryOnFailure'
-    | 'attempt'
+    'goalId' | 'executionId' | 'idempotencyKey' | 'retryOnFailure' | 'attempt'
   > {
   goalId: string
 }
@@ -31,8 +25,8 @@ const PROTOCOL_RETRY_LIMIT = 2
  */
 export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<RunAcpTaskResult> {
   let attempt = 1
-  let taskId: string | undefined
-  let subtaskId: string | undefined
+  let taskId: string | undefined = options.taskId
+  let subtaskId: string | undefined = options.subtaskId
   let protocolRetries = 0
 
   for (;;) {
