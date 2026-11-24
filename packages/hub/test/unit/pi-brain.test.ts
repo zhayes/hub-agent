@@ -96,3 +96,48 @@ describe('createBrainFromEnv', () => {
     expect(() => createBrainFromEnv({ HUBAGENT_BRAIN_MODE: 'llm' })).toThrowError(/pi/)
   })
 })
+
+class ToolCallingFactory implements PiSessionFactory {
+  disposed = 0
+  seenTools: string[] = []
+
+  async create(input: CreatePiSessionInput): Promise<PiSession> {
+    this.seenTools = (input.tools ?? []).map((tool) => tool.name)
+    return {
+      prompt: async () => {
+        const revise = input.tools?.find((tool) => tool.name === 'revise_plan')
+        if (revise === undefined) throw new Error('revise_plan tool missing')
+        await revise.execute(
+          'call-1',
+          {
+            subtasks: [{ title: 'tool plan', description: 'tool plan', requiredCapabilities: [] }],
+            reason: 'planned via meta tool',
+          },
+          undefined,
+          undefined,
+          {} as never,
+        )
+      },
+      getLastAssistantText: () => 'done',
+      dispose: () => {
+        this.disposed += 1
+      },
+    }
+  }
+}
+
+describe('Pi 元工具循环', () => {
+  it('工具记录的 intent 优先于最终自然语言，session 仍 dispose', async () => {
+    const factory = new ToolCallingFactory()
+    const brain = new PiBrain({ factory })
+    const actions = await brain.step(input())
+    expect(factory.seenTools).toContain('discover_agents')
+    expect(factory.seenTools).toContain('revise_plan')
+    expect(actions).toHaveLength(1)
+    expect(actions[0]?.type).toBe('revise_plan')
+    if (actions[0]?.type === 'revise_plan') {
+      expect(actions[0].reason).toBe('planned via meta tool')
+    }
+    expect(factory.disposed).toBe(1)
+  })
+})

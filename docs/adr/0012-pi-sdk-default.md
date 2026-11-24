@@ -33,6 +33,7 @@ M6 先用 `ScriptedBrain` 把快照、队列、校验、预算、DecisionRecord 
 - 本地开发必须配置 Pi 模型/认证，否则 `run` 失败；这是刻意的 fail-closed。
 - 引入 Pi SDK 及其依赖，包体积与启动成本增加。
 - `runGoalWithBrain` 会顺序执行 `revise_plan` 的全部子任务；同一 worktree，并行仍属 M7。
+- Pi session 注册 8 个稳定元工具；工具只读/记录 intent，副作用仍由 Runtime 执行。
 
 ## 4. 复审触发条件
 

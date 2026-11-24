@@ -1,5 +1,6 @@
 import { HubError } from '../../shared/errors'
 import type { BrainAction, BrainInput, DecisionRationale, OrchestratorBrain } from '../types'
+import { createMetaTools } from './meta-tools'
 import { buildBrainSystemPrompt, buildBrainUserPrompt } from './prompt'
 import type { PiSessionFactory } from './session'
 
@@ -26,9 +27,11 @@ export class PiBrain implements OrchestratorBrain {
   }
 
   async step(input: BrainInput): Promise<BrainAction[]> {
+    const meta = createMetaTools(input)
     const session = await this.factory.create({
       cwd: this.cwd,
       systemPrompt: buildBrainSystemPrompt(),
+      tools: meta.tools,
       ...(this.agentDir === undefined ? {} : { agentDir: this.agentDir }),
     })
     try {
@@ -39,11 +42,10 @@ export class PiBrain implements OrchestratorBrain {
           reason: error instanceof Error ? error.message : String(error),
         })
       }
-      const content = session.getLastAssistantText()
-      if (content === undefined || content.trim().length === 0) {
-        throw new HubError('BRAIN_UNAVAILABLE', 'Pi 没有返回 assistant 文本')
-      }
-      const actions = parseActions(content)
+      const actions =
+        meta.state.actions.length > 0
+          ? meta.state.actions
+          : parseActions(session.getLastAssistantText() ?? '')
       this.cache = { stateVersion: input.stateVersion, actions }
       return actions
     } finally {

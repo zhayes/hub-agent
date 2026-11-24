@@ -1,3 +1,5 @@
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
+import type { TSchema } from 'typebox'
 import { HubError } from '../../shared/errors'
 
 export interface PiSession {
@@ -10,6 +12,7 @@ export interface CreatePiSessionInput {
   cwd: string
   systemPrompt: string
   agentDir?: string
+  tools?: ToolDefinition<TSchema, unknown>[]
 }
 
 export interface PiSessionFactory {
@@ -47,13 +50,14 @@ export function createPiSessionFactory(options: { agentDir?: string } = {}): PiS
       })
       try {
         await loader.reload()
+        const customTools = input.tools ?? []
         const { session } = await sdk.createAgentSession({
           cwd: input.cwd,
           agentDir,
           sessionManager: sdk.SessionManager.inMemory(),
           resourceLoader: loader,
-          noTools: 'all',
-          tools: [],
+          customTools,
+          tools: customTools.map((tool) => tool.name),
         })
         return {
           prompt: (text) => session.prompt(text),
