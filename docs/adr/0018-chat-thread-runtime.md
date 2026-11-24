@@ -18,7 +18,7 @@ Web Chat 需要“发一条消息 → 创建 Goal/Task → 跑几分钟 → 显�
 3. `RunCoordinator`（首版由 `ChatService` 在 daemon 进程内实现）在后台调用 `runGoalWithBrain`，通过 `onGoalCreated/onTaskCreated` 尽早回填 thread 的 goal/task。
 4. 结果写回 `chat_messages`（task/approval/result/error）；Web 通过轮询 thread + 全局 SSE 更新。
 5. Ask 模式只读快照，不创建 run。
-6. Approval 的“批准后继续”当前实现为**新 attempt**：approve 后调用 `/chat/threads/:id/resume`，用最后一条用户消息重新启动 run；不重置原 waiting execution。原 task 保留为 waiting。
+6. Approval/Clarification 的“继续”当前实现为**新 attempt**：approve/answer 后调用 resume 接口，用最后一条用户消息重新启动 run；不重置原 waiting execution。原 task 保留为 waiting。
 7. 不做直接 Agent 一对一 Chat；Chat 是 Orchestrator 入口。
 
 ## 3. 被否方案

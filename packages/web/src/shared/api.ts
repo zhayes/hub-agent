@@ -123,6 +123,7 @@ export interface ChatMessage {
   goalId?: string
   taskId?: string
   approvalId?: string
+  clarificationId?: string
   createdAt: string
 }
 
@@ -138,7 +139,20 @@ export const chatApi = {
       method: 'POST',
       body: JSON.stringify(title === undefined ? {} : { title }),
     }),
-  thread: (id: string) => request<ChatThreadDetail & { ok: boolean }>(`/api/v1/chat/threads/${id}`),
+  thread: (id: string, options: { limit?: number; before?: string } = {}) => {
+    const params = new URLSearchParams()
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    if (options.before !== undefined) params.set('before', options.before)
+    const query = params.toString()
+    return request<ChatThreadDetail & { ok: boolean }>(
+      `/api/v1/chat/threads/${id}${query === '' ? '' : `?${query}`}`,
+    )
+  },
+  answer: (id: string, clarificationId: string, answer: string) =>
+    request<{ thread: ChatThread; messages: ChatMessage[] }>(
+      `/api/v1/chat/threads/${id}/clarifications/${clarificationId}/answer`,
+      { method: 'POST', body: JSON.stringify({ answer }) },
+    ),
   resume: (id: string) =>
     request<{ thread: ChatThread; messages: ChatMessage[] }>(`/api/v1/chat/threads/${id}/resume`, {
       method: 'POST',

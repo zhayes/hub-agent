@@ -30,5 +30,6 @@ export interface ChatMessage {
   goalId?: GoalId
   taskId?: TaskId
   approvalId?: string
+  clarificationId?: string
   createdAt: Timestamp
 }

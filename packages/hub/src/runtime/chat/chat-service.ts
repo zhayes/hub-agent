@@ -15,6 +15,7 @@ import {
 import { getTaskEvidence } from '../../storage/queries/evidence'
 import { listAgents, resolveAgent } from '../agent-registry'
 import { runGoalWithBrain } from '../brain-run'
+import { answerClarification } from '../clarify'
 
 export interface ChatServiceOptions {
   db: Db
@@ -48,10 +49,19 @@ export class ChatService {
     return listChatThreads(this.options.db, limit)
   }
 
-  getThread(id: string): { thread: ChatThread; messages: ChatMessage[] } | undefined {
+  getThread(
+    id: string,
+    page: { limit?: number; before?: string } = {},
+  ): { thread: ChatThread; messages: ChatMessage[] } | undefined {
     const thread = getChatThread(this.options.db, asChatThreadId(id))
     if (thread === undefined) return undefined
-    return { thread, messages: listChatMessages(this.options.db, thread.id) }
+    return {
+      thread,
+      messages: listChatMessages(this.options.db, thread.id, {
+        limit: page.limit ?? 100,
+        ...(page.before === undefined ? {} : { before: page.before }),
+      }),
+    }
   }
 
   async postMessage(id: string, input: PostMessageInput): Promise<ChatThread> {
@@ -102,6 +112,25 @@ export class ChatService {
     updateChatThread(this.options.db, threadId, { status: 'active' })
     void this.run(threadId, text, agent.name, userMessage)
     return getChatThread(this.options.db, threadId) ?? thread
+  }
+
+  async answer(id: string, clarificationId: string, answer: string): Promise<ChatThread> {
+    const threadId = asChatThreadId(id)
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
+    }
+    const row = this.options.db
+      .prepare('SELECT execution_id FROM clarifications WHERE id = ?')
+      .get(clarificationId) as { execution_id: string | null } | undefined
+    answerClarification(this.options.db, {
+      questionId: clarificationId,
+      answer,
+      ...(row?.execution_id === null || row?.execution_id === undefined
+        ? {}
+        : { executionId: row.execution_id }),
+    })
+    return this.resume(id)
   }
 
   async resume(id: string): Promise<ChatThread> {
@@ -204,6 +233,17 @@ export class ChatService {
           ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
           taskId: result.taskId,
           approvalId: result.approval.id,
+        })
+      }
+      if (result.clarification !== undefined) {
+        appendChatMessage(db, {
+          threadId,
+          role: 'assistant',
+          kind: 'clarification',
+          content: result.clarification.question,
+          ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
+          taskId: result.taskId,
+          clarificationId: result.clarification.id,
         })
       }
       appendChatMessage(db, {

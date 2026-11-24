@@ -56,6 +56,33 @@ describe('chat storage', () => {
     expect(threads[0]?.lastMessage).toBe('hello')
   })
 
+  it('pages latest messages and loads older by timestamp', () => {
+    const db = database()
+    const thread = createChatThread(db, { title: 'Paged' })
+    for (let index = 0; index < 25; index += 1) {
+      appendChatMessage(db, {
+        threadId: thread.id,
+        role: 'user',
+        kind: 'text',
+        content: `message ${index}`,
+      })
+      db.prepare('UPDATE chat_messages SET created_at = ? WHERE content = ?').run(
+        `2026-01-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+        `message ${index}`,
+      )
+    }
+    const latest = listChatMessages(db, thread.id, { limit: 10 })
+    expect(latest).toHaveLength(10)
+    expect(latest[0]?.content).toBe('message 15')
+    expect(latest[9]?.content).toBe('message 24')
+    const older = listChatMessages(db, thread.id, {
+      limit: 10,
+      before: latest[0]?.createdAt,
+    })
+    expect(older).toHaveLength(10)
+    expect(older[0]?.content).toBe('message 5')
+  })
+
   it('ask mode answers from the snapshot without starting a run', async () => {
     const db = database()
     const chat = new ChatService({ db, provider, clientVersion: 'test' })

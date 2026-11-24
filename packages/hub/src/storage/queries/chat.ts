@@ -29,6 +29,7 @@ interface MessageRow {
   goal_id: string | null
   task_id: string | null
   approval_id: string | null
+  clarification_id: string | null
   created_at: string
 }
 
@@ -59,6 +60,7 @@ function toMessage(row: MessageRow): ChatMessage {
     ...(row.goal_id === null ? {} : { goalId: asGoalId(row.goal_id) }),
     ...(row.task_id === null ? {} : { taskId: asTaskId(row.task_id) }),
     ...(row.approval_id === null ? {} : { approvalId: row.approval_id }),
+    ...(row.clarification_id === null ? {} : { clarificationId: row.clarification_id }),
     createdAt: asTimestamp(row.created_at),
   }
 }
@@ -134,13 +136,33 @@ export function listChatThreads(db: Db, limit = 50): ChatThreadSummary[] {
   }))
 }
 
-export function listChatMessages(db: Db, threadId: ChatThreadId, limit = 100): ChatMessage[] {
-  const rows = db
-    .prepare(
-      `SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC, id ASC LIMIT ?`,
-    )
-    .all(threadId, limit) as MessageRow[]
-  return rows.map(toMessage)
+export interface ChatMessagePage {
+  limit?: number
+  /** 只取该时间之前的消息；配合“加载更早”使用 */
+  before?: string
+}
+
+export function listChatMessages(
+  db: Db,
+  threadId: ChatThreadId,
+  page: number | ChatMessagePage = {},
+): ChatMessage[] {
+  const limit = typeof page === 'number' ? page : (page.limit ?? 100)
+  const before = typeof page === 'number' ? undefined : page.before
+  const rows = (
+    before === undefined
+      ? db
+          .prepare(
+            `SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+          )
+          .all(threadId, limit)
+      : db
+          .prepare(
+            `SELECT * FROM chat_messages WHERE thread_id = ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+          )
+          .all(threadId, before, limit)
+  ) as MessageRow[]
+  return rows.reverse().map(toMessage)
 }
 
 export function appendChatMessage(
@@ -153,14 +175,15 @@ export function appendChatMessage(
     goalId?: string
     taskId?: string
     approvalId?: string
+    clarificationId?: string
   },
 ): ChatMessage {
   const now = asTimestamp(new Date().toISOString())
   const id = asChatMessageId(newId())
   const write = db.transaction(() => {
     db.prepare(
-      `INSERT INTO chat_messages (id, thread_id, role, kind, content, goal_id, task_id, approval_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chat_messages (id, thread_id, role, kind, content, goal_id, task_id, approval_id, clarification_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.threadId,
@@ -170,6 +193,7 @@ export function appendChatMessage(
       input.goalId ?? null,
       input.taskId ?? null,
       input.approvalId ?? null,
+      input.clarificationId ?? null,
       now,
     )
     db.prepare('UPDATE chat_threads SET updated_at = ? WHERE id = ?').run(now, input.threadId)
@@ -184,6 +208,7 @@ export function appendChatMessage(
     ...(input.goalId === undefined ? {} : { goalId: asGoalId(input.goalId) }),
     ...(input.taskId === undefined ? {} : { taskId: asTaskId(input.taskId) }),
     ...(input.approvalId === undefined ? {} : { approvalId: input.approvalId }),
+    ...(input.clarificationId === undefined ? {} : { clarificationId: input.clarificationId }),
     createdAt: now,
   }
 }

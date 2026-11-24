@@ -75,6 +75,7 @@ describe('数据库与迁移', () => {
         '005-workspace',
         '006-chat',
         '007-chat-approval',
+        '008-chat-clarification',
       ])
 
       const second = migrate(db)
@@ -87,6 +88,7 @@ describe('数据库与迁移', () => {
         '005-workspace',
         '006-chat',
         '007-chat-approval',
+        '008-chat-clarification',
       ])
     } finally {
       db.close()

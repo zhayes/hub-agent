@@ -32,6 +32,7 @@ export function ChatView(props: ChatViewProps) {
   const [mode, setMode] = createSignal<'run' | 'ask'>('run')
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal('')
+  const [hasMore, setHasMore] = createSignal(false)
   const [leftCollapsed, setLeftCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.left') === 'collapsed',
   )
@@ -48,9 +49,10 @@ export function ChatView(props: ChatViewProps) {
   const loadThread = async (id: string): Promise<void> => {
     try {
       setError('')
-      const detail = await chatApi.thread(id)
+      const detail = await chatApi.thread(id, { limit: 100 })
       setThread(detail.thread)
       setMessages(detail.messages)
+      setHasMore(detail.messages.length === 100)
       if (detail.thread.status === 'active') startPolling(id)
       else stopPolling()
     } catch (cause) {
@@ -62,6 +64,19 @@ export function ChatView(props: ChatViewProps) {
     try {
       const result = await chatApi.threads()
       setThreads(result.threads)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const loadOlder = async (): Promise<void> => {
+    const current = thread()
+    const first = messages()[0]
+    if (current === undefined || first === undefined || !hasMore()) return
+    try {
+      const older = await chatApi.thread(current.id, { limit: 100, before: first.createdAt })
+      setMessages([...older.messages, ...messages()])
+      setHasMore(older.messages.length === 100)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -136,6 +151,19 @@ export function ChatView(props: ChatViewProps) {
           await loadThread(current.id)
         }
       }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const answerClarification = async (clarificationId: string, answer: string): Promise<void> => {
+    const current = thread()
+    if (current === undefined) return
+    try {
+      const result = await chatApi.answer(current.id, clarificationId, answer)
+      setThread(result.thread)
+      setMessages(result.messages)
+      startPolling(current.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -300,6 +328,13 @@ export function ChatView(props: ChatViewProps) {
               </div>
             }
           >
+            <Show when={hasMore()}>
+              <div class="load-older-wrap">
+                <button type="button" class="text-button" onClick={() => void loadOlder()}>
+                  {props.t('loadOlder')}
+                </button>
+              </div>
+            </Show>
             <For each={messages()}>
               {(message) => (
                 <MessageRow
@@ -309,6 +344,7 @@ export function ChatView(props: ChatViewProps) {
                   onOpenTask={props.onOpenTask}
                   onApprove={(id) => void decideApproval(id, 'approve')}
                   onReject={(id) => void decideApproval(id, 'reject')}
+                  onAnswer={(id, answer) => void answerClarification(id, answer)}
                 />
               )}
             </For>
@@ -452,6 +488,7 @@ function MessageRow(props: {
   onOpenTask: (id: string) => void
   onApprove: (id: string) => void
   onReject: (id: string) => void
+  onAnswer: (id: string, answer: string) => void
 }) {
   if (props.message.role === 'user') {
     return (
@@ -470,6 +507,11 @@ function MessageRow(props: {
         <span>HUBAGENT</span>
         <time>{relativeTime(props.locale, props.message.createdAt)}</time>
       </div>
+      <Show
+        when={props.message.kind === 'clarification' && props.message.clarificationId !== undefined}
+      >
+        <ClarificationCard message={props.message} t={props.t} onAnswer={props.onAnswer} />
+      </Show>
       <Show when={props.message.kind === 'approval' && props.message.approvalId !== undefined}>
         <div class="chat-card approval">
           <div class="chat-card-head">
@@ -509,9 +551,51 @@ function MessageRow(props: {
           </button>
         </div>
       </Show>
-      <Show when={props.message.kind !== 'task' && props.message.kind !== 'approval'}>
+      <Show
+        when={
+          props.message.kind !== 'task' &&
+          props.message.kind !== 'approval' &&
+          props.message.kind !== 'clarification'
+        }
+      >
         <p>{props.message.content}</p>
       </Show>
     </article>
+  )
+}
+
+function ClarificationCard(props: {
+  message: ChatMessage
+  t: Translator
+  onAnswer: (id: string, answer: string) => void
+}) {
+  const [value, setValue] = createSignal('')
+  return (
+    <form
+      class="chat-card clarification"
+      onSubmit={(event) => {
+        event.preventDefault()
+        const answer = value().trim()
+        if (answer !== '') props.onAnswer(props.message.clarificationId ?? '', answer)
+      }}
+    >
+      <div class="chat-card-head">
+        <Icon name="message" size={14} />
+        <span>{props.t('clarification')}</span>
+      </div>
+      <p class="muted">{props.message.content}</p>
+      <div class="field-row" style="margin-top:8px">
+        <input
+          class="text-input"
+          aria-label={props.t('answer')}
+          placeholder={props.t('answer')}
+          value={value()}
+          onInput={(event) => setValue(event.currentTarget.value)}
+        />
+        <button type="submit" class="solid-button">
+          {props.t('submit')}
+        </button>
+      </div>
+    </form>
   )
 }

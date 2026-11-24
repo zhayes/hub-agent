@@ -375,9 +375,9 @@ POST /api/v1/clarifications/:id/answer
 - SSE 重连、错误态、空态；
 - 审批/澄清 inline 操作；
 - 刷新恢复。
-- 长列表分页 + 窗口化；流式更新 rAF 合并；日志/证据懒加载。
+- 长列表 100 条分页 + `content-visibility`；1,000 条 E2E；更激进的窗口化留到消息量再上一个数量级。
 
-**已落地**：`/chat` 路由、异步 thread、Ask 快照、approval 卡、resume 新 attempt、Playwright 路由/折叠 E2E。
+**已落地**：`/chat` 路由、异步 thread、Ask 快照、approval/clarification 卡、resume 新 attempt、消息 100 条分页 + 1000 条 E2E。
 
 **验收**：
 

@@ -762,7 +762,7 @@ Solid 的失败模式是**静默**的：代码能编译、页面不报错，但�
 
 `hubagent doctor` 是重要的落地功能：检查 Node 版本、SQLite 可写、git 可用、各 harness 能否启动、端口占用、配置文件合法性。
 
-**M11 Chat（P2/P3）。** `chat_threads/chat_messages`（006/007）持久化 thread；`ChatService` 在 daemon 内后台跑 `runGoalWithBrain`，`POST /api/v1/chat/threads/:id/messages` 返回 202；Ask 只读快照。Chat UI 路由 `/chat/:id` 已接真实 API。Approval 的“继续”首版是 `/chat/threads/:id/resume` 新 attempt，不是原 execution 精确恢复。
+**M11 Chat（P2/P3）。** `chat_threads/chat_messages`（006/007）持久化 thread；`ChatService` 在 daemon 内后台跑 `runGoalWithBrain`，`POST /api/v1/chat/threads/:id/messages` 返回 202；Ask 只读快照。Chat UI 路由 `/chat/:id` 已接真实 API；消息 100 条分页，1,000 条 E2E 覆盖。Approval/Clarification 的“继续”首版是 `/chat/threads/:id/resume` 新 attempt，不是原 execution 精确恢复（已记入 ADR 0018）。
 
 **M11 落地（P1 生产基础）。** `interfaces/http/app.ts` 提供 tasks/evidence/decisions/agents/approvals/SSE；`hubagentd` 默认监听 `127.0.0.1:7788`，token 写入 `$HUBAGENT_HOME/token`（0600）。`packages/web` 是 Solid 2 + Vite + `@solidjs/router@2.0.1` 控制台，使用真实路由、三态主题、typed i18n、图标按钮与无边框选中；Chat 后端/UI 仍按 WEB-CONSOLE-PLAN P2/P3 推进。
 

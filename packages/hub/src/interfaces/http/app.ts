@@ -95,7 +95,12 @@ export function createHttpApp(options: HttpAppOptions): Hono {
 
   app.get('/api/v1/chat/threads/:id', (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
-    const value = options.chat.getThread(context.req.param('id'))
+    const limit = Number.parseInt(context.req.query('limit') ?? '100', 10)
+    const before = context.req.query('before')
+    const value = options.chat.getThread(context.req.param('id'), {
+      ...(Number.isFinite(limit) ? { limit } : {}),
+      ...(before === undefined ? {} : { before }),
+    })
     return value === undefined
       ? context.json({ code: 'NOT_FOUND', message: 'thread not found' }, 404)
       : context.json({ ok: true, ...value })
@@ -134,6 +139,35 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     try {
       const thread = await options.chat.resume(context.req.param('id'))
+      return context.json(
+        { ok: true, thread, messages: options.chat.getThread(thread.id)?.messages ?? [] },
+        202,
+      )
+    } catch (error) {
+      return context.json(
+        {
+          code: 'CHAT_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
+  })
+
+  app.post('/api/v1/chat/threads/:id/clarifications/:clarificationId/answer', async (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const body = await context.req
+      .json<{ answer?: string }>()
+      .catch((): { answer?: string } => ({}))
+    if (typeof body.answer !== 'string' || body.answer.trim().length === 0) {
+      return context.json({ code: 'INVALID_INPUT', message: 'answer is required' }, 400)
+    }
+    try {
+      const thread = await options.chat.answer(
+        context.req.param('id'),
+        context.req.param('clarificationId'),
+        body.answer,
+      )
       return context.json(
         { ok: true, thread, messages: options.chat.getThread(thread.id)?.messages ?? [] },
         202,

@@ -39,7 +39,10 @@ const task = {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript((value) => localStorage.setItem('hubagent_token', value), token)
+  await page.addInitScript((value) => {
+    localStorage.setItem('hubagent_token', value)
+    localStorage.setItem('hubagent.locale', 'en-US')
+  }, token)
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
@@ -83,4 +86,37 @@ test('context pane collapses and composer remains usable', async ({ page }) => {
   await page.locator('.chat-head-actions').getByRole('button', { name: 'Collapse context' }).click()
   await expect(context).toHaveClass(/collapsed/)
   await expect(page.getByRole('textbox', { name: 'Describe a task, or ask what is happening…' })).toBeVisible()
+})
+
+
+test('renders only the latest page and loads older messages', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const all = Array.from({ length: 1000 }, (_, index) => ({
+    id: `m${index}`,
+    threadId: 't1',
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    kind: 'text',
+    content: `message ${index}`,
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+  }))
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 1000 }] } })
+    if (path === '/api/v1/chat/threads/t1') {
+      const before = url.searchParams.get('before')
+      const source = before === null ? all : all.filter((message) => message.createdAt < before)
+      return route.fulfill({ json: { ok: true, thread, messages: source.slice(-100) } })
+    }
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.goto('/chat/t1')
+  await expect(page.locator('.chat-message')).toHaveCount(100)
+  await page.getByRole('button', { name: 'Load older messages' }).click()
+  await expect(page.locator('.chat-message')).toHaveCount(200)
 })
