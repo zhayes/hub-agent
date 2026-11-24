@@ -15,7 +15,7 @@
     "test:kill9": "tsx packages/hub/test/manual/kill9-test.ts",
     "test:srt-acp": "tsx packages/hub/test/manual/srt-acp-smoke.ts",
     "arch": "depcruise packages/hub/src --config .dependency-cruiser.cjs",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm arch && pnpm build:web",
+    "verify": "pnpm typecheck && pnpm lint && pnpm build:web && pnpm test:unit && pnpm arch",
     "hubagent": "tsx packages/hub/src/bin/hubagent.ts",
     "hubagentd": "tsx packages/hub/src/bin/hubagentd.ts",
     "doctor": "tsx packages/hub/src/bin/hubagent.ts doctor",
