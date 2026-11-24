@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { AgentHost } from '../agent-host/agent-host'
+import { ScriptedBrain } from '../brain/scripted-brain'
 import type { VerificationCheck } from '../domain/entities'
 import { addAgent, resolveAgent } from '../runtime/agent-registry'
 import { runGoalWithBrain } from '../runtime/brain-run'
@@ -132,6 +133,7 @@ async function main(): Promise<void> {
         const result = await runGoalWithBrain({
           db,
           provider,
+          brain: new ScriptedBrain(),
           agent: resolveAgent(db, 'bench'),
           objective: task.objective,
           worktree: dir,

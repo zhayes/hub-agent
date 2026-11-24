@@ -1,4 +1,4 @@
-import { ScriptedBrain } from '../brain/scripted-brain'
+import { createBrainFromEnv } from '../brain/create-brain'
 import type { BrainBudget, DecisionRecord, OrchestratorBrain } from '../brain/types'
 import type { Goal } from '../domain/entities'
 import { asGoalId, asTimestamp } from '../domain/ids'
@@ -6,15 +6,16 @@ import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
-import { type RunAcpTaskOptions, type RunAcpTaskResult, runAcpTask } from './acp-run'
+import { runAcpWithRetry } from './acp-retry'
+import type { RunAcpTaskOptions, RunAcpTaskResult } from './acp-run'
 import { runBrainRound } from './brain-loop'
 
 /**
  * M6 的 Brain 驱动入口：
  *   建 Goal → Brain 拆计划 → Brain 选 Agent → 执行 → Brain 接收结果。
  *
- * M6 用 ScriptedBrain 证明“快照 → 动作 → DecisionRecord”可重放；
- * Pi/LLM 实现替换 OrchestratorBrain 即可，不需要改 Runtime。
+ * 默认走真实 LLM（HUBAGENT_BRAIN_MODE=llm）；显式 scripted 才用测试替身。
+ * LLM 输出仍由 brain-loop/validate 做 schema/权限/预算/幂等校验。
  */
 
 export interface RunGoalWithBrainOptions extends Omit<RunAcpTaskOptions, 'goalId' | 'plan'> {
@@ -29,7 +30,7 @@ export interface RunGoalWithBrainResult extends RunAcpTaskResult {
 export async function runGoalWithBrain(
   options: RunGoalWithBrainOptions,
 ): Promise<RunGoalWithBrainResult> {
-  const { brain = new ScriptedBrain(), budget, ...taskOptions } = options
+  const { brain = createBrainFromEnv(), budget, ...taskOptions } = options
   const goalId = asGoalId(newId())
   const now = asTimestamp(new Date().toISOString())
   const title =
@@ -81,7 +82,7 @@ export async function runGoalWithBrain(
     throw new HubError('ACTION_REJECTED', 'Brain 的 revise_plan 为空', { goalId })
   }
 
-  const result = await runAcpTask({
+  const result = await runAcpWithRetry({
     ...taskOptions,
     goalId,
     plan: {

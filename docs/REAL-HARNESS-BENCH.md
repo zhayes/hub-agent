@@ -3,7 +3,7 @@
 ## 先说清楚两件事
 
 1. **`fixtures/regression-tasks` 是 mock 基线**：它的 checks 绑定 `mock-output.txt`，换成真实 harness 会全部 fail。真实 harness 用 `fixtures/regression-tasks-real`（checks 针对真实文件/测试）。
-2. **bench 目前只替换执行 Agent，不替换 Brain**：`runGoalWithBrain` 仍用 `ScriptedBrain`（单子任务）。所以 `brainDecisionsPerTask` / 过度拆解率不是 LLM Brain 指标；要测 Brain 本身，需要先接 Pi/LLM 适配器。
+2. **bench 刻意注入 `ScriptedBrain`**：它测的是“真实执行 Agent + 验收”链路，而不是 Brain；所以 `brainDecisionsPerTask` / 过度拆解率不是 LLM Brain 指标。生产 `hubagent run` 默认已走真实 LLM（ADR 0012）。
 
 ## Claude Code
 

@@ -19,7 +19,8 @@
     "hubagent": "tsx packages/hub/src/bin/hubagent.ts",
     "hubagentd": "tsx packages/hub/src/bin/hubagentd.ts",
     "doctor": "tsx packages/hub/src/bin/hubagent.ts doctor",
-    "bench": "tsx packages/hub/src/bench/run.ts"
+    "bench": "tsx packages/hub/src/bench/run.ts",
+    "test:brain-real": "tsx packages/hub/test/manual/real-brain-smoke.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

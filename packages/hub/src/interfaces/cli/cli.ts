@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { Command } from 'commander'
+import { createBrainFromEnv } from '../../brain/create-brain'
 import type { VerificationCheck } from '../../domain/entities'
 import { runAcpTask } from '../../runtime/acp-run'
 import { addAgent, listAgents, resolveAgent } from '../../runtime/agent-registry'
@@ -94,6 +95,9 @@ export function createCli(version: string): Command {
         hubDir: dir,
         dbPath: dbPath(dir),
         lockPath: lockPath(dir),
+        brainMode: process.env.HUBAGENT_BRAIN_MODE ?? 'llm',
+        brainKeyConfigured: Boolean(process.env.HUBAGENT_BRAIN_API_KEY?.trim()),
+        brainModel: process.env.HUBAGENT_BRAIN_MODEL ?? 'deepseek-chat',
       }
       if (options.json === true) {
         process.stdout.write(`${JSON.stringify({ ok: true, ...payload }, null, 2)}\n`)
@@ -354,6 +358,7 @@ export function createCli(version: string): Command {
     .option('--manual-review', '追加人工复核检查（verdict=manual_required）')
     .option('--artifact-dir <path>', '验收日志目录')
     .option('--approval-mode <mode>', 'sandbox_denied 的授权形态：once | policy')
+    .option('--brain-mode <mode>', 'Brain 模式：llm | pi | scripted（默认 llm）')
     .option('--no-brain', '跳过 Brain，使用 M4 固定脚本（仅排障）')
     .option('--json', '输出机器可读 JSON')
     .action(
@@ -377,6 +382,7 @@ export function createCli(version: string): Command {
           artifactDir?: string
           approvalMode?: string
           brain?: boolean
+          brainMode?: string
           json?: boolean
         },
       ) => {
@@ -532,8 +538,23 @@ export function createCli(version: string): Command {
                 ? {}
                 : { promptTimeoutMs: options.promptTimeoutMs }),
             }
+            if (options.brain === false && options.brainMode !== undefined) {
+              throw new HubError('CONFIG_INVALID', '--no-brain 与 --brain-mode 不能同时使用')
+            }
+            const brain =
+              options.brain === false || options.brainMode === undefined
+                ? undefined
+                : createBrainFromEnv({
+                    ...process.env,
+                    HUBAGENT_BRAIN_MODE: options.brainMode,
+                  })
             const result =
-              options.brain === false ? await runAcpTask(common) : await runGoalWithBrain(common)
+              options.brain === false
+                ? await runAcpTask(common)
+                : await runGoalWithBrain({
+                    ...common,
+                    ...(brain === undefined ? {} : { brain }),
+                  })
             let outputResult: typeof result & {
               workspace?: {
                 projectId: string

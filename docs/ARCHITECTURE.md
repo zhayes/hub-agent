@@ -418,7 +418,7 @@ Runtime 校验（schema → 权限 → 预算 → 幂等）后才落库执行。
 
 > 这样"消息注入能否叫醒 Agent"就不再是正确性前提，只是延迟优化。
 
-**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、确定性实现与动作校验；`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → 委派 → accept/finish 的 Brain 驱动入口。M6 用 `ScriptedBrain` 证明可重放决策；Pi/LLM 适配器替换 `OrchestratorBrain` 即可，不改 Runtime、队列或校验。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
+**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、测试替身与动作校验；`brain/pi/{llm-client,llm-brain}.ts` 提供 OpenAI-compatible 的真实 LLM 实现，`brain/create-brain.ts` 按 env 选择。`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → 委派 → accept/finish 的 Brain 驱动入口。默认 `HUBAGENT_BRAIN_MODE=llm`，无 key fail-closed；`ScriptedBrain` 只在显式 `scripted` 时用于测试/离线。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
 
 ---
 
@@ -567,7 +567,7 @@ COMMIT
   5. 写入恢复决策点，交由 Brain 决定继续/回滚/放弃
 ```
 
-**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复。`hubagentd` 启动时执行 `scanRecovery`，把非终态 Execution 收敛为 `unknown` 并写决策点；`runAcpTask` 在创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。自动重试循环与 `task pause/resume/retry` CLI 尚未接线，留给 M9。
+**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause,fail}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复与最终失败收敛。`runtime/acp-retry.ts` 已接自动重试：协议/启动最多 2 次、无 diff 同 Agent 重试 1 次、有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。`hubagentd` 启动时执行 `scanRecovery`；`runAcpTask` 创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。换 Agent/重规划仍需 Selection Engine，`task retry` 只支持 paused 任务 resume。
 
 ---
 

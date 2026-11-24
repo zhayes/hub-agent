@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { ScriptedBrain } from '../../src/brain/scripted-brain'
 import { addAgent, resolveAgent } from '../../src/runtime/agent-registry'
 import { runGoalWithBrain } from '../../src/runtime/brain-run'
 import type {
@@ -50,6 +51,12 @@ function database(): Db {
 }
 
 class MockProvider implements SandboxProvider {
+  env: NodeJS.ProcessEnv
+
+  constructor(env: NodeJS.ProcessEnv = { ...process.env, MOCK_ACP_DELAY_MS: '0' }) {
+    this.env = env
+  }
+
   describe(): SandboxDescription {
     return { kind: 'srt', platform: process.platform, ready: true, detail: 'test' }
   }
@@ -58,10 +65,10 @@ class MockProvider implements SandboxProvider {
     if (command === 'mock-acp') {
       return {
         argv: [process.execPath, mockAgent],
-        env: { ...process.env, MOCK_ACP_DELAY_MS: '0' },
+        env: this.env,
       }
     }
-    return { argv: ['/bin/bash', '-c', command], env: { ...process.env } }
+    return { argv: ['/bin/bash', '-c', command], env: this.env }
   }
 
   async dispose(): Promise<void> {}
@@ -73,6 +80,7 @@ describe('runGoalWithBrain', () => {
     const dir = repo()
     const result = await runGoalWithBrain({
       db,
+      brain: new ScriptedBrain(),
       provider: new MockProvider(),
       agent: resolveAgent(db, 'mock'),
       objective: '写 mock-output.txt 并验收',
@@ -98,5 +106,65 @@ describe('runGoalWithBrain', () => {
     }
     expect(task.status).toBe('running')
     expect(task.goal_id).toBe(result.goalId)
+  })
+})
+
+describe('runGoalWithBrain：M8 自动重试', () => {
+  it('首次 refusal 且无 diff -> 同 Agent 重试后成功', async () => {
+    const db = database()
+    const dir = repo()
+    const marker = mkdtempSync(join(tmpdir(), 'hubagent-retry-')) + '/failed-once'
+    const provider = new MockProvider()
+    provider.env = {
+      ...process.env,
+      MOCK_ACP_DELAY_MS: '0',
+      MOCK_ACP_FAIL_FIRST_FILE: marker,
+    }
+    const result = await runGoalWithBrain({
+      db,
+      provider,
+      brain: new ScriptedBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: '第一次失败，第二次成功',
+      worktree: dir,
+      checks: [
+        { kind: 'command', cmd: 'true', timeoutMs: 5_000, expect: { exitCode: 0 } },
+        { kind: 'diffScope', allowedPaths: ['.'] },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    expect(result.verdict).toBe('pass')
+    const executions = db
+      .prepare('SELECT status, attempt FROM executions ORDER BY attempt ASC')
+      .all() as Array<{ status: string; attempt: number }>
+    expect(executions.map((item) => item.status)).toEqual(['failed', 'succeeded'])
+    expect(executions.map((item) => item.attempt)).toEqual([1, 2])
+  })
+
+  it('持续失败 -> 只重试一次，最终 Task/Goal failed', async () => {
+    const db = database()
+    const dir = repo()
+    const provider = new MockProvider()
+    provider.env = { ...process.env, MOCK_ACP_DELAY_MS: '0', MOCK_ACP_ALWAYS_FAIL: '1' }
+    const result = await runGoalWithBrain({
+      db,
+      provider,
+      brain: new ScriptedBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: '持续失败',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(false)
+    const executions = db.prepare('SELECT COUNT(*) AS n FROM executions').get() as { n: number }
+    expect(executions.n).toBe(2)
+    expect(
+      (db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as { status: string })
+        .status,
+    ).toBe('failed')
+    expect(
+      (db.prepare('SELECT status FROM goals WHERE id = ?').get(result.goalId) as { status: string })
+        .status,
+    ).toBe('failed')
   })
 })

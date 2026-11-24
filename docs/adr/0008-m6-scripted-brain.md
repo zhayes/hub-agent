@@ -1,6 +1,6 @@
 # ADR 0008：M6 用 ScriptedBrain 验证接口，Pi/LLM 适配器后接
 
-- **状态：** 已接受（Accepted）
+- **状态：** 部分被 ADR 0012 取代（ScriptedBrain 不再是默认；仅测试/离线）
 - **日期：** 2026-11-24
 - **相关：** PRD §6.10 / §11.16 / §13.5.6；ARCHITECTURE §5；PLAN M6
 - **证据：** `brain.test.ts`、`runtime/brain-run.ts`、`hubagent task decisions`

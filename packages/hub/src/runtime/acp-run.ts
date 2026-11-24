@@ -66,6 +66,10 @@ export interface RunAcpTaskOptions {
   taskId?: string
   subtaskId?: string
   idempotencyKey?: string
+  /** 自动重试时保留 subtask/task 为 running，由调用方最终收敛 */
+  retryOnFailure?: boolean
+  /** Execution attempt（默认 1） */
+  attempt?: number
   /** Brain 决定的计划标题；不传用 objective 生成 */
   plan?: {
     taskTitle: string
@@ -102,6 +106,7 @@ export interface RunAcpTaskResult {
   sessionId: string
   agent: { id: string; name: string }
   stopReason: string
+  attempt: number
   verdict: VerificationVerdict | 'not_run'
   verification?: VerificationRun
   approval?: Approval
@@ -245,6 +250,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         })
       }
     }
+    const attempt = options.attempt ?? 1
     const executionId =
       options.executionId === undefined
         ? asExecutionId(newId())
@@ -338,7 +344,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       })
     }
     const idempotencyKey =
-      options.idempotencyKey ?? deriveIdempotencyKey({ goalId, subtaskId, attempt: 1 })
+      options.idempotencyKey ?? deriveIdempotencyKey({ goalId, subtaskId, attempt })
     const reservation = reserveDelegation(db, {
       subtaskId,
       idempotencyKey,
@@ -365,7 +371,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         agentId: asAgentId(agent.id),
         sessionId: asSessionId(session.sessionId),
         status: 'created',
-        attempt: 1,
+        attempt,
         createdAt: now,
       },
     })
@@ -409,9 +415,11 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
 
     if (promptResponse.stopReason !== 'end_turn') {
       append({ type: 'execution.status', executionId, to: 'failed', at: at() })
-      append({ type: 'subtask.status', subtaskId, to: 'failed', at: at() })
-      append({ type: 'task.status', taskId, to: 'failed', at: at() })
-      append({ type: 'goal.status', goalId, to: 'failed', at: at() })
+      if (options.retryOnFailure !== true) {
+        append({ type: 'subtask.status', subtaskId, to: 'failed', at: at() })
+        append({ type: 'task.status', taskId, to: 'failed', at: at() })
+        append({ type: 'goal.status', goalId, to: 'failed', at: at() })
+      }
       return {
         ok: false,
         goalId,
@@ -421,6 +429,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         sessionId: session.sessionId,
         agent: { id: agent.id, name: agent.name },
         stopReason: promptResponse.stopReason,
+        attempt,
         verdict: 'not_run',
         evidence,
         transcriptRef,
@@ -472,9 +481,11 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       append({ type: 'task.status', taskId, to: 'waiting_input', at: at() })
     } else {
       append({ type: 'execution.status', executionId, to: 'failed', at: at() })
-      append({ type: 'subtask.status', subtaskId, to: 'failed', at: at() })
-      append({ type: 'task.status', taskId, to: 'failed', at: at() })
-      append({ type: 'goal.status', goalId, to: 'failed', at: at() })
+      if (options.retryOnFailure !== true) {
+        append({ type: 'subtask.status', subtaskId, to: 'failed', at: at() })
+        append({ type: 'task.status', taskId, to: 'failed', at: at() })
+        append({ type: 'goal.status', goalId, to: 'failed', at: at() })
+      }
     }
 
     return {
@@ -486,6 +497,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       sessionId: session.sessionId,
       agent: { id: agent.id, name: agent.name },
       stopReason: promptResponse.stopReason,
+      attempt,
       verdict: verification.run.verdict,
       verification: verification.run,
       ...(approval === undefined ? {} : { approval }),
@@ -512,25 +524,27 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
           to: 'failed',
           at: asTimestamp(new Date().toISOString()),
         })
-        append({
-          type: 'subtask.status',
-          subtaskId: ids.subtaskId,
-          to: 'failed',
-          at: asTimestamp(new Date().toISOString()),
-        })
-        append({
-          type: 'task.status',
-          taskId: ids.taskId,
-          to: 'failed',
-          at: asTimestamp(new Date().toISOString()),
-        })
-        if (ids.goalId !== undefined) {
+        if (options.retryOnFailure !== true) {
           append({
-            type: 'goal.status',
-            goalId: ids.goalId,
+            type: 'subtask.status',
+            subtaskId: ids.subtaskId,
             to: 'failed',
             at: asTimestamp(new Date().toISOString()),
           })
+          append({
+            type: 'task.status',
+            taskId: ids.taskId,
+            to: 'failed',
+            at: asTimestamp(new Date().toISOString()),
+          })
+          if (ids.goalId !== undefined) {
+            append({
+              type: 'goal.status',
+              goalId: ids.goalId,
+              to: 'failed',
+              at: asTimestamp(new Date().toISOString()),
+            })
+          }
         }
       } catch {
         // 失败路径的记录是尽力而为；原始错误仍必须上抛。

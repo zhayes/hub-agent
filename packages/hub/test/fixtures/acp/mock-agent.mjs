@@ -8,13 +8,15 @@
  *   MOCK_ACP_REQUEST_PERMISSION=1 先发 session/request_permission，再决定是否写文件
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 const delayMs = Number(process.env.MOCK_ACP_DELAY_MS ?? '300')
 const requestPermission = process.env.MOCK_ACP_REQUEST_PERMISSION === '1'
 const writePath = process.env.MOCK_ACP_WRITE_PATH ?? 'mock-output.txt'
+const alwaysFail = process.env.MOCK_ACP_ALWAYS_FAIL === '1'
+const failFirstFile = process.env.MOCK_ACP_FAIL_FIRST_FILE
 
 const rl = createInterface({ input: process.stdin })
 let sessionId = 'mock-session-1'
@@ -72,6 +74,15 @@ async function handlePrompt(id, params) {
   process.stderr.write('[mock-acp] prompt\n')
   cancelled = false
   pendingPrompt = id
+  if (alwaysFail) {
+    finishPrompt('refusal')
+    return
+  }
+  if (failFirstFile !== undefined && !existsSync(failFirstFile)) {
+    writeFileSync(failFirstFile, 'failed-once\n', 'utf8')
+    finishPrompt('refusal')
+    return
+  }
   update({
     sessionUpdate: 'agent_message_chunk',
     content: { type: 'text', text: 'mock agent working' },
