@@ -377,6 +377,8 @@ POST /api/v1/clarifications/:id/answer
 - 刷新恢复。
 - 长列表分页 + 窗口化；流式更新 rAF 合并；日志/证据懒加载。
 
+**已落地**：`/chat` 路由、异步 thread、Ask 快照、approval 卡、resume 新 attempt、Playwright 路由/折叠 E2E。
+
 **验收**：
 
 - 发 Run 后 1s 内出现用户消息与 Planning；
