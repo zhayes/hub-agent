@@ -8,8 +8,10 @@ import {
 } from './settings'
 import {
   assertSandboxSpec,
+  networkModeOf,
   type SandboxDescription,
   type SandboxedCommand,
+  type SandboxNetworkMode,
   type SandboxProvider,
   type SandboxSpec,
 } from './types'
@@ -91,12 +93,14 @@ function sorted(paths: readonly string[]): string[] {
 }
 
 function sessionSnapshot(spec: SandboxSpec, platform: NodeJS.Platform): SessionSnapshot {
+  const networkMode = networkModeOf(spec)
   if (platform === 'win32') {
     // Windows 的写授权只能在会话级下发，因此首个 spec 的 filesystem 成为会话策略。
     // 但域名仍不放进会话：代理的会话白名单会串到其他任务，域名统一走
     // per-command 注册。
     const full = buildSrtSettings(spec)
     const base = buildSrtSessionSettings({
+      networkMode,
       allowLocalBinding: spec.allowLocalBinding === true,
       deniedDomains: full.network.deniedDomains,
     })
@@ -104,6 +108,7 @@ function sessionSnapshot(spec: SandboxSpec, platform: NodeJS.Platform): SessionS
     return {
       key: JSON.stringify({
         network: {
+          networkMode,
           allowLocalBinding: base.network.allowLocalBinding ?? false,
           deniedDomains: sorted(base.network.deniedDomains),
         },
@@ -119,11 +124,13 @@ function sessionSnapshot(spec: SandboxSpec, platform: NodeJS.Platform): SessionS
   }
 
   const policy: SrtSessionPolicy = {
+    networkMode,
     allowLocalBinding: spec.allowLocalBinding === true,
     deniedDomains: sorted(spec.deniedDomains ?? []),
   }
   return {
     key: JSON.stringify({
+      networkMode: policy.networkMode,
       allowLocalBinding: policy.allowLocalBinding,
       deniedDomains: policy.deniedDomains,
     }),
@@ -138,11 +145,17 @@ function sessionSnapshot(spec: SandboxSpec, platform: NodeJS.Platform): SessionS
  *   `allowedDomains` 保留（profile 与凭据注入仍要它），代理放行靠注册。
  * - Windows：per-exec 只接受 deny，传 allow 会直接抛错；写授权留在会话级。
  */
-function perCommandSettings(settings: SrtSettings, platform: NodeJS.Platform): SrtSettings {
+function perCommandSettings(
+  settings: SrtSettings,
+  platform: NodeJS.Platform,
+  networkMode: SandboxNetworkMode,
+): SrtSettings {
   if (platform === 'win32') {
     return {
       network: {
-        allowedDomains: settings.network.allowedDomains,
+        ...(networkMode === 'agent-managed'
+          ? {}
+          : { allowedDomains: settings.network.allowedDomains ?? [] }),
         deniedDomains: settings.network.deniedDomains,
       },
       filesystem: {
@@ -156,7 +169,9 @@ function perCommandSettings(settings: SrtSettings, platform: NodeJS.Platform): S
 
   return {
     network: {
-      allowedDomains: settings.network.allowedDomains,
+      ...(networkMode === 'agent-managed'
+        ? {}
+        : { allowedDomains: settings.network.allowedDomains ?? [] }),
       deniedDomains: [],
     },
     filesystem: settings.filesystem,
@@ -229,8 +244,10 @@ export class SrtProvider implements SandboxProvider {
     this.ensureReady()
     await this.ensureInitialized(spec)
 
+    const networkMode = networkModeOf(spec)
     const settings = buildSrtSettings(spec)
-    const allowedDomains = settings.network.allowedDomains
+    const allowedDomains =
+      networkMode === 'allowlist' ? (settings.network.allowedDomains ?? []) : []
 
     // 只有需要单命令域名时，才生成不可猜的 key（srt 要求 >=22 字符、
     // 至少 128 bit 随机；ULID / 计数器都不满足）。
@@ -258,7 +275,7 @@ export class SrtProvider implements SandboxProvider {
     try {
       const result = await this.driver.wrapArgv(
         command,
-        perCommandSettings(settings, this.platform),
+        perCommandSettings(settings, this.platform, networkMode),
         spec.cwd,
         options,
       )
@@ -369,7 +386,7 @@ export class SrtProvider implements SandboxProvider {
     if (this.sessionKey !== snapshot.key) {
       throw new HubError(
         'SANDBOX_UNAVAILABLE',
-        '会话级沙箱策略在首个命令后发生变化（allowLocalBinding / deniedDomains / 写授权），拒绝执行',
+        '会话级沙箱策略在首个命令后发生变化（networkMode / allowLocalBinding / deniedDomains / 写授权），拒绝执行',
         { reason: 'session_policy_changed', platform: this.platform },
       )
     }

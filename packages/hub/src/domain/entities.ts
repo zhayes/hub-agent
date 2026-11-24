@@ -65,6 +65,19 @@ export type VerificationKind =
   | 'noUnexpectedChange'
   | 'llmReview'
 
+/** 可执行验收检查（PRD §6.7.5）。自然语言不能单独作为验收条件。 */
+export type VerificationCheck =
+  | {
+      kind: 'command'
+      cmd: string
+      timeoutMs: number
+      expect: { exitCode: number | number[] }
+    }
+  | { kind: 'fileExists'; path: string }
+  | { kind: 'diffScope'; allowedPaths: string[] }
+  | { kind: 'noUnexpectedChange'; paths: string[] }
+  | { kind: 'llmReview'; rubric: string; evidenceRefs: string[] }
+
 export interface VerificationCheckResult {
   checkId: string
   kind: VerificationKind
@@ -74,6 +87,8 @@ export interface VerificationCheckResult {
   /** 大文本一律存引用，不内联 */
   outputRef?: string
   durationMs?: number
+  /** llmReview 等无法自动判定的检查；verdict 会变成 manual_required */
+  manualRequired?: boolean
 }
 
 export interface ExecutionEvidence {

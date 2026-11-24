@@ -1,9 +1,18 @@
 import type { Db } from './db'
 import { MIGRATION_001_INIT, type Migration } from './migrations/001-init'
 import { MIGRATION_002_AGENTS } from './migrations/002-agents'
+import { MIGRATION_003_AGENT_PROFILE } from './migrations/003-agent-profile'
+import { MIGRATION_004_BRAIN } from './migrations/004-brain'
+import { MIGRATION_005_WORKSPACE } from './migrations/005-workspace'
 
 /** 迁移按顺序追加；只增不改。 */
-export const MIGRATIONS: readonly Migration[] = [MIGRATION_001_INIT, MIGRATION_002_AGENTS]
+export const MIGRATIONS: readonly Migration[] = [
+  MIGRATION_001_INIT,
+  MIGRATION_002_AGENTS,
+  MIGRATION_003_AGENT_PROFILE,
+  MIGRATION_004_BRAIN,
+  MIGRATION_005_WORKSPACE,
+]
 
 export interface MigrateResult {
   applied: string[]

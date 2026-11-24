@@ -1324,7 +1324,7 @@ type PermissionScope =
 - 高风险 Shell 命令默认需要审批。
 - 访问 Secret 默认禁止，必须明确授权。
 - 远程 Agent 默认只能访问委托任务明确提供的上下文。
-- 远程 Agent 不得继承 HubAgent 的本地全部权限。
+- 本地受信 Agent 默认采用 agent-managed 网络（模型/外部资源由 Agent 自身配置负责）；远程 Agent 不得继承 HubAgent 的本地网络权限。
 - 权限审批必须关联具体任务、Agent、操作和资源。
 - 授权必须支持过期和撤销。
 
@@ -1382,13 +1382,14 @@ Permission Policy Check
 
 - **V1.0 起强制启用系统级沙箱**，三平台各自使用系统原生原语（macOS `sandbox-exec`、Linux `bubblewrap`、Windows `srt-win` + WFP），不允许“先上再补”。平台矩阵见 §6.9.8。
 - 强制对象：Coding Agent 进程与验证命令进程，二者必须处于同一等级隔离。
-- 默认拒绝：写全局配置目录、读凭据目录（`~/.ssh`、`~/.aws`、`~/.kube` 等）、访问白名单之外网络。
-- 允许项必须显式声明：工作区写、harness 自身状态目录、包管理器与代码托管域名。
+- 文件/凭据边界默认拒绝：写全局配置目录、读凭据目录（`~/.ssh`、`~/.aws`、`~/.kube` 等）。
+- 网络策略按信任等级分层：本地受信 Agent 默认 `agent-managed`（HubAgent 不套网络白名单，模型 API/外部资源由 Agent 自己配置）；`allowlist` 模式默认拒绝白名单外网络，用于高风险/无人值守任务；`deny` 用于远程 A2A / 不可信 Agent。
+- 允许项必须显式声明：工作区写、harness 自身状态目录、allowlist 模式下的域名。
 - **失败即拒绝执行（fail-closed）**：沙箱依赖缺失或初始化失败时，不得降级为无隔离执行。
 - Agent 与验证命令必须以**任务工作区为 cwd** 启动：沙箱的强制拒绝路径（`.git/hooks`、`.git/config` 等）以进程 cwd 为基准，cwd 不对则这层保护静默失效。
 - 因沙箱拦截导致的失败必须归因为 `SANDBOX_DENIED`（`failureCategory = resource`），并给出可审批的放宽建议，不得表现为普通任务失败。
 - 不提供“跳过沙箱”的常规开关；必要时只能由用户显式、按项目、带有效期授权，并记为高风险事件。
-- 决策依据与实测证据：`docs/adr/0002-sandbox-from-day-one.md`；可执行验证：`poc/tc-014/`。
+- 决策依据与实测证据：`docs/adr/0002-sandbox-from-day-one.md`、`docs/adr/0006-local-trusted-agent-network.md`；可执行验证：`poc/tc-014/`。
 
 ### 6.9.8 平台支持矩阵
 
@@ -2441,6 +2442,7 @@ interface VerificationCheckResult {
   exitCode?: number;
   outputRef?: string;      // 日志引用，不内联大文本
   durationMs?: number;
+  manualRequired?: boolean; // llmReview 等无法自动判定的检查
 }
 ```
 

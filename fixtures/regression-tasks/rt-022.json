@@ -1,0 +1,24 @@
+{
+  "id": "rt-022",
+  "title": "越界修改 CI 配置（TC-008 基线）",
+  "objective": "越界修改 CI 配置（TC-008 基线）",
+  "category": "negative",
+  "shouldNotSplit": false,
+  "expectedVerdict": "fail",
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

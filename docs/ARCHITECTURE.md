@@ -418,6 +418,8 @@ Runtime 校验（schema → 权限 → 预算 → 幂等）后才落库执行。
 
 > 这样"消息注入能否叫醒 Agent"就不再是正确性前提，只是延迟优化。
 
+**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、确定性实现与动作校验；`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → 委派 → accept/finish 的 Brain 驱动入口。M6 用 `ScriptedBrain` 证明可重放决策；Pi/LLM 适配器替换 `OrchestratorBrain` 即可，不改 Runtime、队列或校验。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
+
 ---
 
 ## 6. Runtime 层设计
@@ -531,6 +533,8 @@ COMMIT
 
 **禁止**：在验证里调用被验收 Agent；用自然语言判断代替退出码；证据缺失时给 `pass`。
 
+**M5 落地。** `runtime/verify/runner.ts` 实现五类检查；命令经 AgentHost/SandboxProvider 执行，cwd 固定 worktree，输出写 `artifacts/<executionId>/<checkId>.log`，`VerificationCheckResult` 只存引用。verdict 规则：任一确定性检查失败 → `fail`；含 `llmReview` 或没有检查 → `manual_required`；全通过才 `pass`。`runAcpTask` 先写 evidence、再跑验收，最后按 verdict 收敛 Execution/Subtask；pass 时 Task 仍保持 running（交付属 M7），`sandbox_denied` 生成 Approval 并停在 `waiting_approval`。`task show --evidence` 与 `approval list/approve/reject` 由 CLI 提供。
+
 ### 6.6 工作区与租约
 
 | 模式 | 实现 | 适用 |
@@ -547,6 +551,8 @@ COMMIT
 - 需合并时走确定性流程（`merge --no-ff` 或 cherry-pick），冲突即升级 Brain，**禁止静默覆盖**。
 - 保留每个 Execution 的基线 ref，支持回滚到基线。
 
+**M7 落地（核心库）。** `runtime/workspace/lease.ts` 实现租约互斥与过期 sweep；`git.ts` 用 `GitRunner`/`AgentHostGitRunner` 封装 worktree add/remove、`merge --no-ff`、`reset --hard`、diff patch，Runtime 不直接 `child_process`；`delivery.ts` 实现 branch-only / patch-export / auto-merge 五条件降级。不同 worktree 路径可并行，同一路径只允许一个写入者。`run` 默认 worktree 隔离：自动注册项目、建 worktree、租约、branch-only 交付并完成 Task；`task clean` 默认拒绝丢弃未提交改动。`--agents a1,a2` 走一个 Goal/Task、两个 Subtask、各自 worktree/lease，并行执行后 `merge --no-ff`；冲突抛 `DELIVERY_CONFLICT`。
+
 ### 6.7 恢复扫描（重启后）
 
 ```text
@@ -560,6 +566,8 @@ COMMIT
        - 进程仍存活                  → 重新 attach 或强杀（可配置）
   5. 写入恢复决策点，交由 Brain 决定继续/回滚/放弃
 ```
+
+**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复。`hubagentd` 启动时执行 `scanRecovery`，把非终态 Execution 收敛为 `unknown` 并写决策点；`runAcpTask` 在创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。自动重试循环与 `task pause/resume/retry` CLI 尚未接线，留给 M9。
 
 ---
 
@@ -754,6 +762,8 @@ Solid 的失败模式是**静默**的：代码能编译、页面不报错，但�
 
 `hubagent doctor` 是重要的落地功能：检查 Node 版本、SQLite 可写、git 可用、各 harness 能否启动、端口占用、配置文件合法性。
 
+**M9 落地。** CLI 已覆盖 `init/config/logs/gc/doctor/maintenance`、`agent add|list|show`、`run`（单 Agent / `--agents` 并行）、`task list|show|events|evidence|decisions|pause|resume|cancel|retry|clean|answer`、`approval list|approve|reject`，全部支持 `--json`。退出码由 `interfaces/cli/exit-codes.ts` 统一映射 0/2/3/4/5；`scripts/acceptance-v1.sh` 跑最小闭环。
+
 ---
 
 ## 10. API 设计
@@ -932,18 +942,18 @@ Verifier  ──► SandboxProvider.wrap(spec) ──► spawn
 |---|---|---|
 | 写 | 仅 worktree + 任务私有 tmp | 全局配置目录强制拒绝（`.bashrc`、`.gitconfig`、`.git/hooks` 等） |
 | 读 | 系统路径 + worktree | 凭据目录默认拒绝（`~/.ssh`、`~/.aws`、`~/.kube`）；harness 自身状态目录放行 |
-| 网络 | 全禁 | 项目级 base allowlist + 子任务增量（包管理器、代码托管） |
+| 网络 | 本地受信 Agent：`agent-managed`；高风险/远程：`allowlist` / `deny` | 默认不套网络白名单，模型 API/外部资源由 Agent 自己负责；allowlist 才走项目 base + 子任务增量（ADR 0006） |
 | 凭据 | 不进沙箱明文 | env 与文件走 mask / deny |
 | 本地端口 | 按项目开关 | dev server / 集成测试需要（`allowLocalBinding`） |
 | 依赖缺失 | **拒绝执行** | fail-closed，不用“降级为无隔离”换可用性 |
 
-**违规即证据（降级实现）。** srt 0.0.83 的 violation store 在库模式下为空，因此证据来自：stderr 的拒绝信号（`Operation not permitted` / `403`）+ 我们自己记录的 spawn 规格（cwd、允许路径、允许域名）。写入 `ExecutionEvidence` 与事件流，不得只写日志。若后续版本修复 store，可在 `SandboxProvider` 内部切回结构化归因，上层不变。
+**违规即证据（降级实现，主要适用于 allowlist/deny）。** srt 0.0.83 的 violation store 在库模式下为空，因此证据来自：stderr 的拒绝信号（`Operation not permitted` / `403`）+ 我们自己记录的 spawn 规格（cwd、允许路径、允许域名）。写入 `ExecutionEvidence` 与事件流，不得只写日志。若后续版本修复 store，可在 `SandboxProvider` 内部切回结构化归因，上层不变。
 
-**违规即审批。** 因隔离失败的任务必须给出可操作的下一步：从 stderr 与契约声明的资源反推被拦项（域名 / 路径 / 端口），生成 `Approval`（`reason = sandbox_denied`，携带建议放宽项），用户批准后**仅本次**生效。
+**违规即审批（allowlist/deny）。** 因隔离失败的任务必须给出可操作的下一步：从 stderr 与契约声明的资源反推被拦项（域名 / 路径 / 端口），生成 `Approval`（`reason = sandbox_denied`，携带建议放宽项），用户批准后**仅本次**生效。
 
 > 沙箱因此是“可协商的边界”，而不是黑盒报错。不设“跳过沙箱”的常规开关；必要时只能由用户显式、按项目、带有效期授权，并记为高风险事件。
 >
-> 决策依据、实测数据与被否方案：`docs/adr/0002-sandbox-from-day-one.md`；可执行验证：`poc/tc-014/`。
+> 决策依据、实测数据与被否方案：`docs/adr/0002-sandbox-from-day-one.md`、`docs/adr/0006-local-trusted-agent-network.md`；可执行验证：`poc/tc-014/`。
 
 ---
 
@@ -992,7 +1002,7 @@ Verifier  ──► SandboxProvider.wrap(spec) ──► spawn
 | 架构约束 | dependency-cruiser | R1~R7 规则 |
 | 故障注入 | 自研 harness | `kill -9` daemon / harness、磁盘满、DB 锁、429、超时 |
 | E2E | Playwright | 创建任务 → 审批 → 查看证据 → 完成 |
-| 回归基线 | `fixtures/regression-tasks` | 20~30 个真实任务，指标对比（PRD §17.2） |
+| 回归基线 | `fixtures/regression-tasks` | 24 个任务描述符 + `pnpm bench`；默认 mock 编排基线，可用 `--agent-command` 接真实 harness |
 
 **必须存在的负向测试**：越界写入、自述成功但构建失败、重复投递、不该拆的任务、重启不重复执行、仓库注入指令。
 

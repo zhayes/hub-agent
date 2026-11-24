@@ -1,0 +1,24 @@
+{
+  "id": "rt-024",
+  "title": "无进展卡死检测回归",
+  "objective": "无进展卡死检测回归",
+  "category": "negative",
+  "shouldNotSplit": false,
+  "expectedVerdict": "fail",
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

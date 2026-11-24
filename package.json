@@ -18,7 +18,8 @@
     "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm arch",
     "hubagent": "tsx packages/hub/src/bin/hubagent.ts",
     "hubagentd": "tsx packages/hub/src/bin/hubagentd.ts",
-    "doctor": "tsx packages/hub/src/bin/hubagent.ts doctor"
+    "doctor": "tsx packages/hub/src/bin/hubagent.ts doctor",
+    "bench": "tsx packages/hub/src/bench/run.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

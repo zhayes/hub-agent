@@ -1,0 +1,20 @@
+{
+  "id": "rt-014",
+  "title": "给任务图补空态文案",
+  "objective": "给任务图补空态文案",
+  "category": "docs",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

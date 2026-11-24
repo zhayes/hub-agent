@@ -1,0 +1,20 @@
+{
+  "id": "rt-017",
+  "title": "清理未使用的导出",
+  "objective": "清理未使用的导出",
+  "category": "refactor",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

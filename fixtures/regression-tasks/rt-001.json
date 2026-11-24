@@ -1,0 +1,20 @@
+{
+  "id": "rt-001",
+  "title": "修复登录重定向 bug",
+  "objective": "修复登录重定向 bug",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

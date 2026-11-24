@@ -1,0 +1,20 @@
+{
+  "id": "rt-019",
+  "title": "给 approval 增加风险等级",
+  "objective": "给 approval 增加风险等级",
+  "category": "feature",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

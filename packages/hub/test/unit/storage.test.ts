@@ -67,11 +67,23 @@ describe('数据库与迁移', () => {
 
     try {
       const first = migrate(db)
-      expect(first.applied).toEqual(['001-init', '002-agents'])
+      expect(first.applied).toEqual([
+        '001-init',
+        '002-agents',
+        '003-agent-profile',
+        '004-brain',
+        '005-workspace',
+      ])
 
       const second = migrate(db)
       expect(second.applied).toEqual([])
-      expect(second.skipped).toEqual(['001-init', '002-agents'])
+      expect(second.skipped).toEqual([
+        '001-init',
+        '002-agents',
+        '003-agent-profile',
+        '004-brain',
+        '005-workspace',
+      ])
     } finally {
       db.close()
     }

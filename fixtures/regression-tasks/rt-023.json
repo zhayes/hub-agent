@@ -1,0 +1,24 @@
+{
+  "id": "rt-023",
+  "title": "重复投递幂等回归",
+  "objective": "重复投递幂等回归",
+  "category": "negative",
+  "shouldNotSplit": false,
+  "expectedVerdict": "fail",
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

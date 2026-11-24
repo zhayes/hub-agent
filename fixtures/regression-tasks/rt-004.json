@@ -1,0 +1,20 @@
+{
+  "id": "rt-004",
+  "title": "重构重复的日期格式化函数",
+  "objective": "重构重复的日期格式化函数",
+  "category": "refactor",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import type { AgentHost } from '../../agent-host/agent-host'
+import type { SandboxNetworkMode } from '../../sandbox/types'
 import { newId } from '../../shared/id'
 
 /**
@@ -14,17 +15,31 @@ export interface GitEvidence {
   changedFiles?: string[]
 }
 
+export interface GitSandboxOptions {
+  networkMode?: SandboxNetworkMode
+  allowedDomains?: readonly string[]
+}
+
 interface GitResult {
   ok: boolean
   stdout: string
   stderr: string
 }
 
-async function runGit(host: AgentHost, worktree: string, args: string): Promise<GitResult> {
+async function runGit(
+  host: AgentHost,
+  worktree: string,
+  args: string,
+  sandbox: GitSandboxOptions = {},
+): Promise<GitResult> {
   const process = await host.spawn(`git-${newId()}`, {
     worktree,
     command: `git ${args}`,
-    sandbox: { allowedWrite: [] },
+    sandbox: {
+      allowedWrite: [],
+      ...(sandbox.networkMode === undefined ? {} : { networkMode: sandbox.networkMode }),
+      ...(sandbox.allowedDomains === undefined ? {} : { allowedDomains: sandbox.allowedDomains }),
+    },
     timeouts: { startupMs: 5_000, idleMs: 5_000, totalMs: 20_000, killGraceMs: 500 },
     maxStdoutBytes: 4 * 1024 * 1024,
     maxStderrBytes: 1024 * 1024,
@@ -37,8 +52,12 @@ async function runGit(host: AgentHost, worktree: string, args: string): Promise<
   }
 }
 
-export async function readGitHead(host: AgentHost, worktree: string): Promise<string | undefined> {
-  const head = await runGit(host, worktree, 'rev-parse HEAD')
+export async function readGitHead(
+  host: AgentHost,
+  worktree: string,
+  sandbox: GitSandboxOptions = {},
+): Promise<string | undefined> {
+  const head = await runGit(host, worktree, 'rev-parse HEAD', sandbox)
   return head.ok && head.stdout.length > 0 ? head.stdout : undefined
 }
 
@@ -46,21 +65,22 @@ export async function collectGitEvidence(
   host: AgentHost,
   worktree: string,
   baseSha: string | undefined,
+  sandbox: GitSandboxOptions = {},
 ): Promise<GitEvidence> {
   const evidence: GitEvidence = {}
 
-  const branch = await runGit(host, worktree, 'rev-parse --abbrev-ref HEAD')
+  const branch = await runGit(host, worktree, 'rev-parse --abbrev-ref HEAD', sandbox)
   if (branch.ok && branch.stdout.length > 0) evidence.branch = branch.stdout
 
-  const head = await runGit(host, worktree, 'rev-parse HEAD')
+  const head = await runGit(host, worktree, 'rev-parse HEAD', sandbox)
   if (head.ok && head.stdout.length > 0) evidence.commitSha = head.stdout
 
   if (baseSha !== undefined && baseSha.length > 0) {
-    const stat = await runGit(host, worktree, `diff --stat ${baseSha}`)
+    const stat = await runGit(host, worktree, `diff --stat ${baseSha}`, sandbox)
     if (stat.ok && stat.stdout.length > 0) evidence.diffstat = stat.stdout
 
-    const tracked = await runGit(host, worktree, `diff --name-only ${baseSha}`)
-    const untracked = await runGit(host, worktree, 'ls-files --others --exclude-standard')
+    const tracked = await runGit(host, worktree, `diff --name-only ${baseSha}`, sandbox)
+    const untracked = await runGit(host, worktree, 'ls-files --others --exclude-standard', sandbox)
     const files = [
       ...(tracked.ok ? tracked.stdout.split('\n') : []),
       ...(untracked.ok ? untracked.stdout.split('\n') : []),
@@ -70,7 +90,7 @@ export async function collectGitEvidence(
     if (files.length > 0) evidence.changedFiles = [...new Set(files)]
   } else {
     // 没有基线（非 git 仓库 / 空仓库）：至少给出工作区当前改动。
-    const status = await runGit(host, worktree, 'status --porcelain')
+    const status = await runGit(host, worktree, 'status --porcelain', sandbox)
     if (status.ok && status.stdout.length > 0) {
       const files = status.stdout
         .split('\n')

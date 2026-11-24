@@ -6,7 +6,14 @@ import type { AcpExecutionEvent } from '../adapters/acp/event'
 import { collectGitEvidence, type GitEvidence, readGitHead } from '../adapters/acp/git-evidence'
 import { AgentHost } from '../agent-host/agent-host'
 import type { AgentTimeouts } from '../agent-host/types'
-import type { ExecutionEvidence, TaskBrief } from '../domain/entities'
+import type {
+  Approval,
+  ExecutionEvidence,
+  TaskBrief,
+  VerificationCheck,
+  VerificationRun,
+  VerificationVerdict,
+} from '../domain/entities'
 import type { DomainEvent } from '../domain/events'
 import {
   asAgentId,
@@ -22,7 +29,7 @@ import {
   type TaskId,
 } from '../domain/ids'
 import type { DomainState } from '../domain/machine'
-import type { SandboxProvider } from '../sandbox/types'
+import type { SandboxNetworkMode, SandboxProvider } from '../sandbox/types'
 import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
 import { hubDir } from '../shared/paths'
@@ -30,6 +37,9 @@ import type { Db } from '../storage/db'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
 import { type AgentRecord, markAgentSeen } from './agent-registry'
+import { createSandboxDeniedApproval } from './approval'
+import { deriveIdempotencyKey, reserveDelegation } from './recovery/idempotency'
+import { runVerification } from './verify/runner'
 
 /**
  * M4 的固定脚本闭环：一个 Agent、一个 Subtask、一次 prompt，不接 Brain。
@@ -48,8 +58,25 @@ export interface RunAcpTaskOptions {
   agent: AgentRecord
   objective: string
   worktree: string
+  /** 已有 Goal（Brain 先建目标），不传则按 M4 固定流创建 */
+  goalId?: string
+  /** 已有 Execution ID（worktree 租约需要先知道它），不传则新建 */
+  executionId?: string
+  /** 已有 Task / Subtask（并行编排先建计划），不传则新建 */
+  taskId?: string
+  subtaskId?: string
+  idempotencyKey?: string
+  /** Brain 决定的计划标题；不传用 objective 生成 */
+  plan?: {
+    taskTitle: string
+    taskDescription: string
+    subtaskTitle: string
+    subtaskDescription: string
+  }
   transcriptDir?: string
-  /** 传给沙箱的 per-command 域名白名单（模型 API 等） */
+  /** 网络策略；默认 agent-managed（本地受信 Agent 自己负责网络） */
+  networkMode?: SandboxNetworkMode
+  /** 仅 allowlist 模式使用 */
   allowedDomains?: readonly string[]
   /** 传给沙箱的 per-command 写路径（harness 自身状态目录等） */
   allowedWrite?: readonly string[]
@@ -57,6 +84,11 @@ export interface RunAcpTaskOptions {
   agentTimeouts?: Partial<AgentTimeouts>
   initializeTimeoutMs?: number
   promptTimeoutMs?: number
+  /** 可执行验收检查；空 = 无法自动判定，verdict 为 manual_required */
+  checks?: readonly VerificationCheck[]
+  /** 验收日志目录；默认 ~/.hubagent/artifacts/<executionId> */
+  artifactDir?: string
+  approvalDecisionMode?: 'once' | 'policy'
   onEvent?: (event: AcpExecutionEvent) => void
   onStderr?: (line: string) => void
 }
@@ -70,6 +102,9 @@ export interface RunAcpTaskResult {
   sessionId: string
   agent: { id: string; name: string }
   stopReason: string
+  verdict: VerificationVerdict | 'not_run'
+  verification?: VerificationRun
+  approval?: Approval
   evidence: ExecutionEvidence
   transcriptRef: string
   updates: number
@@ -112,6 +147,11 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
   let acp: AcpClient | undefined
   let baseSha: string | undefined
   const events: AcpExecutionEvent[] = []
+  const networkMode = options.networkMode ?? 'agent-managed'
+  const gitSandbox = {
+    networkMode,
+    ...(options.allowedDomains === undefined ? {} : { allowedDomains: options.allowedDomains }),
+  }
 
   const recordEvent = (event: AcpExecutionEvent): void => {
     events.push(event)
@@ -136,7 +176,8 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       // cwd 由 AgentHost 强制；写授权包含 worktree。
       sandbox: {
         allowedWrite: options.allowedWrite ?? [],
-        allowedDomains: options.allowedDomains ?? [],
+        networkMode,
+        ...(options.allowedDomains === undefined ? {} : { allowedDomains: options.allowedDomains }),
       },
     })
 
@@ -166,13 +207,53 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     }
 
     const session = await acp.newSession(worktree)
-    baseSha = await readGitHead(host, worktree).catch(() => undefined)
+    baseSha = await readGitHead(host, worktree, gitSandbox).catch(() => undefined)
 
     const now = asTimestamp(new Date().toISOString())
-    const goalId = asGoalId(newId())
-    const taskId = asTaskId(newId())
-    const subtaskId = asSubtaskId(newId())
-    const executionId = asExecutionId(newId())
+    const goalId = options.goalId === undefined ? asGoalId(newId()) : asGoalId(options.goalId)
+    if (options.goalId !== undefined && state.goals[goalId] === undefined) {
+      throw new HubError('NOT_FOUND', `Goal 不存在：${options.goalId}`, { goalId: options.goalId })
+    }
+    const taskId = options.taskId === undefined ? asTaskId(newId()) : asTaskId(options.taskId)
+    const subtaskId =
+      options.subtaskId === undefined ? asSubtaskId(newId()) : asSubtaskId(options.subtaskId)
+    if (options.taskId !== undefined) {
+      const existing = state.tasks[taskId]
+      if (existing === undefined) {
+        throw new HubError('NOT_FOUND', `Task 不存在：${options.taskId}`, {
+          taskId: options.taskId,
+        })
+      }
+      if (existing.goalId !== goalId) {
+        throw new HubError('EVENT_REJECTED', 'Task 不属于指定 Goal', {
+          taskId: options.taskId,
+          goalId,
+        })
+      }
+    }
+    if (options.subtaskId !== undefined) {
+      const existing = state.subtasks[subtaskId]
+      if (existing === undefined) {
+        throw new HubError('NOT_FOUND', `Subtask 不存在：${options.subtaskId}`, {
+          subtaskId: options.subtaskId,
+        })
+      }
+      if (existing.taskId !== taskId) {
+        throw new HubError('EVENT_REJECTED', 'Subtask 不属于指定 Task', {
+          subtaskId: options.subtaskId,
+          taskId,
+        })
+      }
+    }
+    const executionId =
+      options.executionId === undefined
+        ? asExecutionId(newId())
+        : asExecutionId(options.executionId)
+    if (state.executions[executionId] !== undefined) {
+      throw new HubError('EVENT_REJECTED', `Execution 已存在：${executionId}`, {
+        executionId,
+      })
+    }
     ids.goalId = goalId
     ids.taskId = taskId
     ids.subtaskId = subtaskId
@@ -206,50 +287,75 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     )
 
     const title = objective.length > 80 ? `${objective.slice(0, 77)}...` : objective
-    append({
-      type: 'goal.created',
-      goal: {
-        id: goalId,
-        userId: 'local',
-        title,
-        intent: objective,
-        status: 'active',
-        createdAt: now,
-        updatedAt: now,
-      },
+    if (options.goalId === undefined) {
+      append({
+        type: 'goal.created',
+        goal: {
+          id: goalId,
+          userId: 'local',
+          title,
+          intent: objective,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+    }
+    if (options.taskId === undefined) {
+      append({
+        type: 'task.created',
+        task: {
+          id: taskId,
+          goalId,
+          title: options.plan?.taskTitle ?? title,
+          description: options.plan?.taskDescription ?? objective,
+          status: 'draft',
+          priority: 0,
+          acceptanceCriteria: ['执行完成并产出可核验的 diff'],
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+    }
+    if (options.subtaskId === undefined) {
+      append({
+        type: 'subtask.created',
+        subtask: {
+          id: subtaskId,
+          taskId,
+          title: options.plan?.subtaskTitle ?? '执行 ACP 任务',
+          description: options.plan?.subtaskDescription ?? objective,
+          status: 'ready',
+          required: true,
+          dependencies: [],
+          requiredCapabilities: [],
+          assignedAgentId: asAgentId(agent.id),
+          priority: 0,
+          maxAttempts: 1,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+    }
+    const idempotencyKey =
+      options.idempotencyKey ?? deriveIdempotencyKey({ goalId, subtaskId, attempt: 1 })
+    const reservation = reserveDelegation(db, {
+      subtaskId,
+      idempotencyKey,
+      executionId,
+      brief: { objective, worktree },
+      workspace: { worktree },
+      budget: { maxWallClockMs: options.promptTimeoutMs ?? 0 },
+      policy: { networkMode },
     })
-    append({
-      type: 'task.created',
-      task: {
-        id: taskId,
-        goalId,
-        title,
-        description: objective,
-        status: 'draft',
-        priority: 0,
-        acceptanceCriteria: ['执行完成并产出可核验的 diff'],
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
-    append({
-      type: 'subtask.created',
-      subtask: {
-        id: subtaskId,
-        taskId,
-        title: '执行 ACP 任务',
-        description: objective,
-        status: 'ready',
-        required: true,
-        dependencies: [],
-        requiredCapabilities: [],
-        assignedAgentId: asAgentId(agent.id),
-        priority: 0,
-        maxAttempts: 1,
-        createdAt: now,
-        updatedAt: now,
-      },
-    })
+    if (!reservation.created && reservation.contract.executionId !== executionId) {
+      throw new HubError('ACTION_REJECTED', '幂等键已绑定到另一个 Execution，拒绝重复投递', {
+        idempotencyKey,
+        existingExecutionId: reservation.contract.executionId,
+        requestedExecutionId: executionId,
+      })
+    }
+
     append({
       type: 'execution.created',
       execution: {
@@ -265,11 +371,15 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     })
 
     const at = (): ReturnType<typeof asTimestamp> => asTimestamp(new Date().toISOString())
-    append({ type: 'task.status', taskId, to: 'planning', at: at() })
-    append({ type: 'task.status', taskId, to: 'ready', at: at() })
-    append({ type: 'task.status', taskId, to: 'running', at: at() })
-    append({ type: 'subtask.status', subtaskId, to: 'assigned', at: at() })
-    append({ type: 'subtask.status', subtaskId, to: 'running', at: at() })
+    if (options.taskId === undefined && state.tasks[taskId]?.status === 'draft') {
+      append({ type: 'task.status', taskId, to: 'planning', at: at() })
+      append({ type: 'task.status', taskId, to: 'ready', at: at() })
+      append({ type: 'task.status', taskId, to: 'running', at: at() })
+    }
+    if (state.subtasks[subtaskId]?.status === 'ready') {
+      append({ type: 'subtask.status', subtaskId, to: 'assigned', at: at() })
+      append({ type: 'subtask.status', subtaskId, to: 'running', at: at() })
+    }
     append({ type: 'execution.status', executionId, to: 'starting', at: at() })
     append({ type: 'execution.status', executionId, to: 'running', at: at() })
 
@@ -287,7 +397,9 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     }
 
     const promptResponse = await acp.prompt(renderTaskBrief(brief))
-    const git = await collectGitEvidence(host, worktree, baseSha).catch((): GitEvidence => ({}))
+    const git = await collectGitEvidence(host, worktree, baseSha, gitSandbox).catch(
+      (): GitEvidence => ({}),
+    )
     const evidence: ExecutionEvidence = {
       ...git,
       transcriptRef,
@@ -295,9 +407,69 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
 
     append({ type: 'execution.evidence', executionId, evidence })
 
-    const succeeded = promptResponse.stopReason === 'end_turn'
-    if (succeeded) {
+    if (promptResponse.stopReason !== 'end_turn') {
+      append({ type: 'execution.status', executionId, to: 'failed', at: at() })
+      append({ type: 'subtask.status', subtaskId, to: 'failed', at: at() })
+      append({ type: 'task.status', taskId, to: 'failed', at: at() })
+      append({ type: 'goal.status', goalId, to: 'failed', at: at() })
+      return {
+        ok: false,
+        goalId,
+        taskId,
+        subtaskId,
+        executionId,
+        sessionId: session.sessionId,
+        agent: { id: agent.id, name: agent.name },
+        stopReason: promptResponse.stopReason,
+        verdict: 'not_run',
+        evidence,
+        transcriptRef,
+        updates: events.length,
+        durationMs: Date.now() - startedAt,
+      }
+    }
+
+    const verification = await runVerification({
+      executionId,
+      worktree,
+      checks: options.checks ?? [],
+      ...(evidence.changedFiles === undefined ? {} : { changedFiles: evidence.changedFiles }),
+      artifactDir: options.artifactDir ?? join(hubDir(), 'artifacts', executionId),
+      host,
+      networkMode,
+      ...(options.allowedDomains === undefined ? {} : { allowedDomains: options.allowedDomains }),
+      ...(options.allowedWrite === undefined ? {} : { allowedWrite: options.allowedWrite }),
+    })
+    append({ type: 'verification.recorded', run: verification.run })
+
+    let approval: Approval | undefined
+    if (verification.sandboxDenied !== undefined) {
+      approval = createSandboxDeniedApproval({
+        taskId,
+        executionId,
+        agentId: agent.id,
+        source: verification.sandboxDenied.source,
+        text: verification.sandboxDenied.text,
+        ...(options.approvalDecisionMode === undefined
+          ? {}
+          : { decisionMode: options.approvalDecisionMode }),
+      })
+      append({ type: 'approval.requested', approval })
+    }
+
+    if (verification.run.verdict === 'pass') {
       append({ type: 'execution.status', executionId, to: 'succeeded', at: at() })
+      append({ type: 'subtask.status', subtaskId, to: 'succeeded', at: at() })
+      // 验收 pass 不等于交付完成（PRD §6.12.4）。Task 保持 running，
+      // 等 M7 的 branch-only / patch-export 交付动作实际落地后再 completed。
+    } else if (approval !== undefined) {
+      append({ type: 'execution.status', executionId, to: 'waiting_permission', at: at() })
+      append({ type: 'subtask.status', subtaskId, to: 'waiting_approval', at: at() })
+      append({ type: 'task.status', taskId, to: 'waiting_approval', at: at() })
+    } else if (verification.run.verdict === 'manual_required') {
+      append({ type: 'execution.status', executionId, to: 'waiting_input', at: at() })
+      append({ type: 'subtask.status', subtaskId, to: 'waiting_input', at: at() })
+      append({ type: 'task.status', taskId, to: 'waiting_input', at: at() })
     } else {
       append({ type: 'execution.status', executionId, to: 'failed', at: at() })
       append({ type: 'subtask.status', subtaskId, to: 'failed', at: at() })
@@ -306,7 +478,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     }
 
     return {
-      ok: succeeded,
+      ok: verification.run.verdict === 'pass',
       goalId,
       taskId,
       subtaskId,
@@ -314,6 +486,9 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       sessionId: session.sessionId,
       agent: { id: agent.id, name: agent.name },
       stopReason: promptResponse.stopReason,
+      verdict: verification.run.verdict,
+      verification: verification.run,
+      ...(approval === undefined ? {} : { approval }),
       evidence,
       transcriptRef,
       updates: events.length,
@@ -323,7 +498,9 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     // 只有 ACP 成功建 Session 后才可能已经有记录；此时把失败收敛到执行上。
     if (ids.executionId !== undefined && ids.taskId !== undefined && ids.subtaskId !== undefined) {
       try {
-        const git = await collectGitEvidence(host, worktree, baseSha).catch((): GitEvidence => ({}))
+        const git = await collectGitEvidence(host, worktree, baseSha, gitSandbox).catch(
+          (): GitEvidence => ({}),
+        )
         const evidence: ExecutionEvidence = {
           ...git,
           ...(transcriptRef === undefined ? {} : { transcriptRef }),

@@ -255,7 +255,8 @@ pnpm hubagent maintenance rebuild-projections --verify   # 重建后与投影一
 - 拒绝启动零写记录：新增架构规则 **R9**（`agent-host/**` 不得 import `storage/**`）；失败启动只抛错、不注册进程，任务/执行记录由 Runtime 在 spawn 成功后再写。
 - `doctor` 新增 `sandboxPlatform`：Windows 查账户/组/WFP（`SANDBOX_NOT_PROVISIONED`），Linux 查 `kernel.apparmor_restrict_unprivileged_userns`。
 - 本机验收：TC-014 **11/11**；`pnpm test:srt-acp` 走真实 srt 包装层完成 JSON-RPC 一行往返 + 越界写被拒；`pnpm verify` 171 用例、arch 39 modules 全绿；`hubagent doctor` 8 项检查全 ok。
-- 未完成：Ubuntu / Windows CI 矩阵与实机验证；Windows 多 worktree 的会话级写授权限制（当前首个 worktree 固定，见上表）。
+- CI 骨架已加：`.github/workflows/ci.yml` 跑 macOS/Ubuntu 的 `pnpm verify` + TC-014，Windows 先只做 typecheck/lint/arch。
+- 暂缓：Ubuntu / Windows 平台矩阵与实机验证（用户决定）；Windows 多 worktree 的会话级写授权限制仍存在。
 
 **0.0.83 实测约束（写进检查单，勿想当然）**
 
@@ -339,7 +340,15 @@ pnpm hubagent run "写一个 mock-output.txt 并提交" --agent mock --worktree 
 # ok, taskId, executionId, branch=main, commitSha, diffstat, changedFiles, transcriptRef
 ```
 
-`pnpm verify`：187 用例、arch 48 modules 全绿。**真实 Claude Code / Codex / OpenCode 本机未安装**，上述验收用 mock ACP Agent 跑通协议链路；安装后按同一命令复跑即可，不需要改代码。
+`pnpm verify`：229 用例、arch 71 modules 全绿。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
+
+**P0 网络策略收尾（2026-11-24）**
+
+- 本地受信 Agent 默认 `networkMode=agent-managed`：HubAgent 不安装网络白名单/代理，模型 API 与外部查询由 Agent 自己负责。
+- 文件/凭据边界不变：cwd/allowWrite/denyRead/denyWrite 继续强制。
+- `agent add` 记录 `networkMode / allowedDomains / allowedWrite`；`run` 自动读取，默认不再需要 `--allow-domain`。
+- `allowlist` / `deny` 保留给高风险、无人值守、远程 A2A；ADR 0006 记录这次威胁模型调整。
+- DSH 实测：`agent add --allow-write <DSH 状态目录>` 后，`run` 不传任何网络参数即可跑通。
 
 **本地 DSH 连接（2026-11-24 已验证）**
 
@@ -348,16 +357,24 @@ Desktop 版 DSH 自带 ACP profile，`dsh --profile acp` 就是标准 ACP stdio 
 ```bash
 # Desktop：dsh 在 app.asar 内，必须用 Electron 的 Node 模式启动
 DSH_CMD="ELECTRON_RUN_AS_NODE=1 \"$DSH_NODE_EXECUTABLE\" \"$DSH_INSTALL_DIR/lib/bin.js\" --profile acp"
-pnpm hubagent agent add --name dsh --cmd "$DSH_CMD" --json
-
-pnpm hubagent run "只回复 OK，不要修改文件" --agent dsh --worktree <abs-repo> \
-  --allow-domain api.deepseek.com --allow-domain '*.deepseek.com' \
+pnpm hubagent agent add --name dsh --cmd "$DSH_CMD" \
   --allow-write "$DSH_HOME/sessions" --allow-write "$DSH_HOME/storages" \
   --allow-write "$DSH_HOME/cache" --allow-write "$DSH_HOME/profiles/acp" \
+  --allow-write "$DSH_HOME/llm-deepseek" --json
+
+pnpm hubagent run "只回复 OK，不要修改文件" --agent dsh --worktree <abs-repo> \
   --prompt-timeout-ms 120000 --json
 ```
 
 注意：这是"把本地 harness 作为受信 Agent"的用法，allow-write 只给 DSH 自己的状态目录；DSH 运行所需的模型凭据仍由 harness 自己读取。不要把 `~/.dsh` 整体放开给不可信 Agent。
+
+**Codex 探测（2026-11-24）**
+
+- ChatGPT.app 自带 `codex-cli 0.171.0-alpha.13.2`；ACP 适配器为 `@agentclientprotocol/codex-acp@2.10.0`。
+- `initialize` / `session/new` 成功，Codex 返回了 `auth`、`loadSession`、`sessionCapabilities` 等能力。
+- `session/prompt` 期间 Codex 报 `workspace routing discovery timed out`，WebSocket→HTTPS 回退后仍反复重连，180s 超时。
+- 同机 `codex login status` 显示 `Logged in using ChatGPT`，但 `codex exec` 同样不返回；这是 Codex 本机 workspace routing/网络问题，不是 HubAgent/srt 协议失败。
+- 修好 Codex 的 routing/网络后，`hubagent run --agent codex` 无需改代码即可复跑；当前保留为已知阻塞项。
 
 **不包含**：多 Agent、重试、Brain（本步由固定脚本驱动，不接 LLM）。
 
@@ -385,6 +402,28 @@ pnpm test:unit -- diff-scope       # TC-008：改 CI 配置 → 越界判失败
 pnpm hubagent task show <id> --evidence   # 每条检查：命令 + 退出码 + 日志引用
 pnpm hubagent approval list --json        # 沙箱拦截 → 自动生成审批项
 ```
+
+**实现进度（2026-11-24，已完成）**
+
+- `runtime/verify/runner.ts`：五类检查全部落地；命令经 AgentHost/SandboxProvider 执行，输出落 `artifacts/<executionId>/<checkId>.log`，结果只存引用。
+- verdict 规则：任一确定性检查失败 → `fail`；含 `llmReview` 或没有检查 → `manual_required`；全通过才 `pass`。**没有检查不会默认通过。**
+- `runAcpTask` 改为先验收再收敛：pass → Execution / Subtask succeeded，Task 保持 running（交付留给 M7）；fail → 全链 failed；manual → waiting_input；sandbox_denied → Approval + waiting_approval。
+- `task show <id> --evidence`：任务、执行、每条检查、退出码、日志引用、审批。
+- `approval list/approve/reject`：`reason=sandbox_denied`、`decisionMode=once|policy`、过期时间；批准只记录裁决，自动应用放宽留给策略实体（不在 M5 伪造）。
+- CLI `run` 新增 `--verify-command` / `--verify-file` / `--allowed-path` / `--unexpected-path` / `--manual-review` / `--approval-mode`。
+
+**验收结果（本机）**
+
+| 场景 | 结果 |
+|---|---|
+| 正常通过（命令通过 + diffScope） | `verdict=pass`，Execution/Subtask succeeded，Task running（交付待 M7） |
+| TC-009 自述成功 + 构建失败 | `verdict=fail`，Execution/Task failed，证据保留 |
+| TC-008 改 `.github/workflows/ci.yml` 超出 `allowedPath src` | `diffScope fail` |
+| sandbox_denied 越界写 | 自动生成 pending Approval，Task waiting_approval |
+| `task show --evidence` | 打印命令、退出码、日志引用 |
+| `approval approve` | pending → approved |
+
+`pnpm verify`：229 用例、arch 71 modules 全绿。
 
 **不包含**：判断性评审的质量优化（先保证确定性检查可信）。
 
@@ -414,6 +453,30 @@ pnpm hubagent task decisions <id>  # 能看到"为什么这样拆/为什么选�
 pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 ```
 
+**实现进度（2026-11-24，核心完成；Pi/LLM 适配器未接）**
+
+- `brain/types.ts`：`OrchestratorBrain`、`BrainInput`、`BrainAction`、`BrainBudget`、`DecisionRecord`、`Clarification`。
+- `brain/snapshot.ts`：从 DomainState 折叠派生视图，不含原始事件流/工具流水/完整日志。
+- `brain/scripted-brain.ts`：确定性实现，用于证明“同一快照 → 同一动作”；Pi/LLM 可替换它。
+- `brain/validate.ts`：schema → 权限/引用 → 预算 → 幂等；返回可执行动作与错误，不产生副作用。
+- `runtime/decision-queue.ts`：`dedupe_key UNIQUE` + 条件 claim；重复投递只派发一次；重启可续。
+- `runtime/decision-record.ts`：每次回合写 `DecisionRecord`（type / rationale / inputs / alternatives）。
+- `runtime/brain-loop.ts`：入队/claim → 快照 → step → 校验 → 记录；输入/输出 token、动作数、超时都受预算约束。
+- `runtime/clarify.ts`：`clarify` / `decide`，答案按 `questionId + executionId` 精确路由；有 options 时只能选其中之一。
+- `runtime/brain-run.ts`：Goal → Brain 拆计划 → Brain 委派 → 执行 → Brain accept/finish；CLI `run` 默认走 Brain，`--no-brain` 可回退 M4 固定脚本。
+- `hubagent task decisions <id>`：查看 DecisionRecord。
+
+**验收结果**
+
+| 场景 | 结果 |
+|---|---|
+| 同一快照重复 step/explain | 语义等价（`brain.test.ts`） |
+| 同一 dedupeKey 重复投递 | 只入队一次、只 claim 一次 |
+| `hubagent run` 接 Brain | 仍完成 ACP + 验收，产出 2 条 DecisionRecord |
+| TC-018 两个并行问题 | executionId 不匹配时拒绝路由 |
+
+`pnpm verify`：229 用例、arch 71 modules 全绿。**已知留白**：M6 用 `ScriptedBrain` 证明可重放决策；Pi/LLM 适配器尚未接入（需要模型 provider 与 key），替换 `OrchestratorBrain` 即可，不改 Runtime/队列/校验。
+
 **不包含**：多 Agent 并行（M7）、复杂重规划（M8）。
 
 ---
@@ -440,6 +503,20 @@ pnpm test:unit -- delivery         # 默认 branch-only；auto-merge 缺任一�
 pnpm hubagent run "分析依赖风险，同时检查核心代码质量" --json   # TC-002
 ```
 
+**实现进度（2026-11-24，完成）**
+
+- `runtime/workspace/lease.ts`：`shared / worktree / copy` 租约，路径重叠互斥、不同 worktree 可并行、过期 sweep、release/renew。
+- `runtime/workspace/git.ts`：`GitRunner` 抽象 + `AgentHostGitRunner`（Runtime 不直接 child_process）；worktree add/remove/prune、`merge --no-ff`、`reset --hard`、rev-parse、diff patch。
+- `runtime/workspace/delivery.ts`：`branch-only` / `patch-export` / `auto-merge`；auto-merge 五前置条件缺一即降级并记录原因。
+- 测试：`lease.test.ts` 4 个、`merge.test.ts` 2 个（不同文件合并成功/同文件冲突）、`delivery.test.ts` 4 个。
+- `run` 默认 `worktree` 隔离：自动注册项目、建 worktree、acquire lease、执行、branch-only 交付、Task completed；`--isolation shared` 可回退。
+- `task clean` 默认拒绝丢弃未提交改动，`--force` 才清理；worktree 的 git 元数据只放行 objects/worktrees/refs/logs，不给 hooks/config。
+- TC-002 双 Agent 并行：`--agents a1,a2`，一个 Goal/Task、两个 Subtask、各自 worktree/lease，并行执行后 `merge --no-ff`；不同文件成功，同文件冲突 `DELIVERY_CONFLICT`。
+- 本地实测：两 Agent 改 `src/a.txt` / `src/b.txt`，两个 merge 成功，Task completed；`task clean` 删除两个 worktree。
+- `auto-merge` / `patch-export` 策略库已完成；CLI 默认 branch-only，显式项目级 auto-merge 开关留给 M9 设置页。
+
+`pnpm verify`：229 用例、arch 71 modules 全绿。
+
 **不包含**：跨机协作、Relay。
 
 ---
@@ -464,6 +541,18 @@ pnpm test:unit -- no-progress      # 注入"卡住"场景 → 被检测并暂停
 pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 ```
 
+**实现进度（2026-11-24，核心完成；自动重试循环/CLI 接线留给 M9）**
+
+- `runtime/recovery/failure.ts`：失败分类 + 升级链（协议重试 2 → 同 Agent → 换 Agent → 重规划 2 → 用户），`sandbox_denied` 不计失败，`unknown` 不重试。
+- `runtime/recovery/side-effect.ts`：`none/partial/complete/unknown` 副作用分类；有 diff 先核验。
+- `runtime/recovery/no-progress.ts`：事件超时、等价计划、diff 震荡、预算异常、重复工具调用；配合 `pauseTask` 暂停现场。
+- `runtime/recovery/idempotency.ts`：`idempotencyKey` 派生 + `delegation_contracts` 唯一约束；`runAcpTask` 已接入，重复投递拒绝新 Execution。
+- `runtime/recovery/scan.ts`：重启扫描把非终态 Execution 收敛为 `unknown` 并写恢复决策点；`hubagentd` 启动时执行。
+- `runtime/recovery/pause.ts`：Task/Execution/Subtask 暂停与反向恢复。
+- 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2。
+
+`pnpm verify`：250 用例、arch 83 modules 全绿。**已知留白**：升级链/无进展检测目前是 Runtime 可调用判定库，`runAcpTask` 尚未自动执行完整重试循环；`task pause/resume/retry` CLI 在 M9 接线。
+
 ---
 
 ### M9 · CLI 完整面（3–4 人日）
@@ -483,6 +572,18 @@ pnpm test:unit -- cli-exit-codes
 bash scripts/acceptance-v1.sh        # 串跑 TC-001~TC-005、TC-008~TC-018
 ```
 
+**实现进度（2026-11-24，完成）**
+
+- 顶级命令：`init / config / logs / gc / doctor / maintenance`；`gc` 默认 dry-run，`--apply` 才删除。
+- `agent add|list|show`；`run` 单 Agent / `--agents` 并行 / `--json`。
+- `task list|show|events|evidence|decisions|pause|resume|cancel|retry|clean|answer`；`--json` 全支持。
+- `approval list|approve|reject --json`。
+- [exit-codes.ts](<packages/hub/src/interfaces/cli/exit-codes.ts>)：0 成功 / 2 参数/引用 / 3 审批 / 4 验收失败 / 5 运行异常；`cli-exit-codes.test.ts` 覆盖。
+- [acceptance-v1.sh](<scripts/acceptance-v1.sh>)：`pnpm verify` + `init/doctor/config/task list/approval list/gc` 最小闭环，本机通过。
+- `task retry` 目前只对 `paused` 任务执行 resume；失败任务的自动重试循环仍待把 M8 升级链接进 Runtime（不伪造）。
+
+`pnpm verify`：250 用例、arch 83 modules 全绿。
+
 ---
 
 ### M10 · 回归基线与指标（4–6 人日）
@@ -500,6 +601,17 @@ bash scripts/acceptance-v1.sh        # 串跑 TC-001~TC-005、TC-008~TC-018
 ```bash
 pnpm bench --suite fixtures/regression-tasks --out reports/baseline.json
 ```
+
+**实现进度（2026-11-24，完成）**
+
+- [fixtures/regression-tasks](<fixtures/regression-tasks/README.md>)：24 个任务描述符（20 正常 + 4 负例，3 个 `shouldNotSplit`）。
+- [bench/run.ts](<packages/hub/src/bench/run.ts>)：`pnpm bench` 跑任务、写 `reports/baseline.json`；默认 mock agent，可用 `--agent-command` 接真实 harness。
+- [bench/metrics.ts](<packages/hub/src/bench/metrics.ts>)：自主完成率、验收误判率、恢复成功率、过度拆解率、Brain 决策数、人工介入次数、平均耗时。
+- [bench/recovery-probe.ts](<packages/hub/src/bench/recovery-probe.ts>)：确定性 seed running Execution → `scanRecovery`，验证 unknown + 决策点。
+- 实测 `reports/baseline.json`：24 tasks，`autonomousCompletionRate=1`、`verificationMisjudgmentRate=0`、`recoverySuccessRate=1`、`overDecompositionRate=0`、`brainDecisionsPerTask=2`、`humanInterventionsPerTask=0`。
+- 诚实边界：默认 mock 模式度量编排/验收链路，不代表 LLM 规划质量；真实 harness 需用 `--agent-command` 并提供能完成任务的 Agent。
+
+`pnpm verify`：250 用例、arch 83 modules 全绿。
 
 ---
 

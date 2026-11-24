@@ -1,0 +1,20 @@
+{
+  "id": "rt-020",
+  "title": "分析测试覆盖率缺口",
+  "objective": "分析测试覆盖率缺口",
+  "category": "analysis",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

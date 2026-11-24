@@ -1,0 +1,20 @@
+{
+  "id": "rt-016",
+  "title": "补一个端到端验收脚本",
+  "objective": "补一个端到端验收脚本",
+  "category": "test",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

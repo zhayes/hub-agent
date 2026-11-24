@@ -1,0 +1,20 @@
+{
+  "id": "rt-013",
+  "title": "优化慢查询的索引",
+  "objective": "优化慢查询的索引",
+  "category": "performance",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

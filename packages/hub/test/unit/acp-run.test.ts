@@ -64,10 +64,10 @@ class MockProvider implements SandboxProvider {
 
   async wrap(command: string, _spec: SandboxSpec): Promise<SandboxedCommand> {
     if (this.error !== undefined) throw this.error
-    if (command.startsWith('git ')) {
-      return { argv: ['/bin/bash', '-c', command], env: this.env }
+    if (command === 'mock-acp') {
+      return { argv: [process.execPath, mockAgent], env: this.env }
     }
-    return { argv: [process.execPath, mockAgent], env: this.env }
+    return { argv: ['/bin/bash', '-c', command], env: this.env }
   }
 
   async dispose(): Promise<void> {}
@@ -87,10 +87,16 @@ describe('runAcpTask：成功链路', () => {
       objective: '写一个 mock-output.txt 并提交',
       worktree: dir,
       transcriptDir,
+      checks: [
+        { kind: 'command', cmd: 'true', timeoutMs: 5_000, expect: { exitCode: 0 } },
+        { kind: 'diffScope', allowedPaths: ['.'] },
+      ],
     })
 
     expect(result.ok).toBe(true)
     expect(result.stopReason).toBe('end_turn')
+    expect(result.verdict).toBe('pass')
+    expect(result.verification?.verdict).toBe('pass')
     expect(result.evidence.branch).toBeTruthy()
     expect(result.evidence.commitSha).toBeTruthy()
     expect(result.evidence.changedFiles).toContain('mock-output.txt')
@@ -110,11 +116,117 @@ describe('runAcpTask：成功链路', () => {
     expect(execution.status).toBe('succeeded')
     expect(execution.session_id).toBe(result.sessionId)
 
-    // M5 之前不伪造 subtask/task 成功：验收证据链还没接。
     const task = db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as {
       status: string
     }
     expect(task.status).toBe('running')
+    const subtask = db
+      .prepare('SELECT status FROM subtasks WHERE id = ?')
+      .get(result.subtaskId) as { status: string }
+    expect(subtask.status).toBe('succeeded')
+  })
+})
+
+describe('runAcpTask：验收失败（TC-009 / TC-008）', () => {
+  it('TC-009：Agent 返回 end_turn，但构建检查失败 -> fail', async () => {
+    const db = database()
+    const dir = repo()
+    const provider = new MockProvider({ ...process.env, MOCK_ACP_DELAY_MS: '0' })
+
+    const result = await runAcpTask({
+      db,
+      provider,
+      agent: resolveAgent(db, 'mock'),
+      objective: '自述成功但构建失败',
+      worktree: dir,
+      transcriptDir: join(dir, '.transcripts'),
+      checks: [
+        { kind: 'command', cmd: 'exit 1', timeoutMs: 5_000, expect: { exitCode: 0 } },
+        { kind: 'diffScope', allowedPaths: ['.'] },
+      ],
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.verdict).toBe('fail')
+    expect(result.verification?.checks[0]?.exitCode).toBe(1)
+    expect(result.verification?.checks[0]?.passed).toBe(false)
+
+    const execution = db
+      .prepare('SELECT status FROM executions WHERE id = ?')
+      .get(result.executionId) as { status: string }
+    expect(execution.status).toBe('failed')
+    const task = db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as {
+      status: string
+    }
+    expect(task.status).toBe('failed')
+  })
+
+  it('TC-008：改动 CI 配置超出 allowedPaths -> diffScope fail', async () => {
+    const db = database()
+    const dir = repo()
+    const provider = new MockProvider({
+      ...process.env,
+      MOCK_ACP_DELAY_MS: '0',
+      MOCK_ACP_WRITE_PATH: '.github/workflows/ci.yml',
+    })
+
+    const result = await runAcpTask({
+      db,
+      provider,
+      agent: resolveAgent(db, 'mock'),
+      objective: '顺便改 CI 配置',
+      worktree: dir,
+      transcriptDir: join(dir, '.transcripts'),
+      checks: [{ kind: 'diffScope', allowedPaths: ['src'] }],
+    })
+
+    expect(result.verdict).toBe('fail')
+    expect(result.evidence.changedFiles).toContain('.github/workflows/ci.yml')
+    expect(result.verification?.checks[0]?.kind).toBe('diffScope')
+    expect(result.verification?.checks[0]?.passed).toBe(false)
+  })
+})
+
+describe('runAcpTask：sandbox_denied -> Approval', () => {
+  it('验收命令被沙箱拒绝 -> 生成 pending Approval，任务 waiting_approval', async () => {
+    const db = database()
+    const dir = repo()
+    const provider = new MockProvider({ ...process.env, MOCK_ACP_DELAY_MS: '0' })
+
+    const result = await runAcpTask({
+      db,
+      provider,
+      agent: resolveAgent(db, 'mock'),
+      objective: '需要越界写的验收',
+      worktree: dir,
+      transcriptDir: join(dir, '.transcripts'),
+      checks: [
+        {
+          kind: 'command',
+          cmd: "printf 'Operation not permitted' >&2; exit 1",
+          timeoutMs: 5_000,
+          expect: { exitCode: 0 },
+        },
+      ],
+    })
+
+    expect(result.verdict).toBe('fail')
+    expect(result.approval?.reason).toBe('sandbox_denied')
+    expect(result.approval?.status).toBe('pending')
+    expect(result.approval?.decisionMode).toBe('once')
+
+    const execution = db
+      .prepare('SELECT status FROM executions WHERE id = ?')
+      .get(result.executionId) as { status: string }
+    expect(execution.status).toBe('waiting_permission')
+    const task = db.prepare('SELECT status FROM tasks WHERE id = ?').get(result.taskId) as {
+      status: string
+    }
+    expect(task.status).toBe('waiting_approval')
+    const approval = db
+      .prepare('SELECT status FROM approvals WHERE id = ?')
+      .get(result.approval?.id) as { status: string }
+    expect(approval.status).toBe('pending')
   })
 })
 

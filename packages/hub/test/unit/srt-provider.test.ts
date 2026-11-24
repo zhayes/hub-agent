@@ -186,7 +186,7 @@ describe('SrtProvider：会话初始化', () => {
 
     expect(driver.initialized).toHaveLength(1)
     const session = driver.initialized[0]
-    expect(session?.network.allowedDomains).toEqual([])
+    expect(session?.network).not.toHaveProperty('allowedDomains')
     expect(session?.filesystem.allowWrite).toEqual([])
     expect(session?.filesystem.denyRead).toContain('~/.ssh')
     expect(driver.wrapCalls).toHaveLength(2)

@@ -1,0 +1,24 @@
+{
+  "id": "rt-021",
+  "title": "自述成功但构建失败（TC-009 基线）",
+  "objective": "自述成功但构建失败（TC-009 基线）",
+  "category": "negative",
+  "shouldNotSplit": false,
+  "expectedVerdict": "fail",
+  "checks": [
+    {
+      "kind": "command",
+      "cmd": "node -e \"process.exit(1)\"",
+      "timeoutMs": 5000,
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

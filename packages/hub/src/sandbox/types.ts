@@ -12,6 +12,8 @@ import { HubError } from '../shared/errors'
  *   3. 未就绪即拒绝（fail-closed），没有 `enabled: false` 这种开关。
  */
 
+export type SandboxNetworkMode = 'agent-managed' | 'allowlist' | 'deny'
+
 export interface SandboxSpec {
   /** 任务工作区绝对路径；同时作为进程 cwd（ADR 0002 C2） */
   cwd: string
@@ -19,7 +21,16 @@ export interface SandboxSpec {
   allowedWrite: readonly string[]
   /** 额外的拒绝读路径；默认值见 settings.ts 的 DEFAULT_DENY_READ */
   denyRead?: readonly string[]
-  /** 网络白名单；空 = 全禁（allow-only 语义） */
+  /**
+   * 网络策略：
+   *   - agent-managed（默认）：不套网络白名单，Agent 自己负责模型/外部资源；
+   *     文件与凭据边界仍然强制。
+   *   - allowlist：只允许白名单域名；未声明即拒绝。
+   *   - deny：禁止一切出网。
+   * 未显式设置时：给了 allowedDomains/deniedDomains 视为 allowlist，否则 agent-managed。
+   */
+  networkMode?: SandboxNetworkMode
+  /** 仅 allowlist 模式使用；allowlist 下空数组 = 全禁 */
   allowedDomains?: readonly string[]
   deniedDomains?: readonly string[]
   /** 需要直连本机端口时开启（dev server / 集成测试） */
@@ -67,8 +78,24 @@ export interface SandboxProvider {
   dispose(): Promise<void>
 }
 
+export function networkModeOf(spec: SandboxSpec): SandboxNetworkMode {
+  if (spec.networkMode !== undefined) return spec.networkMode
+  if ((spec.allowedDomains?.length ?? 0) > 0 || (spec.deniedDomains?.length ?? 0) > 0) {
+    return 'allowlist'
+  }
+  return 'agent-managed'
+}
+
 /** 校验 spec 的静态约束；在 wrap 之前调用，错误尽早暴露 */
 export function assertSandboxSpec(spec: SandboxSpec): void {
+  if (
+    spec.networkMode !== undefined &&
+    spec.networkMode !== 'agent-managed' &&
+    spec.networkMode !== 'allowlist' &&
+    spec.networkMode !== 'deny'
+  ) {
+    throw new HubError('SANDBOX_UNAVAILABLE', `未知的 networkMode：${String(spec.networkMode)}`)
+  }
   if (!isAbsolute(spec.cwd)) {
     throw new HubError('SANDBOX_UNAVAILABLE', `沙箱 cwd 必须是绝对路径：${spec.cwd}`, {
       cwd: spec.cwd,
@@ -81,5 +108,17 @@ export function assertSandboxSpec(spec: SandboxSpec): void {
   }
   if (spec.timeoutMs !== undefined && (!Number.isFinite(spec.timeoutMs) || spec.timeoutMs <= 0)) {
     throw new HubError('SANDBOX_UNAVAILABLE', `timeoutMs 必须为正数：${spec.timeoutMs}`)
+  }
+  if (
+    spec.networkMode === 'agent-managed' &&
+    ((spec.allowedDomains?.length ?? 0) > 0 || (spec.deniedDomains?.length ?? 0) > 0)
+  ) {
+    throw new HubError(
+      'SANDBOX_UNAVAILABLE',
+      'networkMode=agent-managed 时不能同时传 allowedDomains/deniedDomains；需要白名单请显式设 networkMode=allowlist',
+    )
+  }
+  if (spec.networkMode === 'deny' && (spec.allowedDomains?.length ?? 0) > 0) {
+    throw new HubError('SANDBOX_UNAVAILABLE', 'networkMode=deny 时不能传 allowedDomains')
   }
 }

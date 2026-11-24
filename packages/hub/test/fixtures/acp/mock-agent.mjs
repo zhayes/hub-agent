@@ -8,14 +8,13 @@
  *   MOCK_ACP_REQUEST_PERMISSION=1 先发 session/request_permission，再决定是否写文件
  */
 import { spawnSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 const delayMs = Number(process.env.MOCK_ACP_DELAY_MS ?? '300')
 const requestPermission = process.env.MOCK_ACP_REQUEST_PERMISSION === '1'
-
-setTimeout(() => process.stderr.write('[mock-acp] started\n'), 10)
+const writePath = process.env.MOCK_ACP_WRITE_PATH ?? 'mock-output.txt'
 
 const rl = createInterface({ input: process.stdin })
 let sessionId = 'mock-session-1'
@@ -61,7 +60,7 @@ function maybeCommit() {
     encoding: 'utf8',
   })
   if (inside.status !== 0) return
-  spawnSync('git', ['add', 'mock-output.txt'], { cwd, encoding: 'utf8' })
+  spawnSync('git', ['add', writePath], { cwd, encoding: 'utf8' })
   spawnSync(
     'git',
     ['-c', 'user.name=Mock ACP', '-c', 'user.email=mock@local', 'commit', '-m', 'mock change'],
@@ -70,6 +69,7 @@ function maybeCommit() {
 }
 
 async function handlePrompt(id, params) {
+  process.stderr.write('[mock-acp] prompt\n')
   cancelled = false
   pendingPrompt = id
   update({
@@ -130,8 +130,9 @@ async function handlePrompt(id, params) {
     return
   }
 
+  mkdirSync(dirname(join(cwd, writePath)), { recursive: true })
   writeFileSync(
-    join(cwd, 'mock-output.txt'),
+    join(cwd, writePath),
     `mock output ${new Date().toISOString()} ${params.sessionId}\n`,
     'utf8',
   )

@@ -1,6 +1,6 @@
 # ADR 0002：沙箱从 V1.0 起强制启用（fail-closed）
 
-- **状态：** 已接受（Accepted）
+- **状态：** 已接受（Accepted）；网络默认条款由 ADR 0006 部分取代（文件/凭据边界继续有效）
 - **日期：** 2026-11-23
 - **相关：** PRD §2.1 / §6.9.7 / §17 TC-014；ARCHITECTURE §2.1 / §3.1 R8 / §12.1
 - **证据：** `poc/tc-014/`（可复跑）
@@ -128,3 +128,11 @@ HubAgent 把编码工作交给第三方 Coding Agent（Claude Code / Codex / Ope
 - `docs/ARCHITECTURE.md` §12.1（强制层设计）、§3.1 R8
 - `poc/tc-014/`（可执行验证：`run-probes.sh`、`probe.ts`、README §10 实测结果）
 - `@anthropic-ai/sandbox-runtime` 0.0.83（Apache-2.0）
+
+---
+
+## 9. 变更（2026-11-24）
+
+ADR 0006 部分取代了本 ADR 的**网络默认条款**：本地受信 Agent 默认 `agent-managed`，不套网络 allowlist/代理；文件系统与凭据边界继续由本 ADR 强制。远程 A2A / 高风险任务仍使用 `allowlist` / `deny`。
+
+本 ADR 的“唯一执行入口”“fail-closed”“cwd=worktree”“违规即证据/审批”条款不变。

@@ -1,0 +1,20 @@
+{
+  "id": "rt-008",
+  "title": "给 CLI 增加 --json 示例",
+  "objective": "给 CLI 增加 --json 示例",
+  "category": "docs",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

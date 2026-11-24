@@ -1,0 +1,20 @@
+{
+  "id": "rt-006",
+  "title": "分析依赖升级风险并给出报告",
+  "objective": "分析依赖升级风险并给出报告",
+  "category": "analysis",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

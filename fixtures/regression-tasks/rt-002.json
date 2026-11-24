@@ -1,0 +1,20 @@
+{
+  "id": "rt-002",
+  "title": "补全 README 安装步骤",
+  "objective": "补全 README 安装步骤",
+  "category": "docs",
+  "shouldNotSplit": true,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

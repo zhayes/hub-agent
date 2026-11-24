@@ -23,6 +23,9 @@ describe('Agent Registry', () => {
 
     expect(agent.name).toBe('codex')
     expect(agent.status).toBe('discovered')
+    expect(agent.networkMode).toBe('agent-managed')
+    expect(agent.allowedDomains).toEqual([])
+    expect(agent.allowedWrite).toEqual([])
     expect(listAgents(database)).toHaveLength(1)
     expect(resolveAgent(database, 'codex').id).toBe(agent.id)
     expect(resolveAgent(database).id).toBe(agent.id)
@@ -36,6 +39,20 @@ describe('Agent Registry', () => {
     expect(second.id).toBe(first.id)
     expect(second.command).toBe('new')
     expect(listAgents(database)).toHaveLength(1)
+  })
+
+  it('allowlist profile 会保存域名与写路径', () => {
+    const database = db()
+    const agent = addAgent(database, {
+      name: 'strict',
+      command: 'strict-acp',
+      networkMode: 'allowlist',
+      allowedDomains: ['api.example.com'],
+      allowedWrite: ['/tmp/agent-state'],
+    })
+    expect(agent.networkMode).toBe('allowlist')
+    expect(agent.allowedDomains).toEqual(['api.example.com'])
+    expect(agent.allowedWrite).toEqual(['/tmp/agent-state'])
   })
 
   it('非法名称与空命令被拒', () => {

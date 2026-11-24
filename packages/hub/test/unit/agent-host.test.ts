@@ -315,7 +315,7 @@ describe('AgentHost：三层超时', () => {
   it('total timeout：持续有输出也会被总时长截断', async () => {
     const dir = worktree()
     const provider = new FakeProvider()
-    provider.argv = script("setInterval(() => console.log('tick'), 20)")
+    provider.argv = ['/bin/bash', '-c', 'echo tick; sleep 10']
     const host = hostWith(provider)
 
     const process = await host.spawn('p1', {

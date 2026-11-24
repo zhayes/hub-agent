@@ -1,0 +1,20 @@
+{
+  "id": "rt-015",
+  "title": "修复并发写入竞态",
+  "objective": "修复并发写入竞态",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

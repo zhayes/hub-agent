@@ -163,7 +163,7 @@ describe('ACP client：prompt 与事件映射', () => {
       events.some((event) => event.kind === 'tool.call.update' && event.status === 'completed'),
     ).toBe(true)
     expect(events.some((event) => event.kind === 'prompt.finished')).toBe(true)
-    expect(stderr.join('\n')).toContain('[mock-acp] started')
+    expect(stderr.join('\n')).toContain('[mock-acp] prompt')
     expect(existsSync(join(dir, 'mock-output.txt'))).toBe(true)
   })
 

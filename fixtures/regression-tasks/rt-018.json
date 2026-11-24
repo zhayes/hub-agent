@@ -1,0 +1,20 @@
+{
+  "id": "rt-018",
+  "title": "修复错误日志重复输出",
+  "objective": "修复错误日志重复输出",
+  "category": "bugfix",
+  "shouldNotSplit": false,
+  "expectedVerdict": "pass",
+  "checks": [
+    {
+      "kind": "fileExists",
+      "path": "mock-output.txt"
+    },
+    {
+      "kind": "diffScope",
+      "allowedPaths": [
+        "."
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { SandboxSpec } from './types'
+import { networkModeOf, type SandboxNetworkMode, type SandboxSpec } from './types'
 
 /**
  * SandboxSpec → srt settings（ARCHITECTURE §12.1 的默认策略）。
@@ -25,7 +25,8 @@ export const DEFAULT_DENY_WRITE: readonly string[] = ['.env', '.env.*']
 
 export interface SrtSettings {
   network: {
-    allowedDomains: string[]
+    /** 仅在 allowlist / deny 模式出现；缺省 = 不做网络隔离（agent-managed） */
+    allowedDomains?: string[]
     deniedDomains: string[]
     allowLocalBinding?: boolean
   }
@@ -48,14 +49,25 @@ function unique(paths: readonly string[]): string[] {
  * 否则连 `git commit` 都跑不了（TC-014 的"误伤"一侧）。
  */
 export function buildSrtSettings(spec: SandboxSpec): SrtSettings {
+  const mode = networkModeOf(spec)
+  const network =
+    mode === 'agent-managed'
+      ? {
+          deniedDomains: [],
+          ...(spec.allowLocalBinding === undefined
+            ? {}
+            : { allowLocalBinding: spec.allowLocalBinding }),
+        }
+      : {
+          allowedDomains: mode === 'deny' ? [] : unique(spec.allowedDomains ?? []),
+          deniedDomains: unique(spec.deniedDomains ?? []),
+          ...(spec.allowLocalBinding === undefined
+            ? {}
+            : { allowLocalBinding: spec.allowLocalBinding }),
+        }
+
   return {
-    network: {
-      allowedDomains: unique(spec.allowedDomains ?? []),
-      deniedDomains: unique(spec.deniedDomains ?? []),
-      ...(spec.allowLocalBinding === undefined
-        ? {}
-        : { allowLocalBinding: spec.allowLocalBinding }),
-    },
+    network,
     filesystem: {
       denyRead: unique([...DEFAULT_DENY_READ, ...(spec.denyRead ?? [])]),
       // 默认不额外放行读；需要时由 spec 的 denyRead 反向收窄
@@ -68,6 +80,8 @@ export function buildSrtSettings(spec: SandboxSpec): SrtSettings {
 
 /** 会话级策略：这些字段在 `initialize()` 后固定，不能按命令改变 */
 export interface SrtSessionPolicy {
+  /** 默认 agent-managed：会话不安装网络代理，交给 Agent 自己 */
+  networkMode?: SandboxNetworkMode
   allowLocalBinding?: boolean
   deniedDomains?: readonly string[]
 }
@@ -78,19 +92,30 @@ export interface SrtSessionPolicy {
  * 为什么基线故意「什么都不给」：
  *   - `allowWrite` 为空：写授权是 per-command 的，基线放行会让 A 任务的
  *     命令拥有 B 任务 worktree 的写权限。
- *   - `allowedDomains` 为空：域名白名单按命令在 wrap 前注册
- *     （`registerCommandNetworkLists`），不放进会话配置，否则同样会串任务。
+ *   - `allowedDomains` 不放进会话基线：allowlist 模式按命令在 wrap 前注册
+ *     （`registerCommandNetworkLists`），否则会串任务；agent-managed 则直接不装代理。
  *   - 凭据目录仍然默认拒绝：这是全局底线，不随任务变化。
  */
 export function buildSrtSessionSettings(policy: SrtSessionPolicy = {}): SrtSettings {
+  const mode = policy.networkMode ?? 'agent-managed'
+  const network =
+    mode === 'agent-managed'
+      ? {
+          deniedDomains: [],
+          ...(policy.allowLocalBinding === undefined
+            ? {}
+            : { allowLocalBinding: policy.allowLocalBinding }),
+        }
+      : {
+          allowedDomains: [],
+          deniedDomains: unique(policy.deniedDomains ?? []),
+          ...(policy.allowLocalBinding === undefined
+            ? {}
+            : { allowLocalBinding: policy.allowLocalBinding }),
+        }
+
   return {
-    network: {
-      allowedDomains: [],
-      deniedDomains: unique(policy.deniedDomains ?? []),
-      ...(policy.allowLocalBinding === undefined
-        ? {}
-        : { allowLocalBinding: policy.allowLocalBinding }),
-    },
+    network,
     filesystem: {
       denyRead: unique(DEFAULT_DENY_READ),
       allowRead: [],

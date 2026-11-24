@@ -1,6 +1,9 @@
 #!/usr/bin/env node
+import { scanRecovery } from '../runtime/recovery/scan'
 import { acquireLock } from '../shared/lock'
-import { hubDir, lockPath } from '../shared/paths'
+import { dbPath, hubDir, lockPath } from '../shared/paths'
+import { openDatabase } from '../storage/db'
+import { migrate } from '../storage/migrate'
 
 /**
  * M0 的 daemon 只验证一件事：单实例语义 + 干净退出。
@@ -18,6 +21,11 @@ const checkOnly = args.has('--check')
 async function main(): Promise<void> {
   const dir = hubDir()
   const lock = await acquireLock(dir, lockPath(dir))
+  const db = openDatabase(dbPath(dir))
+  migrate(db)
+  // 启动恢复扫描：非终态 Execution 先收敛为 unknown，交 Brain/用户决策（M8）。
+  const recovery = scanRecovery(db)
+  db.close()
 
   process.stdout.write(
     `${JSON.stringify({
@@ -25,6 +33,7 @@ async function main(): Promise<void> {
       pid: process.pid,
       hubDir: dir,
       lock: lock.path,
+      recovery,
       note: 'M2 骨架：HTTP/SSE/调度在 M3 之后接入',
     })}\n`,
   )

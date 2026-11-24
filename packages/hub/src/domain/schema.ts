@@ -74,15 +74,24 @@ export const subtaskSchema = z.object({
   updatedAt: timestampSchema,
 })
 
-export const verificationCheckSchema = z.object({
-  checkId: nonEmpty,
-  kind: z.enum(['command', 'fileExists', 'diffScope', 'noUnexpectedChange', 'llmReview']),
-  passed: z.boolean(),
-  command: z.string().optional(),
-  exitCode: z.number().int().optional(),
-  outputRef: z.string().optional(),
-  durationMs: z.number().nonnegative().optional(),
-})
+export const verificationCheckSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('command'),
+    cmd: nonEmpty,
+    timeoutMs: z.number().int().positive(),
+    expect: z.object({
+      exitCode: z.union([z.number().int(), z.array(z.number().int()).min(1)]),
+    }),
+  }),
+  z.object({ kind: z.literal('fileExists'), path: nonEmpty }),
+  z.object({ kind: z.literal('diffScope'), allowedPaths: z.array(z.string()) }),
+  z.object({ kind: z.literal('noUnexpectedChange'), paths: z.array(z.string()) }),
+  z.object({
+    kind: z.literal('llmReview'),
+    rubric: nonEmpty,
+    evidenceRefs: z.array(z.string()),
+  }),
+])
 
 export const executionEvidenceSchema = z.object({
   branch: z.string().optional(),
@@ -107,10 +116,21 @@ export const executionSchema = z.object({
   finishedAt: timestampSchema.optional(),
 })
 
+const verificationCheckResultSchema = z.object({
+  checkId: nonEmpty,
+  kind: z.enum(['command', 'fileExists', 'diffScope', 'noUnexpectedChange', 'llmReview']),
+  passed: z.boolean(),
+  command: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  outputRef: z.string().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  manualRequired: z.boolean().optional(),
+})
+
 export const verificationRunSchema = z.object({
   id: verificationRunIdSchema,
   executionId: executionIdSchema,
-  checks: z.array(verificationCheckSchema),
+  checks: z.array(verificationCheckResultSchema),
   verdict: z.enum(['pass', 'fail', 'manual_required']),
   decidedBy: z.enum(['runtime', 'brain', 'human']),
   createdAt: timestampSchema,

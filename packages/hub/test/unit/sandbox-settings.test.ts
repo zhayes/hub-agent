@@ -29,6 +29,12 @@ describe('SandboxSpec 静态校验', () => {
   it('合法 spec 不抛错', () => {
     expect(() => assertSandboxSpec(spec({ allowedWrite: ['/work/project/src'] }))).not.toThrow()
   })
+
+  it('未知 networkMode 被拒', () => {
+    expect(() =>
+      assertSandboxSpec(spec({ networkMode: 'bogus' as unknown as SandboxSpec['networkMode'] })),
+    ).toThrowError(/networkMode/)
+  })
 })
 
 describe('srt settings：读默认放行 + 显式 deny', () => {
@@ -73,18 +79,32 @@ describe('srt settings：写默认拒绝 + 显式 allow', () => {
   })
 })
 
-describe('srt settings：网络默认全禁', () => {
-  it('未声明时白名单为空（= 无网络）', () => {
+describe('srt settings：网络默认 agent-managed', () => {
+  it('默认不设置 allowedDomains（不安装网络代理）', () => {
     const settings = buildSrtSettings(spec())
-    expect(settings.network.allowedDomains).toEqual([])
+    expect(settings.network).not.toHaveProperty('allowedDomains')
     expect(settings.network.deniedDomains).toEqual([])
   })
 
-  it('显式声明的域名被保留且去重', () => {
+  it('显式 allowlist 的域名被保留且去重', () => {
     const settings = buildSrtSettings(
-      spec({ allowedDomains: ['registry.npmjs.org', 'registry.npmjs.org', 'github.com'] }),
+      spec({
+        networkMode: 'allowlist',
+        allowedDomains: ['registry.npmjs.org', 'registry.npmjs.org', 'github.com'],
+      }),
     )
     expect(settings.network.allowedDomains).toEqual(['registry.npmjs.org', 'github.com'])
+  })
+
+  it('deny 模式允许列表为空（代理拒绝全部出网）', () => {
+    const settings = buildSrtSettings(spec({ networkMode: 'deny' }))
+    expect(settings.network.allowedDomains).toEqual([])
+  })
+
+  it('agent-managed 不能同时声明域名白名单', () => {
+    expect(() =>
+      assertSandboxSpec(spec({ networkMode: 'agent-managed', allowedDomains: ['example.com'] })),
+    ).toThrowError(/agent-managed/)
   })
 
   it('allowLocalBinding 只在显式开启时出现', () => {
@@ -94,23 +114,26 @@ describe('srt settings：网络默认全禁', () => {
 })
 
 describe('srt 会话基线：不把任务级权限放进全局配置', () => {
-  it('基线不授予任何写权限，也不放行任何域名', () => {
+  it('默认 agent-managed：不授予写权限，也不安装网络代理', () => {
     const settings = buildSrtSessionSettings()
     expect(settings.filesystem.allowWrite).toEqual([])
-    expect(settings.network.allowedDomains).toEqual([])
+    expect(settings.network).not.toHaveProperty('allowedDomains')
     expect(settings.filesystem.denyRead).toEqual(DEFAULT_DENY_READ)
     expect(settings.filesystem.denyWrite).toEqual(DEFAULT_DENY_WRITE)
   })
 
-  it('会话级 deniedDomains 去重，allowLocalBinding 只在显式开启时出现', () => {
+  it('allowlist 会话：域名基线为空，deniedDomains 去重', () => {
     const settings = buildSrtSessionSettings({
+      networkMode: 'allowlist',
       deniedDomains: ['evil.example', 'evil.example', 'other.example'],
     })
+    expect(settings.network.allowedDomains).toEqual([])
     expect(settings.network.deniedDomains).toEqual(['evil.example', 'other.example'])
     expect(settings.network).not.toHaveProperty('allowLocalBinding')
 
-    expect(buildSrtSessionSettings({ allowLocalBinding: true }).network.allowLocalBinding).toBe(
-      true,
-    )
+    expect(
+      buildSrtSessionSettings({ networkMode: 'allowlist', allowLocalBinding: true }).network
+        .allowLocalBinding,
+    ).toBe(true)
   })
 })
