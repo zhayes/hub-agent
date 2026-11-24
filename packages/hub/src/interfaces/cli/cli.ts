@@ -434,10 +434,19 @@ export function createCli(version: string): Command {
                 ...(options.allowWrite ?? []),
               ]),
             ]
+            const brain =
+              options.brain === false
+                ? undefined
+                : createBrainFromEnv({
+                    ...process.env,
+                    HUBAGENT_BRAIN_MODE:
+                      options.brainMode ?? process.env.HUBAGENT_BRAIN_MODE ?? 'pi',
+                  })
             const parallel = await runParallelAgents({
               db,
               provider,
               agents,
+              ...(brain === undefined ? {} : { brain }),
               objective: goal,
               repoRoot: options.worktree ?? process.cwd(),
               checks,
@@ -552,6 +561,7 @@ export function createCli(version: string): Command {
                 ? await runAcpTask(common)
                 : await runGoalWithBrain({
                     ...common,
+                    availableAgents: listAgents(db),
                     ...(brain === undefined ? {} : { brain }),
                   })
             let outputResult: typeof result & {

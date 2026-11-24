@@ -8,6 +8,7 @@ import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
 import { runAcpWithRetry } from './acp-retry'
 import type { RunAcpTaskOptions, RunAcpTaskResult } from './acp-run'
+import type { AgentRecord } from './agent-registry'
 import { runBrainRound } from './brain-loop'
 import { createClarification } from './clarify'
 import { cancelTask } from './recovery/cancel'
@@ -24,6 +25,8 @@ export interface RunGoalWithBrainOptions
   extends Omit<RunAcpTaskOptions, 'goalId' | 'plan' | 'taskId' | 'subtaskId'> {
   brain?: OrchestratorBrain
   budget?: BrainBudget
+  /** 可参与自动换 Agent 的候选；默认只有 options.agent */
+  availableAgents?: readonly AgentRecord[]
 }
 
 export interface RunGoalWithBrainResult {
@@ -68,16 +71,13 @@ export async function runGoalWithBrain(
   let state = loadState(options.db)
   state = appendEvent(options.db, state, { type: 'goal.created', goal }).state
 
-  const agents = [
-    {
-      id: options.agent.id,
-      name: options.agent.name,
-      status: options.agent.status,
-      ...(options.agent.capabilities === undefined
-        ? {}
-        : { capabilities: options.agent.capabilities }),
-    },
-  ]
+  const availableAgents = options.availableAgents ?? [options.agent]
+  const agents = availableAgents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    status: agent.status,
+    ...(agent.capabilities === undefined ? {} : { capabilities: agent.capabilities }),
+  }))
 
   const decompose = await runBrainRound({
     db: options.db,

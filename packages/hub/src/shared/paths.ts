@@ -21,3 +21,7 @@ export function lockPath(dir: string): string {
 export function dbPath(dir: string): string {
   return join(dir, 'state.db')
 }
+
+export function tokenPath(dir: string): string {
+  return join(dir, 'token')
+}

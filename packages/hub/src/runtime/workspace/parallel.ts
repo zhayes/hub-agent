@@ -1,3 +1,4 @@
+import type { BrainBudget, OrchestratorBrain } from '../../brain/types'
 import type { Goal, Subtask, Task, VerificationCheck } from '../../domain/entities'
 import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../../domain/ids'
 import type { SandboxNetworkMode, SandboxProvider } from '../../sandbox/types'
@@ -5,8 +6,10 @@ import { newId } from '../../shared/id'
 import type { Db } from '../../storage/db'
 import { loadState } from '../../storage/queries/state'
 import { appendEvent } from '../../storage/write/events'
-import { type RunAcpTaskResult, runAcpTask } from '../acp-run'
+import { runAcpWithRetry } from '../acp-retry'
+import type { RunAcpTaskResult } from '../acp-run'
 import type { AgentRecord } from '../agent-registry'
+import { runBrainRound } from '../brain-loop'
 import { completeTaskAfterDelivery } from './finalize'
 import { mergeNoFf } from './git'
 import { abortWorktreeSession, createWorktreeSession, type WorktreeSession } from './session'
@@ -23,6 +26,8 @@ export interface RunParallelAgentsOptions {
   allowedDomains?: readonly string[]
   allowedWrite?: readonly string[]
   transcriptDir?: string
+  brain?: OrchestratorBrain
+  budget?: BrainBudget
 }
 
 export interface ParallelSubtaskResult {
@@ -41,6 +46,7 @@ export interface RunParallelAgentsResult {
   taskId: string
   subtasks: ParallelSubtaskResult[]
   merges: Array<{ branch: string; ok: boolean }>
+  decisions?: number
 }
 
 /** “分析依赖风险，同时检查核心代码质量” → 两个子任务目标。 */
@@ -98,7 +104,34 @@ export async function runParallelAgents(
   state = appendEvent(options.db, state, { type: 'goal.created', goal }).state
   state = appendEvent(options.db, state, { type: 'task.created', task }).state
 
-  const objectives = splitParallelObjective(options.objective, options.agents.length)
+  let objectives = splitParallelObjective(options.objective, options.agents.length)
+  let decisions: number | undefined
+  if (options.brain !== undefined) {
+    const round = await runBrainRound({
+      db: options.db,
+      brain: options.brain,
+      goalId,
+      reason: 'plan_invalid',
+      dedupeKey: `goal:${goalId}:parallel-plan`,
+      agents: options.agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        status: agent.status,
+        ...(agent.capabilities === undefined ? {} : { capabilities: agent.capabilities }),
+      })),
+      ...(options.budget === undefined ? {} : { budget: options.budget }),
+    })
+    decisions = round === undefined ? 0 : 1
+    const drafts =
+      round?.actions
+        .filter((action) => action.type === 'revise_plan')
+        .flatMap((action) => action.subtasks) ?? []
+    if (drafts.length > 0) {
+      objectives = drafts.slice(0, options.agents.length).map((draft) => draft.description)
+      while (objectives.length < options.agents.length) objectives.push(options.objective)
+    }
+  }
+
   const subtasks = options.agents.map((agent, index): Subtask => {
     const subtask: Subtask = {
       id: asSubtaskId(newId()),
@@ -147,10 +180,11 @@ export async function runParallelAgents(
 
     const results = await Promise.all(
       sessions.map(async ({ session, agent, subtask }) => {
-        const result = await runAcpTask({
+        const result = await runAcpWithRetry({
           db: options.db,
           provider: options.provider,
           agent,
+          availableAgents: options.agents,
           objective: subtask.description,
           worktree: session.worktreePath,
           goalId,
@@ -194,6 +228,7 @@ export async function runParallelAgents(
         ok: item.result.ok,
       })),
       merges,
+      ...(decisions === undefined ? {} : { decisions }),
     }
   } finally {
     for (const item of sessions) {

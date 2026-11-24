@@ -762,6 +762,8 @@ Solid 的失败模式是**静默**的：代码能编译、页面不报错，但�
 
 `hubagent doctor` 是重要的落地功能：检查 Node 版本、SQLite 可写、git 可用、各 harness 能否启动、端口占用、配置文件合法性。
 
+**M11 落地（首个切片）。** `interfaces/http/app.ts` 提供 tasks/evidence/decisions/agents/approvals/SSE；`hubagentd` 默认监听 `127.0.0.1:7788`，token 写入 `$HUBAGENT_HOME/token`（0600）。`packages/web` 是 Solid 2 + Vite 控制台，构建后由 daemon 同源托管；当前没有任务图/成本图表/UI SDK，属于可用切片而非完整设计系统。
+
 **M9 落地。** CLI 已覆盖 `init/config/logs/gc/doctor/maintenance`、`agent add|list|show`、`run`（单 Agent / `--agents` 并行）、`task list|show|events|evidence|decisions|pause|resume|cancel|retry|clean|answer`、`approval list|approve|reject`，全部支持 `--json`。退出码由 `interfaces/cli/exit-codes.ts` 统一映射 0/2/3/4/5；`scripts/acceptance-v1.sh` 跑最小闭环。
 
 ---

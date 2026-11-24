@@ -1,0 +1,22 @@
+{
+  "name": "@hubagent/web",
+  "version": "0.0.0-m0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@solidjs/web": "2.0.3",
+    "solid-js": "2.0.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@solidjs/babel-plugin": "2.0.2",
+    "@solidjs/compiler": "2.0.2",
+    "@solidjs/vite-plugin": "3.0.1",
+    "vite": "8.3.8"
+  }
+}

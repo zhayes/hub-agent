@@ -8,19 +8,21 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "typecheck": "tsc -p packages/hub/tsconfig.json --noEmit",
-    "lint": "biome check packages/hub/src packages/hub/test",
-    "lint:fix": "biome check --write packages/hub/src packages/hub/test",
+    "typecheck": "tsc -p packages/hub/tsconfig.json --noEmit && pnpm --filter @hubagent/web typecheck",
+    "lint": "biome check packages/hub/src packages/hub/test packages/web/src packages/web/vite.config.ts",
+    "lint:fix": "biome check --write packages/hub/src packages/hub/test packages/web/src packages/web/vite.config.ts",
     "test:unit": "vitest run",
     "test:kill9": "tsx packages/hub/test/manual/kill9-test.ts",
     "test:srt-acp": "tsx packages/hub/test/manual/srt-acp-smoke.ts",
     "arch": "depcruise packages/hub/src --config .dependency-cruiser.cjs",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm arch",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm arch && pnpm build:web",
     "hubagent": "tsx packages/hub/src/bin/hubagent.ts",
     "hubagentd": "tsx packages/hub/src/bin/hubagentd.ts",
     "doctor": "tsx packages/hub/src/bin/hubagent.ts doctor",
     "bench": "tsx packages/hub/src/bench/run.ts",
-    "test:brain-real": "tsx packages/hub/test/manual/real-brain-smoke.ts"
+    "test:brain-real": "tsx packages/hub/test/manual/real-brain-smoke.ts",
+    "build:web": "pnpm --filter @hubagent/web build",
+    "dev:web": "pnpm --filter @hubagent/web dev"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

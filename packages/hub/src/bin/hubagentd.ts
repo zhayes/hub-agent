@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import { resolve } from 'node:path'
+import { serve } from '@hono/node-server'
+import { createHttpApp } from '../interfaces/http/app'
+import { ensureHttpToken } from '../interfaces/http/token'
 import { scanRecovery } from '../runtime/recovery/scan'
 import { acquireLock } from '../shared/lock'
-import { dbPath, hubDir, lockPath } from '../shared/paths'
+import { dbPath, hubDir, lockPath, tokenPath } from '../shared/paths'
 import { openDatabase } from '../storage/db'
 import { migrate } from '../storage/migrate'
 
@@ -25,7 +29,11 @@ async function main(): Promise<void> {
   migrate(db)
   // 启动恢复扫描：非终态 Execution 先收敛为 unknown，交 Brain/用户决策（M8）。
   const recovery = scanRecovery(db)
-  db.close()
+  const token = ensureHttpToken(dir)
+  const port = Number.parseInt(process.env['HUBAGENT_PORT'] ?? '7788', 10)
+  const webDist = process.env['HUBAGENT_WEB_DIST'] ?? resolve('packages/web/dist')
+  const app = createHttpApp({ db, token: token.token, version: '0.0.0-m0', webDist })
+  const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port })
 
   process.stdout.write(
     `${JSON.stringify({
@@ -33,12 +41,15 @@ async function main(): Promise<void> {
       pid: process.pid,
       hubDir: dir,
       lock: lock.path,
+      port,
+      tokenPath: tokenPath(dir),
       recovery,
-      note: 'M2 骨架：HTTP/SSE/调度在 M3 之后接入',
     })}\n`,
   )
 
   if (checkOnly) {
+    server.close()
+    db.close()
     await lock.release()
     return
   }
@@ -57,6 +68,8 @@ async function main(): Promise<void> {
     if (shuttingDown) return
     shuttingDown = true
     stop()
+    server.close()
+    db.close()
     await lock.release()
     process.stdout.write(`${JSON.stringify({ ok: true, stopped: signal })}\n`)
     process.exitCode = 0

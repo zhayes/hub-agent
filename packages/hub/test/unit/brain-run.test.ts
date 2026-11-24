@@ -374,3 +374,51 @@ describe('Brain actions：delegate', () => {
     expect(subtasks.map((item) => item.status)).toEqual(['succeeded', 'ready'])
   })
 })
+
+class SwitchProvider implements SandboxProvider {
+  describe(): SandboxDescription {
+    return { kind: 'srt', platform: process.platform, ready: true, detail: 'test' }
+  }
+
+  async wrap(command: string, _spec: SandboxSpec): Promise<SandboxedCommand> {
+    if (command === 'mock-acp') {
+      return {
+        argv: [process.execPath, mockAgent],
+        env: { ...process.env, MOCK_ACP_DELAY_MS: '0', MOCK_ACP_ALWAYS_FAIL: '1' },
+      }
+    }
+    if (command === 'mock-acp-alt') {
+      return {
+        argv: [process.execPath, mockAgent],
+        env: { ...process.env, MOCK_ACP_DELAY_MS: '0' },
+      }
+    }
+    return { argv: ['/bin/bash', '-c', command], env: { ...process.env } }
+  }
+
+  async dispose(): Promise<void> {}
+}
+
+describe('Selection Engine：自动换 Agent', () => {
+  it('同 Agent 重试耗尽后自动选择另一个 Agent 完成', async () => {
+    const db = database()
+    addAgent(db, { name: 'mock2', command: 'mock-acp-alt' })
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new SwitchProvider(),
+      brain: new ScriptedBrain(),
+      agent: resolveAgent(db, 'mock'),
+      availableAgents: [resolveAgent(db, 'mock'), resolveAgent(db, 'mock2')],
+      objective: 'switch agent',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(true)
+    const executions = db
+      .prepare('SELECT agent_id, status FROM executions ORDER BY created_at ASC')
+      .all() as Array<{ agent_id: string; status: string }>
+    expect(executions.map((item) => item.status)).toEqual(['failed', 'failed', 'succeeded'])
+    expect(executions[2]?.agent_id).not.toBe(executions[0]?.agent_id)
+  })
+})
