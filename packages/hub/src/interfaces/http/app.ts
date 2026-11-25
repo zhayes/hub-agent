@@ -8,13 +8,16 @@ import { decideApproval, listApprovals } from '../../runtime/approval'
 import type { ChatService } from '../../runtime/chat/chat-service'
 import { listDecisions } from '../../runtime/decision-record'
 import {
+  deleteProvider,
+  listProviders,
   parseModelPatch,
   readModelConfig,
   writeModelConfig,
 } from '../../runtime/model-config/model-config'
-import { HubError } from '../../shared/errors'
+import { type ErrorCode, HubError } from '../../shared/errors'
 import { resolvePiAgentDir } from '../../shared/paths'
 import type { Db } from '../../storage/db'
+import { listAgentPresence } from '../../storage/queries/agent-presence'
 import { getChatThread, listChatMessagesAfter } from '../../storage/queries/chat'
 import { listEventsSince } from '../../storage/queries/events'
 import { getTaskEvidence } from '../../storage/queries/evidence'
@@ -53,7 +56,11 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   /* 模型设置就是 Pi profile 的 models.json / settings.json；永远不回传明文 key。 */
   app.get('/api/v1/settings/model', (context) => {
     try {
-      return context.json({ ok: true, model: readModelConfig(modelDir) })
+      return context.json({
+        ok: true,
+        model: readModelConfig(modelDir),
+        providers: listProviders(modelDir),
+      })
     } catch (error) {
       return errorResponse(context, error)
     }
@@ -63,7 +70,16 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     const body = await context.req.json<unknown>().catch((): unknown => undefined)
     try {
       const model = writeModelConfig(modelDir, parseModelPatch(body))
-      return context.json({ ok: true, model })
+      return context.json({ ok: true, model, providers: listProviders(modelDir) })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
+  app.delete('/api/v1/settings/model/providers/:providerId', (context) => {
+    try {
+      const providers = deleteProvider(modelDir, context.req.param('providerId'))
+      return context.json({ ok: true, model: readModelConfig(modelDir), providers })
     } catch (error) {
       return errorResponse(context, error)
     }
@@ -283,6 +299,11 @@ export function createHttpApp(options: HttpAppOptions): Hono {
 
   app.get('/api/v1/agents', (context) => context.json({ ok: true, agents: listAgents(db) }))
 
+  /* Agent Office 舞台的只读 presence（PLAN-AGENT-OFFICE §3.1）；不写库。 */
+  app.get('/api/v1/agents/presence', (context) =>
+    context.json({ ok: true, ...listAgentPresence(db) }),
+  )
+
   app.get('/api/v1/approvals', (context) =>
     context.json({ ok: true, approvals: listApprovals(db) }),
   )
@@ -379,12 +400,18 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   return app
 }
 
+/** 错误码 → HTTP 状态。没有登记的按 500 处理。 */
+const ERROR_STATUS: Partial<Record<ErrorCode, 400 | 404 | 500>> = {
+  CONFIG_INVALID: 400,
+  NOT_FOUND: 404,
+}
+
 /** 只向客户端暴露稳定错误码，不泄漏底层异常。 */
 function errorResponse(context: Context, error: unknown): Response {
   if (error instanceof HubError) {
     return context.json(
       { code: error.code, message: error.message },
-      error.code === 'CONFIG_INVALID' ? 400 : 500,
+      ERROR_STATUS[error.code] ?? 500,
     )
   }
   return context.json(

@@ -146,6 +146,14 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 - **没有「测试连接」。** hub 没有探测 provider 的能力，与其做个假按钮，不如不做；错的 baseUrl 会在下一次 Brain 回合以 `BRAIN_UNAVAILABLE` 暴露。
 - **中文文案限在字体子集内。** 214 字子集里没有「模型 / 密钥 / 显示 / 隐藏 / 删除」，所以该节标题与字段名用 ASCII 术语（`Model` / `Provider` / `API Key` / `Clear key`），提示语才用中文（`API 地址与 Token 保存在本机。`）。新增了单测把「中文文案 ⊆ cjk-chars.txt」钉住，避免以后静默缺字。
 
+**图标与表单基元（2026-11-25）：**
+
+- **图标全部换成 Lucide**。`Icon.tsx` 不再手绘 path，改为 `@lucide/solid@1.79.0` 的语义名映射（`settings` → `Settings`、`trash` → `Trash`…），保持 `IconName` 联合类型不变，所以调用点一处没改。按图标深路径引入（`@lucide/solid/icons/settings`）而不是包 barrel，避免把 1600 个图标拖进图。`stroke-width` 取 1.6——Lucide 默认 2 在 16px 下比旧手绘集粗一档，整页会显得重。代价：主包 286.52 → 307.46 kB（+6.1 kB gzip，32 个图标）。
+- **表单基元抽到 `components/ui/`**：`TextInput`（含 mono / autofocus / numeric）、`SelectInput`（原生 select + 自绘 chevron）、`Dialog`（原生 `<dialog>`）。`SelectInput` 解决的是真实缺陷：原生箭头贴在文字上的内边距里，所以在 `appearance-none` 之后把它画在 `right-3`，右侧留 `pr-9`。
+- **Dialog 不用 `@ui-sdk/dialog`**。`<dialog>` + `showModal()` 自带焦点陷阱、背景 inert、Esc、top layer；引 SDK 弹层会把命令面板那 ~180 kB 的地基拖进主包。`::backdrop` 只能写在 `styles/tailwind.css`（preflight 是关的）。
+- **设置页从单表单改成 provider 列表 + 弹框**：一行一个 provider（名称、`自定义`/`默认` 徽章、密钥状态点、编辑/删除），底部虚线「添加模型提供商」，空列表时给 DeepSeek 预填项但不落盘。新增 `GET` 返回 `providers[]`、`DELETE /api/v1/settings/model/providers/:id`（删默认会顺位补选，全删清掉默认值）。保存时 `makeDefault` 由表单里的「默认」勾选决定，避免“改个别的密钥把默认悄改了”。
+- **中文字体子集终于可复现**：新增 `scripts/build-cjk-subset.mjs`（`pnpm fonts` / `pnpm fonts:write`），从 `packages/web/src` 提取非注释行的汉字 + 固定标点，走 Google Fonts `text=` 取单文件变量字体。子集 214 → 267 字，59 → 73 kB。没有它就没法把「模型 / 删除 / 编辑 / 添加提供商」写进 UI（旧约束是“缺字就换措辞”）。
+
 **体积实测（生产包，raw / gzip）：** 主包 286.52 / 97.36 kB，命令面板单独成块 55.54 / 19.78 kB（首次 ⌘K 才加载）。SDK 的弹层基础是主要成本：只挂 Toast 大约 +83 kB，移除它主包回到 203.22 kB。若要再压，下一步是把 Toast 也改成按需（需一个待发队列避免首次提示丢失）。
 
 ## 7. 复审触发条件

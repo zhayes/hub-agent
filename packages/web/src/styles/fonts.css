@@ -34,8 +34,9 @@
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* UI character subset (214 glyphs). Missing characters fall back to the system
-   CJK font, so user-generated task titles still render. */
+/* UI character subset. Regenerate with `pnpm fonts:write` after changing copy:
+   the script derives the character set from packages/web/src. Missing characters
+   fall back to the system CJK font, so user-generated task titles still render. */
 @font-face {
   font-family: "Noto Sans SC Subset";
   font-style: normal;

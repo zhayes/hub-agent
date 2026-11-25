@@ -61,6 +61,28 @@ export interface ModelConfigPatch {
   contextWindow?: number | null
   maxTokens?: number | null
   thinkingLevel?: ThinkingLevel | null
+  /** 默认 `true`：保存后该 provider 成为默认。 */
+  makeDefault?: boolean
+}
+
+/** 列表页一行：一个 provider 及其当前选中的模型。 */
+export interface ProviderSummary {
+  providerId: string
+  name?: string
+  /** 该 provider 的当前模型（默认 provider 用 deprecated `defaultModel`）。 */
+  modelId?: string
+  modelIds: string[]
+  api?: string
+  baseUrl?: string
+  apiKeySet: boolean
+  apiKeyKind: ApiKeyKind
+  apiKeyHint?: string
+  /** 当前模型的参数（编辑时回填用）。 */
+  contextWindow?: number
+  maxTokens?: number
+  /** 只有默认 provider 才有全局 thinking 级别。 */
+  thinkingLevel?: ThinkingLevel
+  isDefault: boolean
 }
 
 export function readModelConfig(agentDir: string): ModelConfigView {
@@ -172,26 +194,105 @@ export function writeModelConfig(agentDir: string, patch: ModelConfigPatch): Mod
   nextProvider['models'] = modelsList
   providers[providerId] = nextProvider
 
-  const nextModels: JsonObject = {
-    $schema: asString(models['$schema']) ?? MODELS_SCHEMA,
-    ...models,
-    providers,
-  }
-
   const nextSettings: JsonObject = {
     ...settings,
-    defaultProvider: providerId,
-    defaultModel: modelId,
+    ...(patch.makeDefault === false ? {} : { defaultProvider: providerId, defaultModel: modelId }),
   }
   if (patch.thinkingLevel === null) delete nextSettings['defaultThinkingLevel']
   else if (patch.thinkingLevel !== undefined) {
     nextSettings['defaultThinkingLevel'] = assertThinkingLevel(patch.thinkingLevel)
   }
 
-  mkdirSync(agentDir, { recursive: true, mode: 0o700 })
-  writeJsonAtomic(modelsPath, nextModels)
-  writeJsonAtomic(settingsPath, nextSettings)
+  persist(agentDir, models, nextSettings, providers)
   return readModelConfig(agentDir)
+}
+
+/**
+ * 删除一个 provider。如果它正好是默认的，按确定性顺序补选一个（先剩余的
+ * 第一个），全删光则把 defaultProvider / defaultModel 一起清掉。
+ */
+export function deleteProvider(agentDir: string, providerId: string): ProviderSummary[] {
+  const id = assertProviderId(providerId)
+  const models = readJsonFile(join(agentDir, 'models.json')) ?? {}
+  const settings = readJsonFile(join(agentDir, 'settings.json')) ?? {}
+  const providers = isObject(models['providers']) ? { ...models['providers'] } : {}
+  if (!(id in providers)) throw new HubError('NOT_FOUND', `没有这个提供商：${id}`)
+
+  delete providers[id]
+  const nextSettings: JsonObject = { ...settings }
+  if (nextSettings['defaultProvider'] === id) {
+    const nextId = Object.keys(providers).sort()[0]
+    if (nextId === undefined) {
+      delete nextSettings['defaultProvider']
+      delete nextSettings['defaultModel']
+    } else {
+      nextSettings['defaultProvider'] = nextId
+      const provider = asObject(providers[nextId])
+      const modelId = provider === undefined ? undefined : firstModelId(provider)
+      if (modelId === undefined) delete nextSettings['defaultModel']
+      else nextSettings['defaultModel'] = modelId
+    }
+  }
+
+  persist(agentDir, models, nextSettings, providers)
+  return listProviders(agentDir)
+}
+
+/** 列表页数据：默认 provider 排最前，其余按 id 稳定排序。 */
+export function listProviders(agentDir: string): ProviderSummary[] {
+  const models = readJsonFile(join(agentDir, 'models.json')) ?? {}
+  const settings = readJsonFile(join(agentDir, 'settings.json')) ?? {}
+  const providers = isObject(models['providers']) ? models['providers'] : {}
+  const defaultProvider = asString(settings['defaultProvider'])
+  const defaultModel = asString(settings['defaultModel'])
+
+  const list: ProviderSummary[] = []
+  for (const [providerId, value] of Object.entries(providers)) {
+    const provider = asObject(value)
+    if (provider === undefined) continue
+    const modelIds = asModelList(provider['models'])
+      .map((entry) => asString(entry['id']))
+      .filter((modelId): modelId is string => modelId !== undefined)
+    const isDefault = providerId === defaultProvider
+    const rawKey = asString(provider['apiKey'])
+    const apiKeyKind = classifyKey(rawKey)
+
+    const summary: ProviderSummary = {
+      providerId,
+      modelIds,
+      apiKeySet: apiKeyKind !== 'none',
+      apiKeyKind,
+      isDefault,
+    }
+    const name = asString(provider['name'])
+    if (name !== undefined) summary.name = name
+    const modelId = isDefault && defaultModel !== undefined ? defaultModel : modelIds[0]
+    if (modelId !== undefined) summary.modelId = modelId
+    const api = asString(provider['api'])
+    if (api !== undefined) summary.api = api
+    const baseUrl = asString(provider['baseUrl'])
+    if (baseUrl !== undefined) summary.baseUrl = baseUrl
+    if (apiKeyKind === 'literal' && rawKey !== undefined && rawKey.length >= 8) {
+      summary.apiKeyHint = `…${rawKey.slice(-4)}`
+    }
+    const entry =
+      modelId === undefined
+        ? undefined
+        : asModelList(provider['models']).find((item) => item['id'] === modelId)
+    const contextWindow = asPositiveInt(entry?.['contextWindow'])
+    if (contextWindow !== undefined) summary.contextWindow = contextWindow
+    const maxTokens = asPositiveInt(entry?.['maxTokens'])
+    if (maxTokens !== undefined) summary.maxTokens = maxTokens
+    if (isDefault) {
+      const level = asString(settings['defaultThinkingLevel'])
+      if (level !== undefined && isThinkingLevel(level)) summary.thinkingLevel = level
+    }
+    list.push(summary)
+  }
+
+  return list.sort(
+    (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.providerId.localeCompare(b.providerId),
+  )
 }
 
 /** HTTP 边界用：把不可信 JSON 收窄成 patch，非法即 CONFIG_INVALID。 */
@@ -225,6 +326,10 @@ export function parseModelPatch(value: unknown): ModelConfigPatch {
   if (value['thinkingLevel'] !== undefined) {
     patch.thinkingLevel =
       value['thinkingLevel'] === null ? null : assertThinkingLevel(value['thinkingLevel'])
+  }
+  if (value['makeDefault'] !== undefined) {
+    if (typeof value['makeDefault'] !== 'boolean') throw invalid('makeDefault 必须是布尔值')
+    patch.makeDefault = value['makeDefault']
   }
   return patch
 }
@@ -324,6 +429,26 @@ function readJsonFile(path: string): JsonObject | undefined {
   }
   if (!isObject(parsed)) throw new HubError('CONFIG_INVALID', `${path} 必须是 JSON 对象`)
   return parsed
+}
+
+function persist(
+  agentDir: string,
+  models: JsonObject,
+  settings: JsonObject,
+  providers: JsonObject,
+): void {
+  const nextModels: JsonObject = {
+    $schema: asString(models['$schema']) ?? MODELS_SCHEMA,
+    ...models,
+    providers,
+  }
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 })
+  writeJsonAtomic(join(agentDir, 'models.json'), nextModels)
+  writeJsonAtomic(join(agentDir, 'settings.json'), settings)
+}
+
+function firstModelId(provider: JsonObject): string | undefined {
+  return asString(asModelList(provider['models'])[0]?.['id'])
 }
 
 function writeJsonAtomic(path: string, value: unknown): void {

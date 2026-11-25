@@ -1,6 +1,6 @@
 import type { JSX } from '@solidjs/web'
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost'
 export type ButtonSize = 'sm' | 'md'
 
 const base =
@@ -16,6 +16,8 @@ const variants: Record<ButtonVariant, string> = {
   secondary: 'border border-control bg-surface text-ink hover:bg-hover',
   ghost: 'text-ink-2 hover:bg-hover hover:text-ink',
   danger: 'bg-danger text-canvas hover:opacity-90',
+  /* Destructive row action: reads as danger without a filled red button. */
+  'danger-ghost': 'text-danger hover:bg-danger-soft hover:text-danger',
 }
 
 export interface ButtonProps {

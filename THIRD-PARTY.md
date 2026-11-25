@@ -6,7 +6,7 @@
 |---|---|---|---|
 | [Inter](https://github.com/rsms/inter) | SIL Open Font License 1.1 | UI 拉丁字体（自托管 woff2） | `packages/web/src/assets/fonts/FONT-NOTICES.txt`、`LICENSE-OFL-1.1.txt` |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL Open Font License 1.1 | ID / 命令 / 日志等宽字体（自托管 woff2） | 同上 |
-| [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) | SIL Open Font License 1.1 | 中文 UI 子集（自托管 woff2，214 字） | 同上 |
+| [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) | SIL Open Font License 1.1 | 中文 UI 子集（自托管 woff2，由 `pnpm fonts:write` 生成） | 同上 |
 | [Lucide](https://lucide.dev)（`@lucide/solid`） | ISC | 图标 | `THIRD-PARTY.md` 本文件 |
 | [@ui-sdk](https://ui-sdk.dev)（`@ui-sdk/core`、`@ui-sdk/solid`） | Apache-2.0 | 行为层（dialog / select / command / toast 等） | 依赖包自带 LICENSE |
 | [Tailwind CSS](https://tailwindcss.com) | MIT | 样式工具层 | 依赖包自带 LICENSE |
@@ -28,7 +28,7 @@ Copyright (c) Beautiful UI / Turbo Product.
 ## 字体说明
 
 - 字体文件已在 `packages/web/src/assets/fonts/` 入库，并附 `FONT-NOTICES.txt` 与 `LICENSE-OFL-1.1.txt`。
-- Inter 提供 latin / latin-ext 两个 woff2；JetBrains Mono 提供 latin；Noto Sans SC 为 **214 字的 UI 子集**（`cjk-chars.txt`），用户生成内容缺字时由系统字体回退。
+- Inter 提供 latin / latin-ext 两个 woff2；JetBrains Mono 提供 latin；Noto Sans SC 为 **UI 字符子集**（`cjk-chars.txt`，由 `pnpm fonts:write` 从 `packages/web/src` 提取后重新下载），用户生成内容缺字时由系统字体回退。
 - 子集重生成：改动 `src/**` 中文文案后，重新提取 CJK 字符，再走 Google Fonts 的 `text=` 接口；步骤见 `docs/UI-SPEC.md` §3.2。
 - 若后续替换字体，必须同步更新本文件、`docs/UI-SPEC.md` 与字体目录内的许可文件。
 

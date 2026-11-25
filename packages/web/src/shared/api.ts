@@ -96,6 +96,7 @@ export const api = {
   task: (id: string) => request<TaskView & { ok: boolean }>(`/api/v1/tasks/${id}`),
   decisions: (id: string) => request<{ decisions: Decision[] }>(`/api/v1/tasks/${id}/decisions`),
   agents: () => request<{ agents: AgentRow[] }>('/api/v1/agents'),
+  presence: () => request<AgentPresenceResponse>('/api/v1/agents/presence'),
   approvals: () => request<{ approvals: ApprovalRow[] }>('/api/v1/approvals'),
   approve: (id: string) => request(`/api/v1/approvals/${id}/approve`, { method: 'POST' }),
   reject: (id: string) => request(`/api/v1/approvals/${id}/reject`, { method: 'POST' }),
@@ -118,6 +119,22 @@ export interface ModelConfigView {
   thinkingLevel?: string
 }
 
+export interface ProviderSummary {
+  providerId: string
+  name?: string
+  modelId?: string
+  modelIds: string[]
+  api?: string
+  baseUrl?: string
+  apiKeySet: boolean
+  apiKeyKind: 'literal' | 'env' | 'command' | 'none'
+  apiKeyHint?: string
+  contextWindow?: number
+  maxTokens?: number
+  thinkingLevel?: string
+  isDefault: boolean
+}
+
 export interface ModelConfigPatch {
   providerId: string
   modelId: string
@@ -129,15 +146,26 @@ export interface ModelConfigPatch {
   contextWindow?: number | null
   maxTokens?: number | null
   thinkingLevel?: string | null
+  makeDefault?: boolean
+}
+
+export interface ModelSettings {
+  model: ModelConfigView
+  providers: ProviderSummary[]
 }
 
 export const settingsApi = {
-  model: () => request<{ ok: boolean; model: ModelConfigView }>('/api/v1/settings/model'),
+  model: () => request<ModelSettings & { ok: boolean }>('/api/v1/settings/model'),
   saveModel: (patch: ModelConfigPatch) =>
-    request<{ ok: boolean; model: ModelConfigView }>('/api/v1/settings/model', {
+    request<ModelSettings & { ok: boolean }>('/api/v1/settings/model', {
       method: 'PUT',
       body: JSON.stringify(patch),
     }),
+  deleteProvider: (providerId: string) =>
+    request<ModelSettings & { ok: boolean }>(
+      `/api/v1/settings/model/providers/${encodeURIComponent(providerId)}`,
+      { method: 'DELETE' },
+    ),
 }
 
 export interface ChatThread {
@@ -206,4 +234,65 @@ export const chatApi = {
         body: JSON.stringify({ text, mode }),
       },
     ),
+}
+
+/* --- Agent presence (PLAN-AGENT-OFFICE §3.1) ------------------------------- */
+
+export type PresenceState =
+  | 'discovered'
+  | 'starting'
+  | 'initializing'
+  | 'online'
+  | 'busy'
+  | 'degraded'
+  | 'offline'
+  | 'error'
+  | 'disabled'
+
+export interface AgentActivity {
+  executionId: string
+  executionStatus: string
+  taskId: string
+  taskTitle: string
+  subtaskId: string
+  subtaskTitle: string
+  step?: number
+  steps?: number
+  attempt: number
+  startedAt?: string
+  waitingOn: 'permission' | 'input' | null
+}
+
+export interface AgentApprovalSummary {
+  id: string
+  resource: string
+  riskLevel: string
+  requestedAt: string
+}
+
+export interface AgentLastEvent {
+  type: string
+  at: string
+}
+
+export interface AgentPresence {
+  id: string
+  name: string
+  status: string
+  presence: PresenceState
+  lastSeenAt?: string
+  networkMode: string
+  allowedWrite: string[]
+  allowedDomains: string[]
+  capabilities: string[]
+  activity?: AgentActivity
+  parallelCount: number
+  pendingApprovals: AgentApprovalSummary[]
+  lastEvent?: AgentLastEvent
+}
+
+export interface AgentPresenceResponse {
+  ok: boolean
+  asOf: string
+  agents: AgentPresence[]
 }

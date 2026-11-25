@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  deleteProvider,
+  listProviders,
   parseModelPatch,
   readModelConfig,
   writeModelConfig,
@@ -173,6 +175,74 @@ describe('writeModelConfig', () => {
     ).toThrow(HubError)
     // 没有被我们的写入覆盖掉：仍然是那段坏内容
     expect(readFileSync(modelsPath, 'utf8')).toBe('{ "providers": ')
+  })
+})
+
+describe('provider 列表与删除', () => {
+  it('默认 provider 排最前，并带 key 状态与模型', () => {
+    const dir = tempDir()
+    writeModelConfig(dir, { providerId: 'zzz', modelId: 'm-z', apiKey: 'sk-zzzzzzzz' })
+    writeModelConfig(dir, {
+      providerId: 'aaa',
+      modelId: 'm-a',
+      providerName: 'Alpha',
+      contextWindow: 64000,
+    })
+
+    const list = listProviders(dir)
+    expect(list.map((item) => item.providerId)).toEqual(['aaa', 'zzz'])
+    expect(list[0]?.isDefault).toBe(true)
+    expect(list[0]?.name).toBe('Alpha')
+    expect(list[0]?.modelId).toBe('m-a')
+    expect(list[0]?.contextWindow).toBe(64000)
+    expect(list[0]?.apiKeySet).toBe(false)
+    expect(list[1]?.apiKeySet).toBe(true)
+    expect(list[1]?.apiKeyHint).toBe('…zzzz')
+  })
+
+  it('makeDefault=false 不抢默认', () => {
+    const dir = tempDir()
+    writeModelConfig(dir, { providerId: 'first', modelId: 'm1' })
+    writeModelConfig(dir, { providerId: 'second', modelId: 'm2', makeDefault: false })
+    expect(readModelConfig(dir).providerId).toBe('first')
+  })
+
+  it('删除默认 provider 时顺位补选下一个', () => {
+    const dir = tempDir()
+    writeModelConfig(dir, { providerId: 'alpha', modelId: 'm-a' })
+    writeModelConfig(dir, { providerId: 'beta', modelId: 'm-b' })
+
+    const left = deleteProvider(dir, 'beta')
+    expect(left.map((item) => item.providerId)).toEqual(['alpha'])
+    expect(left[0]?.isDefault).toBe(true)
+    expect(readModelConfig(dir).providerId).toBe('alpha')
+  })
+
+  it('删光则清掉默认值，且不影响其他 settings 字段', () => {
+    const dir = tempDir()
+    writeModelConfig(dir, { providerId: 'only', modelId: 'm1' })
+    const settingsPath = join(dir, 'settings.json')
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>
+    settings['theme'] = 'dark'
+    writeFileSync(settingsPath, JSON.stringify(settings), 'utf8')
+
+    expect(deleteProvider(dir, 'only')).toEqual([])
+    expect(readModelConfig(dir).providerId).toBeUndefined()
+    const next = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>
+    expect(next['defaultProvider']).toBeUndefined()
+    expect(next['defaultModel']).toBeUndefined()
+    expect(next['theme']).toBe('dark')
+  })
+
+  it('删除不存在的 provider 报 NOT_FOUND', () => {
+    const dir = tempDir()
+    writeModelConfig(dir, { providerId: 'alpha', modelId: 'm-a' })
+    expect(() => deleteProvider(dir, 'nope')).toThrow(HubError)
+    try {
+      deleteProvider(dir, 'nope')
+    } catch (error) {
+      expect((error as HubError).code).toBe('NOT_FOUND')
+    }
   })
 })
 

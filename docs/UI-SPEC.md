@@ -98,7 +98,7 @@
 - `font-display: swap`；回退字体用 `size-adjust` 校准，减少 CLS。
 - 许可文本随字体一起入库（`FONT-NOTICES.txt` + `LICENSE-OFL-1.1.txt`）。
 - P0 实测体积：Inter latin 48KB、latin-ext 85KB、JetBrains Mono 31KB、Noto 子集 59KB；英文首屏实际传输约 140KB。
-- 中文子集重新生成：从 `src/**` 提取 CJK 字符到 `assets/fonts/cjk-chars.txt`，再走 Google Fonts 的 `text=` 接口；文案变更后需重跑。
+- 中文子集**由脚本生成**：`pnpm fonts` 只报告差异，`pnpm fonts:write` 从 `packages/web/src` 提取实际用到的 CJK 字符，写入 `assets/fonts/cjk-chars.txt` 并向 Google Fonts 的 `text=` 接口取单文件变量字体（wght 400..700）。文案（含中文）改完必须重跑一次，否则新字会静默回退到系统字体。单测钉住「zh 文案 ⊆ cjk-chars.txt」。
 
 ### 3.3 字号阶梯（5 级）
 
@@ -136,13 +136,13 @@
 |---|---|---|---|
 | Button | 32px 高，6px 圆角，13/500；primary/secondary/ghost/danger | hover / focus / disabled / loading | 一屏一个 primary |
 | IconButton | 32×32；rail 40×40 | hover / active / focus | 必须有 `aria-label` |
-| Field / Input | 36px 高，1px `--line-control`，6px 圆角 | focus / invalid / disabled / hint | label 在上，不用 placeholder 顶替 |
-| Select / Combobox | 36px，行为用 `@ui-sdk/select` | 同 Field | 键盘必须可用 |
+| Field / Input | 36px 高，1px `--line-control`，6px 圆角 | focus / invalid / disabled / hint | label 在上，不用 placeholder 顶替；控件本身用 `TextInput` |
+| Select | 36px，原生 `<select>` + 自绘 chevron（`SelectInput`，`appearance-none pr-9`） | 同 Field | 复杂筛选才用 `@ui-sdk/select` |
 | Panel | `--bg-surface`，1px `--line-subtle`，10px 圆角，16px 内边距 | — | 不加阴影 |
 | StatusDot / StatusBadge | 7px 点；胶囊 20px 高、11px 字 | — | 见 §2.3 |
 | Segmented / Tabs | 30px 高，track `--bg-subtle`，active `--bg-surface` | 键盘左右 | Run/Ask、主题、语言 |
 | Tooltip | 浮层 1 行，12px；`@ui-sdk/tooltip` | hover / focus | rail 图标必须有 |
-| Dialog | `@ui-sdk/dialog`；宽 400–520 | open / closing | 焦点陷阱与回退 |
+| Dialog | 原生 `<dialog>` + `showModal()`；宽 400–520 | open / closing | 平台给焦点陷阱与 Esc；`:backdrop` 在 tailwind.css |
 | Toast | `@ui-sdk/toast`；4s，hover 暂停 | success / error | 不做全局横幅 |
 | CommandPalette | `@ui-sdk/command`；Cmd+K | 空查询 / 无结果 | 跳任务/线程/Agent |
 | EmptyState | 虚线框 8px 圆角，1 句 + 1 动作 | — | 保留面板边框 |
@@ -188,7 +188,7 @@
 
 - 包：**`@lucide/solid@1.79.0`**（Solid 2 专用；不要用 `lucide-solid`，那是 Solid 1）。
 - 必须按图标引入：`import Check from '@lucide/solid/icons/check'`。
-- 尺寸：nav 18、inline 16、status 12；`stroke-width` 统一 1.75（12px 用 2）。
+- 尺寸：nav 18、inline 16、status 12；`stroke-width` 统一 **1.6**（与迁移前的手绘集同粗，整页文字与图标不打架）。
 - 全部经过 `components/ui/Icon.tsx` 门面；`features/**`、`routes/**` 不直接 import 图标库。
 
 ---

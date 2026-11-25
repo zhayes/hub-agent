@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 
 /* Page-level baselines. Everything time-relative is pinned: the clock is fixed,
    the mocked threads are completed (no polling, no ticking loading line) and
@@ -104,6 +104,52 @@ async function mockApi(page: Page): Promise<void> {
   await page.route('**/api/v1/**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/settings/model')
+      return route.fulfill({
+        json: {
+          ok: true,
+          model: {
+            agentDir: '~/.hubagent/pi-agent',
+            providerId: 'deepseek',
+            providerName: 'DeepSeek',
+            modelId: 'deepseek-chat',
+            baseUrl: 'https://api.deepseek.com/v1',
+            api: 'openai-completions',
+            apiKeySet: true,
+            apiKeyKind: 'literal',
+            apiKeyHint: '…wxyz',
+            thinkingLevel: 'medium',
+          },
+          providers: [
+            {
+              providerId: 'deepseek',
+              name: 'DeepSeek',
+              modelId: 'deepseek-chat',
+              modelIds: ['deepseek-chat'],
+              api: 'openai-completions',
+              baseUrl: 'https://api.deepseek.com/v1',
+              apiKeySet: true,
+              apiKeyKind: 'literal',
+              apiKeyHint: '…wxyz',
+              contextWindow: 128000,
+              maxTokens: 8192,
+              thinkingLevel: 'medium',
+              isDefault: true,
+            },
+            {
+              providerId: 'local-proxy',
+              name: 'Local proxy',
+              modelId: 'qwen2.5-coder:7b',
+              modelIds: ['qwen2.5-coder:7b'],
+              api: 'openai-completions',
+              baseUrl: 'http://127.0.0.1:11434/v1',
+              apiKeySet: false,
+              apiKeyKind: 'none',
+              isDefault: false,
+            },
+          ],
+        },
+      })
     if (path === '/api/v1/chat/threads')
       return route.fulfill({ json: { ok: true, threads: conversations } })
     if (path === '/api/v1/chat/threads/t1')
@@ -121,7 +167,12 @@ async function mockApi(page: Page): Promise<void> {
               status: 'completed',
               required: true,
             },
-            { id: 's2', title: 'Move the cookie read after jar sync', status: 'running', required: true },
+            {
+              id: 's2',
+              title: 'Move the cookie read after jar sync',
+              status: 'running',
+              required: true,
+            },
           ],
           executions: [
             {
@@ -194,6 +245,7 @@ const cases = [
 const pages = [
   { name: 'chat', path: '/chat/t1' },
   { name: 'tasks', path: '/tasks/task1' },
+  { name: 'settings', path: '/settings' },
 ] as const
 
 const themes = ['light', 'dark'] as const

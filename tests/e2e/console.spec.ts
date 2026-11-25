@@ -50,12 +50,20 @@ test.beforeEach(async ({ page }) => {
     if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
     if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
     if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
-    if (path === '/api/v1/tasks/task1') return route.fulfill({ json: { ok: true, task, subtasks: [], executions: [], verifications: [], approvals: [] } })
-    if (path === '/api/v1/tasks/task1/decisions') return route.fulfill({ json: { ok: true, decisions: [] } })
-    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 2 }] } })
-    if (path === '/api/v1/chat/threads/t1') return route.fulfill({ json: { ok: true, thread, messages } })
-    if (path === '/api/v1/chat/threads/t1/messages') return route.fulfill({ json: { ok: true, thread, messages } })
-    if (path === '/api/v1/chat/threads/t1/resume') return route.fulfill({ json: { ok: true, thread, messages } })
+    if (path === '/api/v1/tasks/task1')
+      return route.fulfill({
+        json: { ok: true, task, subtasks: [], executions: [], verifications: [], approvals: [] },
+      })
+    if (path === '/api/v1/tasks/task1/decisions')
+      return route.fulfill({ json: { ok: true, decisions: [] } })
+    if (path === '/api/v1/chat/threads')
+      return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 2 }] } })
+    if (path === '/api/v1/chat/threads/t1')
+      return route.fulfill({ json: { ok: true, thread, messages } })
+    if (path === '/api/v1/chat/threads/t1/messages')
+      return route.fulfill({ json: { ok: true, thread, messages } })
+    if (path === '/api/v1/chat/threads/t1/resume')
+      return route.fulfill({ json: { ok: true, thread, messages } })
     return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
   })
 })
@@ -81,8 +89,10 @@ test('chat stream appends pushed messages without polling', async ({ page }) => 
         body: `id: 7\nevent: message\ndata: ${JSON.stringify(streamed)}\n\n`,
       })
     }
-    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [{ ...activeThread, messageCount: 2 }] } })
-    if (path === '/api/v1/chat/threads/t1') return route.fulfill({ json: { ok: true, thread: activeThread, messages } })
+    if (path === '/api/v1/chat/threads')
+      return route.fulfill({ json: { ok: true, threads: [{ ...activeThread, messageCount: 2 }] } })
+    if (path === '/api/v1/chat/threads/t1')
+      return route.fulfill({ json: { ok: true, thread: activeThread, messages } })
     if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
     if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
     if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
@@ -130,7 +140,8 @@ test('approving from the approvals page confirms with a toast', async ({ page })
   await page.route('**/api/v1/**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/v1/events/stream') return route.abort()
-    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [pending] } })
+    if (path === '/api/v1/approvals')
+      return route.fulfill({ json: { ok: true, approvals: [pending] } })
     if (path.includes('/approve')) return route.fulfill({ json: { ok: true } })
     if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
     if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
@@ -190,61 +201,115 @@ test('context pane collapses and composer remains usable', async ({ page }) => {
   await page.getByRole('button', { name: 'Collapse context' }).click()
   // Collapsed leaves the vertical rail in place, so the pane can be reopened.
   await expect(context.getByRole('button', { name: 'Expand context' }).first()).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Describe a task, or ask what is happening…' })).toBeVisible()
+  await expect(
+    page.getByRole('textbox', { name: 'Describe a task, or ask what is happening…' }),
+  ).toBeVisible()
 })
 
+const providerRow = {
+  providerId: 'deepseek',
+  name: 'DeepSeek',
+  modelId: 'deepseek-chat',
+  modelIds: ['deepseek-chat'],
+  api: 'openai-completions',
+  baseUrl: 'https://api.deepseek.com/v1',
+  apiKeySet: true,
+  apiKeyKind: 'literal',
+  apiKeyHint: '…wxyz',
+  isDefault: true,
+}
 
-test('settings model form saves provider, model and key', async ({ page }) => {
-  await page.unroute('**/api/v1/**')
-  const stored = {
-    agentDir: '/tmp/pi-agent',
-    providerId: 'local-proxy',
-    modelId: 'qwen2.5-coder:7b',
-    api: 'openai-completions',
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeySet: true,
-    apiKeyKind: 'literal',
-    apiKeyHint: '…wxyz',
-  }
-  let patch: Record<string, unknown> | undefined
-  await page.route('**/api/v1/**', (route) => {
+const emptyModel = { agentDir: '/tmp/pi-agent', apiKeySet: false, apiKeyKind: 'none' }
+
+/** Routes shared by the settings tests; `overrides` wins on path+method. */
+function mockSettings(
+  page: import('@playwright/test').Page,
+  overrides: Record<string, (route: import('@playwright/test').Route) => Promise<void> | void>,
+): Promise<void> {
+  return page.route('**/api/v1/**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/v1/events/stream') return route.abort()
-    if (path === '/api/v1/settings/model') {
-      if (route.request().method() === 'PUT') {
-        patch = route.request().postDataJSON() as Record<string, unknown>
-        return route.fulfill({ json: { ok: true, model: stored } })
-      }
-      return route.fulfill({
-        json: { ok: true, model: { agentDir: '/tmp/pi-agent', apiKeySet: false, apiKeyKind: 'none' } },
-      })
-    }
+    const handler = overrides[`${route.request().method()} ${path}`]
+    if (handler !== undefined) return handler(route)
     if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
     if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
     if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
     if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [] } })
     return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
   })
+}
+
+test('settings model list adds a provider through the dialog', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const saved: Array<Record<string, unknown>> = []
+  await mockSettings(page, {
+    'GET /api/v1/settings/model': (route) =>
+      route.fulfill({ json: { ok: true, model: emptyModel, providers: [] } }),
+    'PUT /api/v1/settings/model': async (route) => {
+      saved.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fulfill({
+        json: {
+          ok: true,
+          model: { ...emptyModel, apiKeySet: true, apiKeyKind: 'literal' },
+          providers: [providerRow],
+        },
+      })
+    },
+  })
 
   await page.goto('/settings')
-  // 未配置时 Save 不可用：Provider 与 Model ID 是必填项。
-  const saveModel = page.locator('form').getByRole('button', { name: 'Save' })
-  await expect(saveModel).toBeDisabled()
+  // 空列表直接给 DeepSeek 预填项（不落盘）
+  await expect(page.getByRole('button', { name: 'Configure' })).toBeVisible()
 
-  await page.getByLabel('Provider', { exact: true }).fill('local-proxy')
-  await page.getByLabel('Model ID', { exact: true }).fill('qwen2.5-coder:7b')
-  await page.getByLabel('Base URL', { exact: true }).fill('http://127.0.0.1:11434/v1')
-  await page.getByLabel('API Key', { exact: true }).fill('sk-1234wxyz')
-  await saveModel.click()
+  await page.getByRole('button', { name: 'Add provider' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  // The suggested preset is pre-filled, not saved behind the user's back.
+  await expect(dialog.getByLabel('Provider ID', { exact: true })).toHaveValue('deepseek')
+  await expect(dialog.getByLabel('Model ID', { exact: true })).toHaveValue('deepseek-chat')
 
-  await expect.poll(() => patch?.['providerId']).toBe('local-proxy')
-  expect(patch?.['apiKey']).toBe('sk-1234wxyz')
-  expect(patch?.['api']).toBe('openai-completions')
+  await dialog.getByLabel('API Key', { exact: true }).fill('sk-1234wxyz')
+  await dialog.getByRole('button', { name: 'Save' }).click()
 
-  // 保存后凭据从输入框清掉，只留提示，不再回显明文。
-  await expect(page.getByLabel('API Key', { exact: true })).toHaveValue('')
-  await expect(page.getByText('Key stored · …wxyz')).toBeVisible()
+  await expect.poll(() => saved.length).toBe(1)
+  expect(saved[0]).toMatchObject({
+    providerId: 'deepseek',
+    modelId: 'deepseek-chat',
+    apiKey: 'sk-1234wxyz',
+    makeDefault: true,
+  })
+  await expect(dialog).toBeHidden()
   await expect(page.getByText('Saved.')).toBeVisible()
+  // 保存即默认：列表里的徽章（不是对话框里的同名复选框）
+  await expect(page.locator('span').filter({ hasText: /^Default$/ })).toHaveCount(1)
+})
+
+test('deleting a provider asks first, then removes it', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const deleted: string[] = []
+  const alpha = { ...providerRow, providerId: 'alpha', name: 'Alpha', modelId: 'm-alpha' }
+  const beta = { ...providerRow, providerId: 'beta', name: 'Beta', isDefault: false }
+  await mockSettings(page, {
+    'GET /api/v1/settings/model': (route) =>
+      route.fulfill({ json: { ok: true, model: emptyModel, providers: [alpha, beta] } }),
+    'DELETE /api/v1/settings/model/providers/alpha': async (route) => {
+      deleted.push('alpha')
+      await route.fulfill({ json: { ok: true, model: emptyModel, providers: [beta] } })
+    },
+  })
+
+  await page.goto('/settings')
+  await page.getByRole('button', { name: 'Delete' }).first().click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText(/The key and model settings for Alpha/)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Delete' }).click()
+
+  await expect.poll(() => deleted).toEqual(['alpha'])
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText('Alpha', { exact: true })).toBeHidden()
+  await expect(page.getByText('Beta', { exact: true })).toBeVisible()
 })
 
 test('renders only the latest page and loads older messages', async ({ page }) => {
@@ -261,7 +326,8 @@ test('renders only the latest page and loads older messages', async ({ page }) =
     const url = new URL(route.request().url())
     const path = url.pathname
     if (path === '/api/v1/events/stream') return route.abort()
-    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 1000 }] } })
+    if (path === '/api/v1/chat/threads')
+      return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 1000 }] } })
     if (path === '/api/v1/chat/threads/t1') {
       const before = url.searchParams.get('before')
       const source = before === null ? all : all.filter((message) => message.createdAt < before)

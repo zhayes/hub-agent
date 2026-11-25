@@ -142,8 +142,9 @@ describe('模型设置端点', () => {
       }),
     })
     expect(put.status).toBe(200)
-    const saved = (await put.json()) as { model: { apiKeyHint?: string } }
+    const saved = (await put.json()) as { model: { apiKeyHint?: string }; providers: unknown[] }
     expect(saved.model.apiKeyHint).toBe('…wxyz')
+    expect(saved.providers).toHaveLength(1)
 
     const get = await app.request('/api/v1/settings/model', {
       headers: { authorization: 'Bearer t' },
@@ -151,6 +152,32 @@ describe('模型设置端点', () => {
     const text = await get.text()
     expect(text).not.toContain('sk-secret-9876wxyz')
     expect(text).toContain('local-proxy')
+  })
+
+  it('DELETE 移除 provider 并返回剩余列表', async () => {
+    const dir = tempDir()
+    const app = createHttpApp({ db: seed(), token: 't', modelDir: dir })
+    for (const id of ['alpha', 'beta']) {
+      await app.request('/api/v1/settings/model', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer t', 'content-type': 'application/json' },
+        body: JSON.stringify({ providerId: id, modelId: `m-${id}` }),
+      })
+    }
+
+    const removed = await app.request('/api/v1/settings/model/providers/beta', {
+      method: 'DELETE',
+      headers: { authorization: 'Bearer t' },
+    })
+    expect(removed.status).toBe(200)
+    const payload = (await removed.json()) as { providers: Array<{ providerId: string }> }
+    expect(payload.providers.map((item) => item.providerId)).toEqual(['alpha'])
+
+    const missing = await app.request('/api/v1/settings/model/providers/nope', {
+      method: 'DELETE',
+      headers: { authorization: 'Bearer t' },
+    })
+    expect(missing.status).toBe(404)
   })
 
   it('非法请求体返回 400 与稳定错误码', async () => {

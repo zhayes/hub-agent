@@ -72,3 +72,11 @@
 
   --shadow-card: var(--hx-shadow-card);
 }
+
+/* Native <dialog> is the modal primitive (components/ui/Dialog.tsx).
+   Preflight is off, so the UA backdrop has to be replaced explicitly. */
+@layer base {
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.45);
+  }
+}

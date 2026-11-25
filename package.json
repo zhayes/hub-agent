@@ -22,6 +22,8 @@
     "bench": "tsx packages/hub/src/bench/run.ts",
     "test:brain-real": "tsx packages/hub/test/manual/real-brain-smoke.ts",
     "build:web": "pnpm --filter @hubagent/web build",
+    "fonts": "node scripts/build-cjk-subset.mjs",
+    "fonts:write": "node scripts/build-cjk-subset.mjs --write",
     "dev:web": "pnpm --filter @hubagent/web dev",
     "test:e2e": "playwright test",
     "test:visual": "playwright test --config playwright.visual.config.ts",

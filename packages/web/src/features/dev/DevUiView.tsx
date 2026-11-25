@@ -45,9 +45,11 @@ import { DiffView } from '../../components/ui/DiffView'
 import { Field, fieldControl } from '../../components/ui/Field'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { Panel } from '../../components/ui/Panel'
+import { SelectInput } from '../../components/ui/SelectInput'
 import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
 import { StreamingText } from '../../components/ui/StreamingText'
 import { Tab, TabList, TabPanel, Tabs } from '../../components/ui/Tabs'
+import { TextInput } from '../../components/ui/TextInput'
 import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
 import { ToolChips } from '../../components/ui/ToolChips'
 
@@ -208,11 +210,36 @@ export function DevUiView() {
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <Field label="Bearer token" hint="Stored on this device.">
               {(control) => (
-                <input class={fieldControl} type="password" value="local-token" {...control} />
+                <TextInput
+                  {...control}
+                  type="password"
+                  value="local-token"
+                  onInput={() => undefined}
+                />
               )}
             </Field>
             <Field label="Daemon URL" error="Must be a loopback address.">
-              {(control) => <input class={fieldControl} value="http://0.0.0.0:8787" {...control} />}
+              {(control) => (
+                <TextInput
+                  {...control}
+                  mono
+                  value="http://0.0.0.0:8787"
+                  onInput={() => undefined}
+                />
+              )}
+            </Field>
+            <Field label="Protocol">
+              {(control) => (
+                <SelectInput
+                  {...control}
+                  value="openai-completions"
+                  onChange={() => undefined}
+                  options={[
+                    { value: 'openai-completions', label: 'openai-completions' },
+                    { value: 'anthropic-messages', label: 'anthropic-messages' },
+                  ]}
+                />
+              )}
             </Field>
           </div>
 
