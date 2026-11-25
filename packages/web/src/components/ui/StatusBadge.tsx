@@ -59,11 +59,14 @@ const dotBase = 'status-dot inline-block size-[7px] shrink-0 rounded-full'
 export interface StatusBadgeProps {
   status: string
   label: string
+  class?: string
 }
 
 export function StatusBadge(props: StatusBadgeProps) {
   return (
-    <span class={`${badgeBase} ${badgeTones[statusTone(props.status)]}`}>
+    <span
+      class={`${badgeBase} ${badgeTones[statusTone(props.status)]}${props.class === undefined ? '' : ` ${props.class}`}`}
+    >
       <span>{props.label}</span>
     </span>
   )
@@ -71,8 +74,14 @@ export function StatusBadge(props: StatusBadgeProps) {
 
 export interface StatusDotProps {
   status: string
+  class?: string
 }
 
 export function StatusDot(props: StatusDotProps) {
-  return <span class={`${dotBase} ${dotTones[statusTone(props.status)]}`} aria-hidden="true" />
+  return (
+    <span
+      class={`${dotBase} ${dotTones[statusTone(props.status)]}${props.class === undefined ? '' : ` ${props.class}`}`}
+      aria-hidden="true"
+    />
+  )
 }

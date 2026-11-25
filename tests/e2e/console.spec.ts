@@ -83,10 +83,11 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
 
 test('context pane collapses and composer remains usable', async ({ page }) => {
   await page.goto('/chat/t1')
-  const context = page.locator('.chat-context')
+  const context = page.getByRole('complementary', { name: 'Thread context' })
   await expect(context).toBeVisible()
-  await page.locator('.chat-head-actions').getByRole('button', { name: 'Collapse context' }).click()
-  await expect(context).toHaveClass(/collapsed/)
+  await page.getByRole('button', { name: 'Collapse context' }).click()
+  // Collapsed leaves the vertical rail in place, so the pane can be reopened.
+  await expect(context.getByRole('button', { name: 'Expand context' }).first()).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Describe a task, or ask what is happening…' })).toBeVisible()
 })
 
@@ -118,7 +119,8 @@ test('renders only the latest page and loads older messages', async ({ page }) =
   })
 
   await page.goto('/chat/t1')
-  await expect(page.locator('.chat-message')).toHaveCount(100)
+  const transcript = page.getByRole('log').locator('article')
+  await expect(transcript).toHaveCount(100)
   await page.getByRole('button', { name: 'Load older messages' }).click()
-  await expect(page.locator('.chat-message')).toHaveCount(200)
+  await expect(transcript).toHaveCount(200)
 })

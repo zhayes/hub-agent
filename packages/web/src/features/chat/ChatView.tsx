@@ -1,6 +1,9 @@
 import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
+import { Button } from '../../components/ui/Button'
+import { fieldControl } from '../../components/ui/Field'
 import { Icon } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
+import { LoadingState } from '../../components/ui/LoadingState'
 import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
 import {
   api,
@@ -23,6 +26,28 @@ export interface ChatViewProps {
   onOpenTask: (id: string) => void
 }
 
+/* The three panes are a 300 / 1fr / 300 grid; a collapsed pane shrinks to its
+   rail. Tailwind only emits classes it can see, so every state is spelled out. */
+const layoutCols = {
+  open: 'grid-cols-[300px_minmax(0,1fr)_300px] max-[1100px]:grid-cols-[264px_minmax(0,1fr)] max-[860px]:grid-cols-1',
+  left: 'grid-cols-[0px_minmax(0,1fr)_300px] max-[1100px]:grid-cols-[0px_minmax(0,1fr)] max-[860px]:grid-cols-1',
+  right:
+    'grid-cols-[300px_minmax(0,1fr)_48px] max-[1100px]:grid-cols-[264px_minmax(0,1fr)] max-[860px]:grid-cols-1',
+  both: 'grid-cols-[0px_minmax(0,1fr)_48px] max-[1100px]:grid-cols-[0px_minmax(0,1fr)] max-[860px]:grid-cols-1',
+} as const
+
+const mobileOnly = 'hidden max-[860px]:grid'
+const desktopOnly = 'max-[860px]:hidden'
+
+const threadRow =
+  'grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+const emptyState =
+  'rounded-panel border border-dashed border-line-strong px-4 py-4 text-meta text-ink-2'
+const centeredEmpty =
+  'flex min-h-[220px] flex-col items-center justify-center gap-2.5 px-8 py-8 text-center text-meta text-ink-2'
+const modeButton =
+  'inline-flex h-[26px] items-center gap-1.5 rounded-control px-2 text-badge text-ink-2 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+
 export function ChatView(props: ChatViewProps) {
   const [threads, setThreads] = createSignal<ChatThreadSummary[]>([])
   const [thread, setThread] = createSignal<ChatThread>()
@@ -33,6 +58,7 @@ export function ChatView(props: ChatViewProps) {
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal('')
   const [hasMore, setHasMore] = createSignal(false)
+  const [thinkingMs, setThinkingMs] = createSignal(0)
   const [leftCollapsed, setLeftCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.left') === 'collapsed',
   )
@@ -245,57 +271,87 @@ export function ChatView(props: ChatViewProps) {
 
   const active = (): boolean => thread()?.status === 'active'
 
+  /* Real elapsed time for the loading line: no fake progress, just the clock. */
+  createEffect(
+    () => active(),
+    (running) => {
+      if (!running) {
+        setThinkingMs(0)
+        return
+      }
+      const started = Date.now()
+      setThinkingMs(0)
+      const clock = setInterval(() => setThinkingMs(Date.now() - started), 250)
+      onCleanup(() => clearInterval(clock))
+    },
+  )
+
+  const cols = (): string => {
+    if (leftCollapsed() && rightCollapsed()) return layoutCols.both
+    if (leftCollapsed()) return layoutCols.left
+    if (rightCollapsed()) return layoutCols.right
+    return layoutCols.open
+  }
+
   return (
-    <div
-      class={`chat-layout${leftCollapsed() ? ' left-collapsed' : ''}${rightCollapsed() ? ' right-collapsed' : ''}${mobileThreads() ? ' mobile-threads' : ''}`}
-    >
+    <div class={`grid min-h-0 flex-1 ${cols()}`}>
       <aside
-        class={`chat-threads${leftCollapsed() ? ' collapsed' : ''}`}
+        class={`min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-canvas max-[860px]:border-r-0 ${
+          leftCollapsed() ? 'hidden' : 'flex'
+        } ${mobileThreads() ? 'max-[860px]:flex' : 'max-[860px]:hidden'}`}
         aria-label={props.t('threads')}
       >
-        <div class="chat-pane-head">
-          <span class="section-heading-label">{props.t('threads')}</span>
-          <div class="pane-actions">
+        <div class="flex flex-none items-center justify-between gap-2 px-4 pt-3.5 pb-2.5">
+          <span class="text-meta font-semibold text-ink">{props.t('threads')}</span>
+          <div class="flex items-center gap-0.5">
             <IconButton
               icon="chevronLeft"
               label={props.t('chat')}
-              class="mobile-only"
+              class={mobileOnly}
               onClick={() => setMobileThreads(false)}
             />
             <IconButton
               icon="panelLeft"
               label={props.t('collapseThreads')}
-              class="desktop-only"
+              class={desktopOnly}
               onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
           </div>
         </div>
         <input
-          class="thread-search"
+          class="mx-3 mb-2 h-8 flex-none rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
           type="search"
           aria-label={props.t('searchThreads')}
           placeholder={props.t('searchThreads')}
           value={query()}
           onInput={(event) => setQuery(event.currentTarget.value)}
         />
-        <div class="thread-list">
+        <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
           <For each={filteredThreads()}>
             {(item) => (
               <button
                 type="button"
-                class={`thread-row${thread()?.id === item.id ? ' active' : ''}`}
+                class={`${threadRow} ${thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'}`}
                 onClick={() => {
                   setMobileThreads(false)
                   props.onOpenThread(item.id)
                 }}
                 title={item.title}
               >
-                <StatusDot status={item.status} />
-                <span class="thread-copy">
-                  <span class="thread-title">{item.title}</span>
-                  <span class="thread-preview">{item.lastMessage ?? item.title}</span>
-                  <span class="thread-meta">
+                <StatusDot status={item.status} class="mt-[5px]" />
+                <span class="flex min-w-0 flex-col gap-[3px]">
+                  <span
+                    class={`truncate text-meta ${
+                      thread()?.id === item.id ? 'font-semibold text-ink' : 'font-medium text-ink'
+                    }`}
+                  >
+                    {item.title}
+                  </span>
+                  <span class="line-clamp-2 text-badge leading-snug text-ink-2">
+                    {item.lastMessage ?? item.title}
+                  </span>
+                  <span class="mt-0.5 flex flex-wrap gap-2 text-badge text-ink-3">
                     <span>
                       {item.messageCount} {props.t('messages')}
                     </span>
@@ -306,46 +362,51 @@ export function ChatView(props: ChatViewProps) {
             )}
           </For>
           <Show when={filteredThreads().length === 0}>
-            <p class="empty-state">{props.t('noThreads')}</p>
+            <p class={emptyState}>{props.t('noThreads')}</p>
           </Show>
         </div>
       </aside>
 
-      <section class="chat-main" aria-label={props.t('chat')}>
-        <header class="chat-head">
-          <div class="chat-head-main">
-            <div class="chat-title">{thread()?.title ?? props.t('chat')}</div>
-            <div class="chat-sub">
+      <section
+        class={`min-h-0 min-w-0 flex-col bg-surface ${mobileThreads() ? 'max-[860px]:hidden' : 'flex max-[860px]:flex'}`}
+        aria-label={props.t('chat')}
+      >
+        <header class="flex flex-none items-center justify-between gap-3 border-b border-line px-5 py-3">
+          <div class="min-w-0">
+            <div class="truncate text-section font-semibold text-ink">
+              {thread()?.title ?? props.t('chat')}
+            </div>
+            <div class="mt-1 flex items-center gap-2 text-badge text-ink-3">
               <Show when={thread() !== undefined}>
                 <StatusBadge
                   status={thread()?.status ?? 'active'}
                   label={props.t(statusKey(thread()?.status ?? 'active'))}
                 />
                 <Show when={thread()?.taskId}>
-                  <span class="mono" title={thread()?.taskId}>
+                  <span class="font-mono" title={thread()?.taskId}>
                     {shortenId(thread()?.taskId ?? '')}
                   </span>
                 </Show>
               </Show>
             </div>
           </div>
-          <div class="chat-head-actions">
+          <div class="flex flex-none items-center gap-0.5">
             <IconButton
               icon="panelLeft"
               label={props.t('threads')}
-              class="mobile-only"
+              class={mobileOnly}
               onClick={() => setMobileThreads(true)}
             />
             <IconButton
               icon="panelLeft"
               label={props.t('collapseThreads')}
-              class="desktop-only"
+              class={desktopOnly}
               onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton
               icon="panelRight"
               label={props.t('collapseContext')}
-              class="desktop-only context-toggle"
+              class={`${desktopOnly} max-[1100px]:hidden`}
               onClick={() => setPane('right', !rightCollapsed())}
             />
             <Show when={thread()?.taskId}>
@@ -359,13 +420,14 @@ export function ChatView(props: ChatViewProps) {
         </header>
 
         <Show when={error() !== ''}>
-          <div class="inline-error" role="alert">
+          <div class="flex-none bg-danger-soft px-5 py-2 text-badge text-danger" role="alert">
             {error()}
           </div>
         </Show>
 
         <div
-          class="chat-messages"
+          class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5 max-[860px]:px-4 max-[860px]:pt-4 max-[860px]:pb-1"
+          role="log"
           aria-live="polite"
           ref={(el) => {
             messagesEl = el
@@ -377,20 +439,18 @@ export function ChatView(props: ChatViewProps) {
           <Show
             when={thread() !== undefined}
             fallback={
-              <div class="empty-state centered">
+              <div class={centeredEmpty}>
                 <Icon name="message" size={20} />
                 <p>{props.t('selectThread')}</p>
-                <button type="button" class="solid-button" onClick={() => void newThread()}>
-                  {props.t('newThread')}
-                </button>
+                <Button onClick={() => void newThread()}>{props.t('newThread')}</Button>
               </div>
             }
           >
             <Show when={hasMore()}>
-              <div class="load-older-wrap">
-                <button type="button" class="text-button" onClick={() => void loadOlder()}>
+              <div class="flex justify-center pb-1">
+                <Button variant="ghost" size="sm" onClick={() => void loadOlder()}>
                   {props.t('loadOlder')}
-                </button>
+                </Button>
               </div>
             </Show>
             <For each={messages()}>
@@ -407,26 +467,13 @@ export function ChatView(props: ChatViewProps) {
               )}
             </For>
             <Show when={active()}>
-              <div class="chat-thinking" aria-live="polite">
-                <span class="pixel-loader" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </span>
-                <span>{props.t('loading')}</span>
-              </div>
+              <LoadingState label={props.t('loading')} elapsedMs={thinkingMs()} />
             </Show>
           </Show>
         </div>
 
         <form
-          class="composer"
+          class="flex-none border-t border-line bg-surface px-4 pt-2.5 pb-3.5"
           onSubmit={(event) => {
             event.preventDefault()
             void send()
@@ -438,6 +485,7 @@ export function ChatView(props: ChatViewProps) {
           <textarea
             id="chat-composer"
             rows="2"
+            class="block max-h-[180px] min-h-[54px] w-full resize-none rounded-panel border border-line bg-canvas px-3 py-2.5 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
             value={text()}
             placeholder={
               mode() === 'run' ? props.t('chatPlaceholder') : props.t('chatAskPlaceholder')
@@ -445,11 +493,11 @@ export function ChatView(props: ChatViewProps) {
             onInput={(event) => setText(event.currentTarget.value)}
             onKeyDown={submitOnEnter}
           />
-          <div class="composer-row">
-            <div class="mode-switch">
+          <div class="mt-2 flex items-center gap-2.5">
+            <div class="flex flex-none gap-0.5 rounded-panel bg-subtle p-0.5">
               <button
                 type="button"
-                class={`mode-button${mode() === 'run' ? ' active' : ''}`}
+                class={`${modeButton} ${mode() === 'run' ? 'bg-surface font-medium text-ink' : ''}`}
                 aria-pressed={mode() === 'run' ? 'true' : 'false'}
                 onClick={() => setMode('run')}
               >
@@ -458,7 +506,7 @@ export function ChatView(props: ChatViewProps) {
               </button>
               <button
                 type="button"
-                class={`mode-button${mode() === 'ask' ? ' active' : ''}`}
+                class={`${modeButton} ${mode() === 'ask' ? 'bg-surface font-medium text-ink' : ''}`}
                 aria-pressed={mode() === 'ask' ? 'true' : 'false'}
                 onClick={() => setMode('ask')}
               >
@@ -466,10 +514,12 @@ export function ChatView(props: ChatViewProps) {
                 <span>{props.t('ask')}</span>
               </button>
             </div>
-            <span class="composer-hint">{props.t('chatHint')}</span>
+            <span class="flex-1 text-right text-badge text-ink-3 max-[560px]:hidden">
+              {props.t('chatHint')}
+            </span>
             <button
               type="submit"
-              class="send-button"
+              class="grid size-[34px] flex-none place-items-center rounded-panel bg-ink text-canvas transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45"
               aria-label={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
               title={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
               disabled={busy() || text().trim() === ''}
@@ -481,49 +531,59 @@ export function ChatView(props: ChatViewProps) {
       </section>
 
       <aside
-        class={`chat-context${rightCollapsed() ? ' collapsed' : ''}`}
+        class="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-canvas max-[1100px]:hidden"
         aria-label={props.t('threadContext')}
       >
         <button
           type="button"
-          class="context-rail"
+          class={`w-full items-center gap-2.5 text-badge text-ink-2 [writing-mode:vertical-rl] hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+            rightCollapsed() ? 'flex flex-col py-3.5' : 'hidden'
+          }`}
           aria-label={props.t('expandContext')}
           onClick={() => setPane('right', false)}
         >
           <Icon name="panelRight" size={14} />
           <span>{props.t('threadContext')}</span>
         </button>
-        <div class="chat-context-body">
-          <div class="context-heading">
-            <span class="section-heading-label">{props.t('threadContext')}</span>
+        <div
+          class={`min-h-0 flex-1 overflow-y-auto px-4 py-3.5 ${rightCollapsed() ? 'hidden' : 'block'}`}
+        >
+          <div class="mb-3 flex items-center justify-between">
+            <span class="text-meta font-semibold text-ink">{props.t('threadContext')}</span>
             <IconButton
               icon="panelRight"
               label={props.t('expandContext')}
               onClick={() => setPane('right', true)}
             />
           </div>
-          <Show when={thread()} fallback={<p class="empty-state">{props.t('selectThread')}</p>}>
+          <Show when={thread()} fallback={<p class={emptyState}>{props.t('selectThread')}</p>}>
             {(current) => (
               <>
-                <dl class="context-facts">
-                  <dt>{props.t('status')}</dt>
-                  <dd>
+                <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-badge">
+                  <dt class="text-ink-3">{props.t('status')}</dt>
+                  <dd class="text-right">
                     <StatusBadge
                       status={current().status}
                       label={props.t(statusKey(current().status))}
                     />
                   </dd>
-                  <dt>{props.t('taskId')}</dt>
-                  <dd class="mono" title={current().taskId ?? undefined}>
+                  <dt class="text-ink-3">{props.t('taskId')}</dt>
+                  <dd
+                    class="min-w-0 break-words text-right font-mono text-ink"
+                    title={current().taskId ?? undefined}
+                  >
                     {current().taskId === undefined ? '—' : shortenId(current().taskId ?? '')}
                   </dd>
-                  <dt>{props.t('messages')}</dt>
-                  <dd class="num">{messages().length}</dd>
+                  <dt class="text-ink-3">{props.t('messages')}</dt>
+                  <dd class="text-right tabular-nums text-ink">{messages().length}</dd>
                 </dl>
                 <Show when={contextTask()}>
                   {(task) => (
-                    <a class="context-task-link" href={`/tasks/${task().id}`}>
-                      <span>{task().title}</span>
+                    <a
+                      class="mt-4 flex items-center justify-between gap-2 rounded-panel border border-line bg-surface px-3 py-2.5 text-meta text-ink transition-colors hover:border-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      href={`/tasks/${task().id}`}
+                    >
+                      <span class="truncate">{task().title}</span>
                       <Icon name="external" size={13} />
                     </a>
                   )}
@@ -546,21 +606,28 @@ function MessageRow(props: {
   onReject: (id: string) => void
   onAnswer: (id: string, answer: string) => void
 }) {
+  const meta = (who: string): string =>
+    `mb-1.5 flex items-baseline gap-1.5 text-badge text-ink-3 ${
+      props.message.role === 'user' && who === 'you' ? 'text-ink' : ''
+    }`
+
   if (props.message.role === 'user') {
     return (
-      <article class="chat-message user">
-        <div class="chat-message-meta">
-          <span>{props.t('you')}</span>
+      <article class="max-w-[min(100%,74ch)]">
+        <div class={meta('you')}>
+          <span class="font-medium">{props.t('you')}</span>
           <span aria-hidden="true">·</span>
           <time>{relativeTime(props.locale, props.message.createdAt)}</time>
         </div>
-        <p>{props.message.content}</p>
+        <p class="whitespace-pre-wrap text-body leading-relaxed text-ink">
+          {props.message.content}
+        </p>
       </article>
     )
   }
   return (
-    <article class={`chat-message assistant ${props.message.kind}`}>
-      <div class="chat-message-meta">
+    <article class="max-w-[min(100%,74ch)]">
+      <div class="mb-1.5 flex items-baseline gap-1.5 text-badge text-ink-3">
         <span>{props.t('appName')}</span>
         <span aria-hidden="true">·</span>
         <time>{relativeTime(props.locale, props.message.createdAt)}</time>
@@ -571,42 +638,36 @@ function MessageRow(props: {
         <ClarificationCard message={props.message} t={props.t} onAnswer={props.onAnswer} />
       </Show>
       <Show when={props.message.kind === 'approval' && props.message.approvalId !== undefined}>
-        <div class="chat-card approval">
-          <div class="chat-card-head">
+        <div class="mt-2 rounded-panel border border-line bg-canvas p-3">
+          <div class="flex items-center gap-2 text-meta font-medium text-warning">
             <Icon name="alert" size={14} />
             <span>{props.message.content}</span>
           </div>
-          <div class="row-actions">
-            <button
-              type="button"
-              class="solid-button"
-              onClick={() => props.onApprove(props.message.approvalId ?? '')}
-            >
+          <div class="mt-2.5 flex items-center gap-2">
+            <Button onClick={() => props.onApprove(props.message.approvalId ?? '')}>
               {props.t('approve')}
-            </button>
-            <button
-              type="button"
-              class="text-button"
-              onClick={() => props.onReject(props.message.approvalId ?? '')}
-            >
+            </Button>
+            <Button variant="ghost" onClick={() => props.onReject(props.message.approvalId ?? '')}>
               {props.t('reject')}
-            </button>
+            </Button>
           </div>
         </div>
       </Show>
       <Show when={props.message.kind === 'task' && props.message.taskId !== undefined}>
-        <div class="chat-card">
-          <div class="chat-card-head">
+        <div class="mt-2 rounded-panel border border-line bg-canvas p-3">
+          <div class="flex items-center gap-2 text-meta font-medium text-ink">
             <Icon name="tasks" size={14} />
             <span>{props.message.content}</span>
           </div>
-          <button
-            type="button"
-            class="text-button primary"
-            onClick={() => props.onOpenTask(props.message.taskId ?? '')}
-          >
-            {props.t('openTask')}
-          </button>
+          <div class="mt-2.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => props.onOpenTask(props.message.taskId ?? '')}
+            >
+              {props.t('openTask')}
+            </Button>
+          </div>
         </div>
       </Show>
       <Show
@@ -616,7 +677,15 @@ function MessageRow(props: {
           props.message.kind !== 'clarification'
         }
       >
-        <p>{props.message.content}</p>
+        <p
+          class={`whitespace-pre-wrap text-body leading-relaxed ${
+            props.message.kind === 'plan' || props.message.kind === 'result'
+              ? 'text-ink-2'
+              : 'text-ink'
+          }`}
+        >
+          {props.message.content}
+        </p>
       </Show>
     </article>
   )
@@ -630,29 +699,29 @@ function ClarificationCard(props: {
   const [value, setValue] = createSignal('')
   return (
     <form
-      class="chat-card clarification"
+      class="mt-2 rounded-panel border border-line bg-canvas p-3"
       onSubmit={(event) => {
         event.preventDefault()
         const answer = value().trim()
         if (answer !== '') props.onAnswer(props.message.clarificationId ?? '', answer)
       }}
     >
-      <div class="chat-card-head">
+      <div class="flex items-center gap-2 text-meta font-medium text-ink">
         <Icon name="message" size={14} />
         <span>{props.t('clarification')}</span>
       </div>
-      <p class="muted">{props.message.content}</p>
-      <div class="field-row" style="margin-top:8px">
+      <p class="mt-1.5 text-meta text-ink-2">{props.message.content}</p>
+      <div class="mt-2 flex items-center gap-2">
         <input
-          class="text-input"
+          class={`${fieldControl} min-w-0 flex-1`}
           aria-label={props.t('answer')}
           placeholder={props.t('answer')}
           value={value()}
           onInput={(event) => setValue(event.currentTarget.value)}
         />
-        <button type="submit" class="solid-button">
+        <Button type="submit" size="sm">
           {props.t('submit')}
-        </button>
+        </Button>
       </div>
     </form>
   )
