@@ -230,3 +230,47 @@
 5. **P4** 对话动效：Loading / Thinking / Streaming / Approval / Tool Chips / Context / CodeBlock。
 6. **P5** 行为：Cmd+K、Toast、窗口化、可拖拽、`@` `/`。
 7. **P6** 收口：删旧 CSS、CI、文档与许可。
+
+---
+
+## 11. 3D 增补：Agent Office 舞台（ADR 0020）
+
+`/agents` 的唯一形式是 3D Dispatch Floor（无 2D 降级）。HUD 沿用本文的令牌与基元；3D 部分有独立约束。
+
+### 11.1 场景色板
+
+- 3D 颜色只从 `features/agents/office/scene/theme.ts` 的 `PALETTES` 读取；不在渲染代码散落 hex。
+- 明/暗两套与 HUD 的 paper/ink 语言一致（暖纸色地面、木桌、墨色文字、琥珀强调）。
+- 主题切换时重设已缓存材质颜色 + 灯光 + 网格/玻璃，不重建场景。
+
+### 11.2 状态灯与纸旗
+
+| 阶段 | 视觉 | HUD |
+|---|---|---|
+| working | 绿旗 / 台灯常亮 / 伏案 | 执行中 |
+| needs-approval | 琥珀旗 / 举手 / 更亮 | 等你授权 |
+| needs-input | 琥珀旗 / 举手 | 等待补充 |
+| paused | 暗灯 / 靠背 / 杯子 | 已暂停 |
+| degraded | 琥珀旗 / 降级折角 | 降级运行 |
+| failed | 红旗 / 桌面「退回」 | 故障 |
+| standby | 灰旗 / 坐在等候位 | 待命 |
+
+- 完成（`succeeded` 由前端 diff 推导为 `done` 瞬态）：盖章 → 工单飞向 DONE 墙 → 折桌 → 离场/回 bench。
+- 注意力（等待/故障）：工位纸旗/信标 + 全局横幅 + 名单高亮，不靠单一颜色区分。
+
+### 11.3 动效白名单
+
+- 只允许由 presence diff / 事件驱动的动作：进场、走位、弹桌、落座、举手、靠背、盖章、折桌、离场。
+- **禁止**随机走动、假进度、假终端、完成后跳起/警报音等娱乐化反馈。
+- 连贯性：帧间隔 p95 ≤ 20ms；位移速度方差 < 10%（时长 = 距离 / 速度）；相邻帧位移 > 0.25 世界单位即判瞬移失败。
+
+### 11.4 reduced motion / 可访问性
+
+- `prefers-reduced-motion: reduce`：状态直接切换，跳过走位/盖章动画，信息不丢。
+- canvas 设 `aria-hidden`，交互都在键盘可达的 HUD（调度卡 / 名单 / 抽屉 / 横幅）。
+- 3D-only 时的替代路径是 CLI（`hubagent agents`），不是 2D 视图。
+
+### 11.5 unsupported
+
+- 阻断卡：说明需要 WebGL2、列出诊断（reason / webgl2 / renderer / platform / 时间）、Retry、CLI 提示。
+- 明确写出「No 2D fallback」。context lost 与预检失败同一处理；已打开的抽屉在 context lost 时保留，审批仍可提交。

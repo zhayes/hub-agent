@@ -12,6 +12,7 @@
 | [Tailwind CSS](https://tailwindcss.com) | MIT | 样式工具层 | 依赖包自带 LICENSE |
 | [Beautiful UI](https://www.beautifului.dev) | MIT | 对话界面的视觉与动效参考；部分结构/CSS keyframes 移植 | 本文件 + 源文件头部注释 |
 | [Solid](https://www.solidjs.com)（`solid-js`、`@solidjs/web`、`@solidjs/router`） | MIT | 前端框架 | 依赖包自带 LICENSE |
+| [Three.js](https://threejs.org)（`three`，`@types/three`） | MIT | Agent Office 3D 舞台渲染（仅 `features/agents/office/scene/**`，懒加载，精确锁 `0.169.0`） | 依赖包自带 LICENSE |
 
 ## Beautiful UI
 

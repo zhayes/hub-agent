@@ -70,7 +70,7 @@ packages/web/src/
 - **本地服务只监听回环地址**，新增端点必须走统一鉴权中间件。
 - **所有子进程必须经 `SandboxProvider` 启动**：Coding Agent 与验证命令同一等级隔离；沙箱不可用时**拒绝执行**（fail-closed），不得降级为无隔离。
 - **不引入 React 及其生态包**；Solid 组件不得解构 props。
-- **UI 层依赖白名单**：只允许 `tailwindcss` / `@ui-sdk/core` / `@ui-sdk/solid` / `@lucide/solid`（Solid 2 专用；`lucide-solid` 是 Solid 1 包，勿用）。新增 UI 依赖先写 ADR；不得引入整套组件库或第二套设计系统（见 ADR 0004、ADR 0019、`docs/UI-SPEC.md`）。
+- **UI 层依赖白名单**：只允许 `tailwindcss` / `@ui-sdk/core` / `@ui-sdk/solid` / `@lucide/solid`（Solid 2 专用；`lucide-solid` 是 Solid 1 包，勿用），以及 `three`（仅限 `features/agents/office/scene/**`，精确锁版本、懒加载，见 ADR 0020）。新增 UI 依赖先写 ADR；不得引入整套组件库或第二套设计系统（见 ADR 0004、ADR 0019、`docs/UI-SPEC.md`）。
 - **不得在 `features/**`、`routes/**` 直接 import `@ui-sdk/*` 或 `@lucide/solid`**：只能通过 `components/ui/*` 门面（SDK 处于 beta）。
 
 ---

@@ -55,7 +55,7 @@ pnpm typecheck && pnpm lint && pnpm test:unit
 | M10 | 回归基线与指标 | 20–30 个真实任务、指标采集 | 4–6 | §2.3 六个指标能出数 |
 | **合计** | | | **39–56（约 8–11 周）** | |
 
-M11（Web Console）、V1.1（A2A）、V1.2（Relay）不计入上表。
+M11（Web Console）、M12（Agent Office 3D 舞台，见 `docs/PLAN-AGENT-OFFICE.md`）、V1.1（A2A）、V1.2（Relay）不计入上表。
 
 ---
 
