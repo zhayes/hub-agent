@@ -138,6 +138,8 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 - **可拖拽分栏**：左右栏宽存 state + localStorage（220–460px），拖拽用 pointer capture，键盘用 `role="separator"` + 方向键（Shift 加速），≤860px 仍走单列（内联宽度只在 ≥861px 应用）。手柄默认透明，不影响基线。
 - **`/` 与 `@`**：`/` 列命令（run / ask / new / context），`@` 列任务并按标题或 id 过滤；菜单由输入文本派生，不存平行状态，方向键 + Enter 选择、Esc 清空。列表用 `role=listbox` + `option`，焦点不离开输入框（所以选项是 `tabindex=-1`）。
 
+**体积实测（生产包，raw / gzip）：** 主包 286.52 / 97.36 kB，命令面板单独成块 55.54 / 19.78 kB（首次 ⌘K 才加载）。SDK 的弹层基础是主要成本：只挂 Toast 大约 +83 kB，移除它主包回到 203.22 kB。若要再压，下一步是把 Toast 也改成按需（需一个待发队列避免首次提示丢失）。
+
 ## 7. 复审触发条件
 
 1. `@ui-sdk` beta 出现影响 Dialog/Select/Command 的破坏性变更；

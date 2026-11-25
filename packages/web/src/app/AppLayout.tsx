@@ -1,13 +1,19 @@
 import { useLocation, useNavigate } from '@solidjs/router'
-import type { JSX } from '@solidjs/web'
+import { dynamic, type JSX } from '@solidjs/web'
 import { createSignal, For, onFlush, onSettled, Show } from 'solid-js'
 import { buttonPrimary } from '../components/ui/button-classes'
-import { CommandPalette, type PaletteGroup } from '../components/ui/CommandPalette'
+import type { CommandPaletteProps, PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
 import { ConnectionDot } from '../components/ui/StatusBadge'
 import { Toaster } from '../components/ui/Toaster'
 import { useApp } from './store'
+
+/* The palette drags the SDK's command + dialog + popup foundation (~180 kB) into
+   whatever chunk imports it, so it only loads once someone presses ⌘K. */
+const LazyCommandPalette = dynamic(() =>
+  import('../components/ui/CommandPalette').then((module) => module.CommandPalette),
+) as unknown as (props: CommandPaletteProps) => JSX.Element
 
 const NAV: ReadonlyArray<{
   href: string
@@ -34,6 +40,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
   const navigate = useNavigate()
   const path = () => location.pathname
   const [paletteOpen, setPaletteOpen] = createSignal(false)
+  const [paletteLoaded, setPaletteLoaded] = createSignal(false)
 
   const isChat = (): boolean => path() === '/' || path().startsWith('/chat')
   const isTasks = (): boolean => path().startsWith('/tasks')
@@ -95,6 +102,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
+        setPaletteLoaded(true)
         setPaletteOpen((open) => !open)
       }
     }
@@ -142,15 +150,17 @@ export function AppLayout(props: { children?: JSX.Element }) {
   return (
     <div class="grid h-dvh min-h-0 grid-cols-[56px_minmax(0,1fr)] max-[860px]:grid-cols-1">
       <Toaster />
-      <CommandPalette
-        open={paletteOpen()}
-        onOpenChange={setPaletteOpen}
-        title={app.t('command')}
-        placeholder={app.t('palettePlaceholder')}
-        empty={app.t('paletteEmpty')}
-        groups={paletteGroups()}
-        onRun={runPalette}
-      />
+      <Show when={paletteLoaded()}>
+        <LazyCommandPalette
+          open={paletteOpen()}
+          onOpenChange={setPaletteOpen}
+          title={app.t('command')}
+          placeholder={app.t('palettePlaceholder')}
+          empty={app.t('paletteEmpty')}
+          groups={paletteGroups()}
+          onRun={runPalette}
+        />
+      </Show>
       <aside
         class="flex min-h-0 flex-col items-center gap-1 border-r border-line bg-canvas pt-2.5 pb-3.5 max-[860px]:fixed max-[860px]:inset-x-0 max-[860px]:bottom-0 max-[860px]:z-20 max-[860px]:h-[calc(52px+env(safe-area-inset-bottom))] max-[860px]:flex-row max-[860px]:items-center max-[860px]:justify-between max-[860px]:border-r-0 max-[860px]:border-t max-[860px]:px-2.5 max-[860px]:pt-0 max-[860px]:pb-[env(safe-area-inset-bottom)]"
         aria-label={app.t('appName')}
