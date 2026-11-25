@@ -1,6 +1,7 @@
 import { For, Show } from 'solid-js'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import type { ApprovalRow } from '../../shared/api'
+import { shortenId } from '../../shared/format'
 import { statusKey, type Translator } from '../../shared/i18n'
 
 export interface ApprovalsViewProps {
@@ -12,10 +13,9 @@ export interface ApprovalsViewProps {
 
 export function ApprovalsView(props: ApprovalsViewProps) {
   return (
-    <section class="table-panel" aria-label={props.t('approvals')}>
+    <section class="approvals-page" aria-label={props.t('approvals')}>
       <div class="section-heading">
-        <span>{props.t('approvals')}</span>
-        <span class="muted num">{props.approvals.length}</span>
+        <span>{props.t('pendingItems')}</span>
       </div>
       <Show
         when={props.approvals.length > 0}
@@ -24,23 +24,39 @@ export function ApprovalsView(props: ApprovalsViewProps) {
         <div class="approval-list">
           <For each={props.approvals}>
             {(approval) => (
-              <div class="approval-queue-row">
-                <div class="approval-queue-main">
+              <article class={`approval-card${approval.riskLevel === 'high' ? ' risk-high' : ''}`}>
+                <div class="approval-card-main">
                   <div class="approval-title">
+                    <h2>{approval.reason}</h2>
                     <StatusBadge
                       status={approval.status}
                       label={props.t(statusKey(approval.status))}
                     />
-                    <span class="mono">{approval.reason}</span>
                   </div>
-                  <div class="mono muted">{approval.resource}</div>
-                  <div class="mono muted">{approval.taskId}</div>
+                  <p class="mono approval-resource">{approval.resource}</p>
+                  <div class="approval-meta">
+                    <a
+                      class="meta-link mono"
+                      href={`/tasks/${approval.taskId}`}
+                      title={approval.taskId}
+                    >
+                      {shortenId(approval.taskId)}
+                    </a>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      {props.t('risk')} · <span class="risk-level">{approval.riskLevel}</span>
+                    </span>
+                    <Show when={approval.executionId !== ''}>
+                      <span aria-hidden="true">·</span>
+                      <span class="mono">{shortenId(approval.executionId)}</span>
+                    </Show>
+                  </div>
                 </div>
                 <Show when={approval.status === 'pending'}>
                   <div class="row-actions">
                     <button
                       type="button"
-                      class="text-button primary"
+                      class="solid-button"
                       onClick={() => props.onApprove(approval.id)}
                     >
                       {props.t('approve')}
@@ -54,7 +70,7 @@ export function ApprovalsView(props: ApprovalsViewProps) {
                     </button>
                   </div>
                 </Show>
-              </div>
+              </article>
             )}
           </For>
         </div>

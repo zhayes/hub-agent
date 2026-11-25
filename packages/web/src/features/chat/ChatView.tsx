@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
 import { Icon } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
-import { StatusBadge } from '../../components/ui/StatusBadge'
+import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
 import {
   api,
   type ChatMessage,
@@ -39,7 +39,18 @@ export function ChatView(props: ChatViewProps) {
   const [rightCollapsed, setRightCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.right') === 'collapsed',
   )
+  const [mobileThreads, setMobileThreads] = createSignal(false)
   let poll: ReturnType<typeof setInterval> | undefined
+  let messagesEl: HTMLDivElement | undefined
+  let stick = true
+
+  const scrollToBottom = (): void => {
+    if (messagesEl !== undefined) messagesEl.scrollTop = messagesEl.scrollHeight
+  }
+
+  const isNearBottom = (): boolean =>
+    messagesEl === undefined ||
+    messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80
 
   const stopPolling = (): void => {
     if (poll !== undefined) clearInterval(poll)
@@ -49,10 +60,12 @@ export function ChatView(props: ChatViewProps) {
   const loadThread = async (id: string): Promise<void> => {
     try {
       setError('')
+      const shouldStick = stick
       const detail = await chatApi.thread(id, { limit: 100 })
       setThread(detail.thread)
       setMessages(detail.messages)
       setHasMore(detail.messages.length === 100)
+      if (shouldStick) queueMicrotask(scrollToBottom)
       if (detail.thread.status === 'active') startPolling(id)
       else stopPolling()
     } catch (cause) {
@@ -74,9 +87,15 @@ export function ChatView(props: ChatViewProps) {
     const first = messages()[0]
     if (current === undefined || first === undefined || !hasMore()) return
     try {
+      const previousHeight = messagesEl?.scrollHeight ?? 0
       const older = await chatApi.thread(current.id, { limit: 100, before: first.createdAt })
       setMessages([...older.messages, ...messages()])
       setHasMore(older.messages.length === 100)
+      queueMicrotask(() => {
+        if (messagesEl !== undefined) {
+          messagesEl.scrollTop = messagesEl.scrollHeight - previousHeight
+        }
+      })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -85,11 +104,13 @@ export function ChatView(props: ChatViewProps) {
   const startPolling = (id: string): void => {
     stopPolling()
     poll = setInterval(() => {
+      const shouldStick = stick || isNearBottom()
       void chatApi
         .thread(id)
         .then((detail) => {
           setThread(detail.thread)
           setMessages(detail.messages)
+          if (shouldStick) queueMicrotask(scrollToBottom)
           if (detail.thread.status !== 'active') {
             stopPolling()
             void loadThreads()
@@ -103,6 +124,7 @@ export function ChatView(props: ChatViewProps) {
     try {
       const created = await chatApi.create()
       await loadThreads()
+      setMobileThreads(false)
       props.onOpenThread(created.thread.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -125,6 +147,8 @@ export function ChatView(props: ChatViewProps) {
       setThread(result.thread)
       setMessages(result.messages)
       setText('')
+      stick = true
+      queueMicrotask(scrollToBottom)
       startPolling(id)
       await loadThreads()
     } catch (cause) {
@@ -146,6 +170,8 @@ export function ChatView(props: ChatViewProps) {
           const resumed = await chatApi.resume(current.id)
           setThread(resumed.thread)
           setMessages(resumed.messages)
+          stick = true
+          queueMicrotask(scrollToBottom)
           startPolling(current.id)
         } else {
           await loadThread(current.id)
@@ -163,6 +189,8 @@ export function ChatView(props: ChatViewProps) {
       const result = await chatApi.answer(current.id, clarificationId, answer)
       setThread(result.thread)
       setMessages(result.messages)
+      stick = true
+      queueMicrotask(scrollToBottom)
       startPolling(current.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -179,7 +207,10 @@ export function ChatView(props: ChatViewProps) {
   createEffect(
     () => props.threadId,
     (id) => {
-      if (id !== undefined) void loadThread(id)
+      if (id !== undefined) {
+        stick = true
+        void loadThread(id)
+      }
     },
   )
 
@@ -216,18 +247,25 @@ export function ChatView(props: ChatViewProps) {
 
   return (
     <div
-      class={`chat-layout${leftCollapsed() ? ' left-collapsed' : ''}${rightCollapsed() ? ' right-collapsed' : ''}`}
+      class={`chat-layout${leftCollapsed() ? ' left-collapsed' : ''}${rightCollapsed() ? ' right-collapsed' : ''}${mobileThreads() ? ' mobile-threads' : ''}`}
     >
       <aside
         class={`chat-threads${leftCollapsed() ? ' collapsed' : ''}`}
-        aria-label={props.t('chat')}
+        aria-label={props.t('threads')}
       >
         <div class="chat-pane-head">
-          <span class="section-heading-label">{props.t('chat')}</span>
+          <span class="section-heading-label">{props.t('threads')}</span>
           <div class="pane-actions">
             <IconButton
+              icon="chevronLeft"
+              label={props.t('chat')}
+              class="mobile-only"
+              onClick={() => setMobileThreads(false)}
+            />
+            <IconButton
               icon="panelLeft"
-              label={leftCollapsed() ? props.t('collapseThreads') : props.t('collapseThreads')}
+              label={props.t('collapseThreads')}
+              class="desktop-only"
               onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
@@ -247,12 +285,13 @@ export function ChatView(props: ChatViewProps) {
               <button
                 type="button"
                 class={`thread-row${thread()?.id === item.id ? ' active' : ''}`}
-                onClick={() => props.onOpenThread(item.id)}
+                onClick={() => {
+                  setMobileThreads(false)
+                  props.onOpenThread(item.id)
+                }}
                 title={item.title}
               >
-                <span
-                  class={`status-dot ${item.status === 'active' ? 'live' : item.status === 'failed' ? 'offline' : 'live'}`}
-                />
+                <StatusDot status={item.status} />
                 <span class="thread-copy">
                   <span class="thread-title">{item.title}</span>
                   <span class="thread-preview">{item.lastMessage ?? item.title}</span>
@@ -283,7 +322,9 @@ export function ChatView(props: ChatViewProps) {
                   label={props.t(statusKey(thread()?.status ?? 'active'))}
                 />
                 <Show when={thread()?.taskId}>
-                  <span class="mono">{shortenId(thread()?.taskId ?? '')}</span>
+                  <span class="mono" title={thread()?.taskId}>
+                    {shortenId(thread()?.taskId ?? '')}
+                  </span>
                 </Show>
               </Show>
             </div>
@@ -291,12 +332,20 @@ export function ChatView(props: ChatViewProps) {
           <div class="chat-head-actions">
             <IconButton
               icon="panelLeft"
+              label={props.t('threads')}
+              class="mobile-only"
+              onClick={() => setMobileThreads(true)}
+            />
+            <IconButton
+              icon="panelLeft"
               label={props.t('collapseThreads')}
+              class="desktop-only"
               onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton
               icon="panelRight"
               label={props.t('collapseContext')}
+              class="desktop-only context-toggle"
               onClick={() => setPane('right', !rightCollapsed())}
             />
             <Show when={thread()?.taskId}>
@@ -315,7 +364,16 @@ export function ChatView(props: ChatViewProps) {
           </div>
         </Show>
 
-        <div class="chat-messages" aria-live="polite">
+        <div
+          class="chat-messages"
+          aria-live="polite"
+          ref={(el) => {
+            messagesEl = el
+          }}
+          onScroll={() => {
+            stick = isNearBottom()
+          }}
+        >
           <Show
             when={thread() !== undefined}
             fallback={
@@ -393,23 +451,19 @@ export function ChatView(props: ChatViewProps) {
                 type="button"
                 class={`mode-button${mode() === 'run' ? ' active' : ''}`}
                 aria-pressed={mode() === 'run' ? 'true' : 'false'}
-                aria-label={props.t('runTask')}
-                title={props.t('runTask')}
                 onClick={() => setMode('run')}
               >
-                <Icon name="play" size={14} />
-                <span class="visually-hidden">{props.t('run')}</span>
+                <Icon name="play" size={12} />
+                <span>{props.t('run')}</span>
               </button>
               <button
                 type="button"
                 class={`mode-button${mode() === 'ask' ? ' active' : ''}`}
                 aria-pressed={mode() === 'ask' ? 'true' : 'false'}
-                aria-label={props.t('askStatus')}
-                title={props.t('askStatus')}
                 onClick={() => setMode('ask')}
               >
-                <Icon name="message" size={14} />
-                <span class="visually-hidden">{props.t('ask')}</span>
+                <Icon name="message" size={12} />
+                <span>{props.t('ask')}</span>
               </button>
             </div>
             <span class="composer-hint">{props.t('chatHint')}</span>
@@ -460,7 +514,9 @@ export function ChatView(props: ChatViewProps) {
                     />
                   </dd>
                   <dt>{props.t('taskId')}</dt>
-                  <dd class="mono">{current().taskId ?? '—'}</dd>
+                  <dd class="mono" title={current().taskId ?? undefined}>
+                    {current().taskId === undefined ? '—' : shortenId(current().taskId ?? '')}
+                  </dd>
                   <dt>{props.t('messages')}</dt>
                   <dd class="num">{messages().length}</dd>
                 </dl>
@@ -494,7 +550,8 @@ function MessageRow(props: {
     return (
       <article class="chat-message user">
         <div class="chat-message-meta">
-          <span>YOU</span>
+          <span>{props.t('you')}</span>
+          <span aria-hidden="true">·</span>
           <time>{relativeTime(props.locale, props.message.createdAt)}</time>
         </div>
         <p>{props.message.content}</p>
@@ -504,7 +561,8 @@ function MessageRow(props: {
   return (
     <article class={`chat-message assistant ${props.message.kind}`}>
       <div class="chat-message-meta">
-        <span>HUBAGENT</span>
+        <span>{props.t('appName')}</span>
+        <span aria-hidden="true">·</span>
         <time>{relativeTime(props.locale, props.message.createdAt)}</time>
       </div>
       <Show
@@ -521,7 +579,7 @@ function MessageRow(props: {
           <div class="row-actions">
             <button
               type="button"
-              class="text-button primary"
+              class="solid-button"
               onClick={() => props.onApprove(props.message.approvalId ?? '')}
             >
               {props.t('approve')}

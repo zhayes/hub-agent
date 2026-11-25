@@ -1,0 +1,74 @@
+/* Tailwind v4 entry for the console.
+   Theme + utilities only: preflight is intentionally left out until P3 so the
+   pre-migration stylesheet keeps its global resets. */
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./tokens.css";
+
+@theme {
+  --font-sans:
+    "Inter", "Noto Sans SC Subset", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-title: 24px;
+  --text-title--line-height: 1.2;
+  --text-title--font-weight: 600;
+  --text-title--letter-spacing: -0.02em;
+
+  --text-section: 16px;
+  --text-section--line-height: 1.35;
+  --text-section--font-weight: 600;
+  --text-section--letter-spacing: -0.01em;
+
+  --text-body: 14px;
+  --text-body--line-height: 1.55;
+  --text-body--font-weight: 400;
+  --text-body--letter-spacing: -0.006em;
+
+  --text-meta: 13px;
+  --text-meta--line-height: 1.45;
+
+  --text-badge: 11px;
+  --text-badge--line-height: 1.3;
+  --text-badge--font-weight: 500;
+
+  --radius-control: 6px;
+  --radius-panel: 10px;
+
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 8%);
+  --shadow-dialog: 0 24px 64px rgb(0 0 0 / 18%);
+}
+
+@theme inline {
+  --color-canvas: var(--hx-bg-canvas);
+  --color-surface: var(--hx-bg-surface);
+  --color-subtle: var(--hx-bg-subtle);
+  --color-hover: var(--hx-bg-hover);
+  --color-active: var(--hx-bg-active);
+
+  --color-ink: var(--hx-fg-default);
+  --color-ink-2: var(--hx-fg-muted);
+  --color-ink-3: var(--hx-fg-subtle);
+
+  --color-line: var(--hx-line-subtle);
+  --color-line-strong: var(--hx-line-default);
+  --color-control: var(--hx-line-control);
+
+  --color-accent: var(--hx-accent);
+  --color-accent-hover: var(--hx-accent-hover);
+  --color-accent-soft: var(--hx-accent-soft);
+
+  --color-success: var(--hx-success);
+  --color-success-soft: var(--hx-success-soft);
+  --color-warning: var(--hx-warning);
+  --color-warning-soft: var(--hx-warning-soft);
+  --color-danger: var(--hx-danger);
+  --color-danger-soft: var(--hx-danger-soft);
+
+  --color-ring: var(--hx-ring);
+
+  --shadow-card: var(--hx-shadow-card);
+}

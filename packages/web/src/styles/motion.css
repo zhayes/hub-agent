@@ -1,0 +1,87 @@
+/* Only the motion the UI spec allows: loading, streaming caret, and
+   content-visibility for long rows. Everything degrades under reduced motion. */
+
+@keyframes hx-pixel {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.hx-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  grid-auto-rows: 4px;
+  gap: 2px;
+  color: var(--hx-accent);
+}
+
+.hx-loading-grid i {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  opacity: 0.18;
+  animation: hx-pixel 1.1s ease-in-out infinite;
+}
+
+.hx-loading-grid i:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.hx-loading-grid i:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.hx-loading-grid i:nth-child(4) {
+  animation-delay: 0.3s;
+}
+.hx-loading-grid i:nth-child(5) {
+  animation-delay: 0.4s;
+}
+.hx-loading-grid i:nth-child(6) {
+  animation-delay: 0.5s;
+}
+.hx-loading-grid i:nth-child(7) {
+  animation-delay: 0.6s;
+}
+.hx-loading-grid i:nth-child(8) {
+  animation-delay: 0.7s;
+}
+.hx-loading-grid i:nth-child(9) {
+  animation-delay: 0.8s;
+}
+
+@keyframes hx-caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.hx-caret {
+  animation: hx-caret 1s steps(1, end) infinite;
+}
+
+/* 10k-row fallback probe: no virtualizer in the SDK, so long lists paint lazily. */
+.hx-virtual-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hx-loading-grid i {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .hx-caret {
+    animation: none;
+  }
+}

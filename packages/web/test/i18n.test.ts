@@ -29,12 +29,20 @@ describe('i18n', () => {
     expect(translate('en-US', 'commandExit', { code: 0 })).toBe('exit 0')
     expect(translate('zh-CN', 'commandExit', { code: 0 })).toBe('退出码 0')
     expect(translate('en-US', 'statusRunning')).toBe('running')
-    expect(statusKey('waiting_approval')).toBe('statusWaiting')
+    expect(statusKey('waiting_approval')).toBe('statusWaitingOnYou')
+    expect(statusKey('waiting_input')).toBe('statusWaitingInput')
     expect(statusKey('succeeded')).toBe('statusCompleted')
+    expect(statusKey('idle')).toBe('statusIdle')
+    expect(statusKey('offline')).toBe('statusOffline')
+    expect(statusKey('pending')).toBe('statusPending')
+    expect(statusKey('pass')).toBe('statusPass')
+    expect(statusKey('not-a-status')).toBe('unknown')
   })
 
   it('formats dates and relative time with Intl', () => {
     expect(formatDateTime('en-US', '2026-11-24T08:00:00.000Z')).toMatch(/2026/)
-    expect(formatRelativeTime('en-US', new Date(Date.now() - 60_000).toISOString())).toMatch(/minute/)
+    expect(formatRelativeTime('en-US', new Date(Date.now() - 60_000).toISOString())).toMatch(
+      /minute/,
+    )
   })
 })

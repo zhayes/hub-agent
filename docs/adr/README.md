@@ -20,6 +20,7 @@
 | 0016 | Console Web 采用自有 UI 基元、双主题与 typed i18n | 已接受 | 2026-11-24 |
 | 0017 | Console Web 使用 @solidjs/router 2，不使用显示/隐藏切页 | 已接受 | 2026-11-24 |
 | 0018 | Chat 使用异步 thread + task，不阻塞 HTTP 请求 | 已接受 | 2026-11-24 |
+| 0019 | Console UI v2：Tailwind v4 令牌层 + `@ui-sdk` 行为层 + Beautiful UI 视觉移植 | 已接受（P0 通过） | 2026-11-25 |
 
 ## 约定
 

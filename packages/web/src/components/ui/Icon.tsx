@@ -9,6 +9,7 @@ export type IconName =
   | 'check'
   | 'clock'
   | 'chevronDown'
+  | 'chevronLeft'
   | 'chevronRight'
   | 'copy'
   | 'external'
@@ -37,6 +38,7 @@ const paths: Record<IconName, readonly string[]> = {
   approvals: ['M7 3h10l3 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7l3-4Z', 'M8 13l2.5 2.5L16 10'],
   check: ['m5 12 4 4L19 6'],
   chevronDown: ['m6 9 6 6 6-6'],
+  chevronLeft: ['m15 6-6 6 6 6'],
   chevronRight: ['m9 6 6 6-6 6'],
   clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z', 'M12 7v5l3 2'],
   copy: ['M9 9h11v11H9z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],

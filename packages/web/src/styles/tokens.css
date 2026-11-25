@@ -1,0 +1,39 @@
+/* HubAgent UI v2 tokens (B · Warm Ink).
+   Prefixed with --hx- so they can live beside the pre-migration variables
+   until P3 removes the legacy stylesheet. Contrast measured 2026-11-25. */
+
+:root {
+  --hx-bg-canvas: light-dark(#faf9f6, #0c0b0a);
+  --hx-bg-surface: light-dark(#ffffff, #141311);
+  --hx-bg-subtle: light-dark(#f3f1ec, #1b1917);
+  --hx-bg-hover: light-dark(#efece6, #201d1a);
+  --hx-bg-active: light-dark(#e9e5de, #26221e);
+
+  --hx-fg-default: light-dark(#16181b, #f2efea);
+  --hx-fg-muted: light-dark(#575e68, #a8a29a);
+  --hx-fg-subtle: light-dark(#6b7280, #8f8a82);
+
+  --hx-line-subtle: light-dark(#e6e3dc, #262320);
+  --hx-line-default: light-dark(#dad5cb, #33302b);
+  --hx-line-control: light-dark(#8a8175, #6b645b);
+
+  /* Elevation. Dark mode carries the depth with a top highlight instead of a
+     drop shadow, otherwise a black shadow on a near-black surface reads flat. */
+  --hx-shadow-card:
+    0 1px 2px light-dark(rgb(22 24 27 / 6%), rgb(0 0 0 / 50%)),
+    0 6px 16px -8px light-dark(rgb(22 24 27 / 14%), rgb(0 0 0 / 60%)),
+    inset 0 1px 0 light-dark(rgb(255 255 255 / 0%), rgb(255 255 255 / 5%));
+
+  --hx-accent: light-dark(#c2410c, #ff9468);
+  --hx-accent-hover: light-dark(#9a3412, #ffb08c);
+  --hx-accent-soft: light-dark(#fbede4, #3a2318);
+
+  --hx-success: light-dark(#166534, #5fd39a);
+  --hx-success-soft: light-dark(#e4f3e9, #163024);
+  --hx-warning: light-dark(#92400e, #f2c26b);
+  --hx-warning-soft: light-dark(#fdf3e2, #332916);
+  --hx-danger: light-dark(#b42318, #ff9aa5);
+  --hx-danger-soft: light-dark(#fdecea, #351d22);
+
+  --hx-ring: light-dark(#c2410c, #ff9468);
+}

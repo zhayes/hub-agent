@@ -129,3 +129,10 @@ ADR 0003 的结论是：不用整套组件库，以 `<dialog>` / Popover API / `
 - `@ui-sdk/solid@0.1.0-beta.13` npm 元数据（peerDependencies / exports / license）
 - `docs/ARCHITECTURE.md` §2.2、§8.6、§8.7
 - ADR 0003（平台原语方案，本 ADR 仅取代其组件基座条款）
+
+---
+
+## 9. 变更记录
+
+- **2026-11-25（ADR 0019）：** 图标包更正为 **`@ui-sdk` 白名单中的 `@lucide/solid`**。原第 3 条写的是 `lucide-solid`，那是 Solid 1 包（peer `solid-js ^1.4.7`）；Solid 2 应使用 `@lucide/solid`（peer `solid-js ^2.0.0-rc.0`）。其余条款不变。
+- **2026-11-25（ADR 0019）：** 落地验证版本从 `0.1.0-beta.13` 改为精确锁 **`0.1.0-beta.17`**；P0 以最新 beta 做 spike，未通过则按复审条件回退。

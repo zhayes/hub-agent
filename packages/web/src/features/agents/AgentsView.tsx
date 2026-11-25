@@ -11,10 +11,6 @@ export interface AgentsViewProps {
 export function AgentsView(props: AgentsViewProps) {
   return (
     <section class="table-panel" aria-label={props.t('agents')}>
-      <div class="section-heading">
-        <span>{props.t('agents')}</span>
-        <span class="muted num">{props.agents.length}</span>
-      </div>
       <Show
         when={props.agents.length > 0}
         fallback={<p class="empty-state">{props.t('noAgents')}</p>}
@@ -23,11 +19,11 @@ export function AgentsView(props: AgentsViewProps) {
           <table class="data-table">
             <thead>
               <tr>
-                <th>{props.t('agent')}</th>
-                <th>{props.t('status')}</th>
-                <th>{props.t('command')}</th>
-                <th>{props.t('network')}</th>
-                <th>{props.t('capabilities')}</th>
+                <th class="col-agent">{props.t('agent')}</th>
+                <th class="col-status">{props.t('status')}</th>
+                <th class="col-command">{props.t('command')}</th>
+                <th class="col-network">{props.t('network')}</th>
+                <th class="col-capabilities">{props.t('capabilities')}</th>
               </tr>
             </thead>
             <tbody>
@@ -36,13 +32,17 @@ export function AgentsView(props: AgentsViewProps) {
                   <tr>
                     <td>
                       <div class="agent-name">{agent.name}</div>
-                      <div class="mono muted">{agent.id}</div>
+                      <div class="mono faint">{agent.id}</div>
                     </td>
                     <td>
                       <StatusBadge status={agent.status} label={props.t(statusKey(agent.status))} />
                     </td>
                     <td class="mono muted">{agent.command}</td>
-                    <td class="muted">{agent.networkMode}</td>
+                    <td>
+                      <span class={`network-tag network-${agent.networkMode}`}>
+                        {agent.networkMode}
+                      </span>
+                    </td>
                     <td>
                       <Capabilities value={agent.capabilities} />
                     </td>
@@ -58,7 +58,7 @@ export function AgentsView(props: AgentsViewProps) {
 }
 
 function Capabilities(props: { value: unknown }) {
-  if (!Array.isArray(props.value) || props.value.length === 0) return <span class="muted">—</span>
+  if (!Array.isArray(props.value) || props.value.length === 0) return <span class="faint">—</span>
   return (
     <div class="capability-list">
       <For each={props.value}>{(value) => <span class="chip">{String(value)}</span>}</For>

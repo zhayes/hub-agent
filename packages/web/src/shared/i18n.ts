@@ -3,6 +3,7 @@ export type Locale = 'en-US' | 'zh-CN'
 const en = {
   appName: 'HubAgent',
   appSubtitle: 'Local multi-agent console',
+  workspaceScope: 'Local workspace',
   primaryNavigation: 'Primary navigation',
   navChat: 'Chat',
   navTasks: 'Tasks',
@@ -16,9 +17,38 @@ const en = {
   settings: 'Settings',
   refresh: 'Refresh',
   live: 'Live',
+  offline: 'Offline',
   eventStream: 'Event stream',
   connected: 'Connected',
   reconnecting: 'Reconnecting',
+  eventsCount: '{count} events',
+  allClear: 'Nothing needs you',
+  screenApprovals: '{count} waiting for approval',
+  screenRunning: '{count} running',
+  screenFailed: '{count} failed',
+  screenRegistered: '{count} registered',
+  screenNoNetwork: '{count} without network',
+  screenWaitingOnYou: '{count} waiting on you',
+  pendingCount: '{count} pending',
+  stepPlan: 'Plan',
+  stepExecute: 'Execute',
+  stepVerify: 'Verify',
+  stepDecide: 'Decide',
+  needsYou: 'Needs your approval',
+  threads: 'Threads',
+  queue: 'Queue',
+  pendingItems: 'Pending',
+  you: 'You',
+  risk: 'Risk',
+  tokenStored: 'Token stored on this device',
+  tokenMissing: 'No token yet. Connect the daemon to start.',
+  appearanceHint: 'Theme and language are stored on this device.',
+  languageHint: 'Interface language for the console.',
+  connectionHint: 'The console talks to the local daemon over loopback only.',
+  stepSubtasks: 'Subtasks {count}',
+  stepRuns: 'Runs {count}',
+  stepChecks: 'Checks {count}',
+  stepDecisions: 'Decisions {count}',
   apiToken: 'API token',
   apiTokenHint: 'Paste the bearer token from $HUBAGENT_HOME/token',
   save: 'Save',
@@ -37,9 +67,10 @@ const en = {
   network: 'Network',
   command: 'Command',
   capabilities: 'Capabilities',
-  attempt: 'attempt',
+  attempt: 'Attempt {count}',
   noBranch: 'no branch',
   noDiffstat: 'No diffstat',
+  noSubtasks: 'No subtasks yet.',
   noEvidence: 'No evidence yet.',
   noDecisions: 'No decisions yet.',
   noApprovalsForTask: 'No approvals for this task.',
@@ -89,6 +120,16 @@ const en = {
   statusReady: 'ready',
   statusQueued: 'queued',
   statusDraft: 'draft',
+  statusPending: 'pending',
+  statusIdle: 'idle',
+  statusOffline: 'offline',
+  statusActive: 'active',
+  statusPass: 'passed',
+  statusFail: 'not passed',
+  statusBlocked: 'blocked',
+  statusWaitingOnYou: 'waiting on you',
+  statusWaitingInput: 'waiting for input',
+  statusCancelled: 'cancelled',
   unknown: 'unknown',
   errorPrefix: 'Error',
   copyTaskId: 'Copy task ID',
@@ -124,6 +165,7 @@ export type Translator = (
 const zh: Record<MessageKey, string> = {
   appName: 'HubAgent',
   appSubtitle: '本地多 Agent 控制台',
+  workspaceScope: '本地工作区',
   primaryNavigation: '主导航',
   navChat: '对话',
   navTasks: '任务',
@@ -137,9 +179,38 @@ const zh: Record<MessageKey, string> = {
   settings: '设置',
   refresh: '刷新',
   live: '实时',
+  offline: '离线',
   eventStream: '事件流',
   connected: '已连接',
   reconnecting: '重连中',
+  eventsCount: '{count} 条事件',
+  allClear: '暂无待处理',
+  screenApprovals: '{count} 项待审批',
+  screenRunning: '{count} 个运行中',
+  screenFailed: '{count} 个失败',
+  screenRegistered: '已注册 {count} 个',
+  screenNoNetwork: '{count} 个无网络权限',
+  screenWaitingOnYou: '{count} 项等你处理',
+  pendingCount: '{count} 项待处理',
+  stepPlan: '计划',
+  stepExecute: '执行',
+  stepVerify: '验收',
+  stepDecide: '决策',
+  needsYou: '需要你审批',
+  threads: '对话',
+  queue: '队列',
+  pendingItems: '待处理',
+  you: '你',
+  risk: '风险',
+  tokenStored: 'Token 已保存在本机',
+  tokenMissing: '尚未配置 Token，先连接本地守护进程',
+  appearanceHint: '主题与语言保存在本机。',
+  languageHint: '控制台界面语言。',
+  connectionHint: '控制台只通过回环地址访问本地守护进程。',
+  stepSubtasks: '子任务 {count}',
+  stepRuns: '执行 {count}',
+  stepChecks: '检查 {count}',
+  stepDecisions: '决策 {count}',
   apiToken: 'API Token',
   apiTokenHint: '粘贴 $HUBAGENT_HOME/token 中的 bearer token',
   save: '保存',
@@ -158,9 +229,10 @@ const zh: Record<MessageKey, string> = {
   network: '网络',
   command: '命令',
   capabilities: '能力',
-  attempt: '尝试',
+  attempt: '第 {count} 次',
   noBranch: '无分支',
   noDiffstat: '无 diffstat',
+  noSubtasks: '暂无子任务。',
   noEvidence: '暂无证据。',
   noDecisions: '暂无决策。',
   noApprovalsForTask: '此任务暂无审批。',
@@ -210,6 +282,16 @@ const zh: Record<MessageKey, string> = {
   statusReady: '待执行',
   statusQueued: '排队中',
   statusDraft: '草稿',
+  statusPending: '待处理',
+  statusIdle: '空闲',
+  statusOffline: '离线',
+  statusActive: '进行中',
+  statusPass: '已通过',
+  statusFail: '未通过',
+  statusBlocked: '受阻',
+  statusWaitingOnYou: '待你审批',
+  statusWaitingInput: '等待输入',
+  statusCancelled: '已取消',
   unknown: '未知',
   errorPrefix: '错误',
   copyTaskId: '复制任务 ID',
@@ -267,7 +349,10 @@ export function statusKey(status: string): MessageKey {
     case 'running':
       return 'statusRunning'
     case 'waiting_approval':
+      return 'statusWaitingOnYou'
     case 'waiting_input':
+      return 'statusWaitingInput'
+    case 'waiting':
       return 'statusWaiting'
     case 'paused':
       return 'statusPaused'
@@ -283,6 +368,25 @@ export function statusKey(status: string): MessageKey {
       return 'statusQueued'
     case 'draft':
       return 'statusDraft'
+    case 'pending':
+      return 'statusPending'
+    case 'idle':
+      return 'statusIdle'
+    case 'offline':
+      return 'statusOffline'
+    case 'active':
+      return 'statusActive'
+    case 'pass':
+    case 'passed':
+    case 'verified':
+      return 'statusPass'
+    case 'fail':
+      return 'statusFail'
+    case 'blocked':
+      return 'statusBlocked'
+    case 'cancelled':
+    case 'canceled':
+      return 'statusCancelled'
     default:
       return 'unknown'
   }

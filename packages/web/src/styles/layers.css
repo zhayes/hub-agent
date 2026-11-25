@@ -1,0 +1,6 @@
+/* Cascade order for the console UI migration.
+   legacy    — the pre-migration stylesheet (wrapped in styles.css)
+   ui-sdk    — the small amount of behavior CSS injected by @ui-sdk/core
+   theme     — Tailwind theme variables
+   utilities — Tailwind utilities, which must win over legacy rules */
+@layer legacy, ui-sdk, theme, utilities;

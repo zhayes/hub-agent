@@ -23,9 +23,12 @@
     "test:brain-real": "tsx packages/hub/test/manual/real-brain-smoke.ts",
     "build:web": "pnpm --filter @hubagent/web build",
     "dev:web": "pnpm --filter @hubagent/web dev",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:visual": "playwright test --config playwright.visual.config.ts",
+    "test:visual:update": "playwright test --config playwright.visual.config.ts --update-snapshots"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
     "@biomejs/biome": "^2.6.8",
     "@playwright/test": "1.65.1",
     "@swc/core": "^1.16.22",
