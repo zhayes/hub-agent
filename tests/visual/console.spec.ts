@@ -131,7 +131,8 @@ async function mockApi(page: Page): Promise<void> {
               evidence: {
                 branch: 'fix/auth-redirect-loop',
                 commitSha: '9f2c41ad8123',
-                diffstat: ' src/auth/session.ts | 14 +++++-----\n 2 files changed, +14 −8',
+                diffstat:
+                  ' src/auth/session.ts | 14 +++++++++-----\n src/auth/cookie.ts  |  8 ++++----\n 2 files changed, 14 insertions(+), 8 deletions(-)',
               },
             },
           ],

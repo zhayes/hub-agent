@@ -1,5 +1,6 @@
 import { For, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
+import { DiffView } from '../../components/ui/DiffView'
 import { Icon } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
 import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
@@ -325,10 +326,21 @@ export function TasksView(props: TasksViewProps) {
                         {execution.evidence?.branch ?? props.t('noBranch')} ·{' '}
                         {execution.evidence?.commitSha?.slice(0, 8) ?? '—'}
                       </div>
-                      <Show when={execution.evidence?.diffstat}>
-                        <pre class="mt-2 overflow-x-auto rounded-control bg-subtle px-3 py-2.5 font-mono text-badge leading-relaxed whitespace-pre text-ink-2">
-                          {execution.evidence?.diffstat}
-                        </pre>
+                      <Show
+                        when={
+                          (execution.evidence?.diffstat ?? '') !== '' ||
+                          (execution.evidence?.changedFiles?.length ?? 0) > 0
+                        }
+                      >
+                        <DiffView
+                          class="mt-2"
+                          {...(execution.evidence?.diffstat === undefined
+                            ? {}
+                            : { stat: execution.evidence.diffstat })}
+                          {...(execution.evidence?.changedFiles === undefined
+                            ? {}
+                            : { files: execution.evidence.changedFiles })}
+                        />
                       </Show>
                       <Show when={execution.evidence?.transcriptRef}>
                         <div class="font-mono text-badge text-ink-3">

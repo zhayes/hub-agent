@@ -128,7 +128,7 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 - **Streaming 是消息级，不是 token 级。** hub 不产生 LLM token 流：助手消息在建任务 / 待审批 / 待澄清 / 结束这些离散点一次性写入。因此 `GET /api/v1/chat/threads/:id/stream`（SSE，游标为 `rowid`）推的是整条消息，前端把光标只放在**运行中线程的最后一条**上。不伪造逐字流。
 - **Thinking 绑定 plan，不绑 CoT。** 运行时只持久化计划，所以展开件展示 `kind: 'plan'` 的内容，标题用 `stepPlan`。不存在链式思考数据，也不去造它。
 - **Tool Chips 绑定“已记录的效果”，不是工具名。** hub 不持久化原始工具调用，chips 因此渲染消息携带的结构化引用（task / approval / clarification），并链到任务页。要展示真实工具名，得先在 hub 侧落地工具调用记录。
-- **Diff 视图未做。** diffstat 只在任务详情（`executions.evidence`）里有数据，聊天侧没有对应载荷；等 P4 之后单独补。
+- **Diff 视图已完成，但只到 stat 层。** hub 只采集 `git diff --stat` 与 `changedFiles`，不存 unified patch；`components/ui/DiffView.tsx` 因此解析 stat 渲染每文件的 +/- 与比例条，仅有文件清单时退化成行列表。要显示真实 hunk，需要先在采集端追加 `git diff` 全文并落库（受 4MB stdout 上限约束）。
 - **窗口化放弃（有据）。** 试过消息行加 `content-visibility: auto`，视觉回归在手机视口出现 6% 像素偏移（固有尺寸改变滚动锚点），已回滚。聊天按 100 条分页，DOM 只随用户主动翻页增长；真正要窗口化时需阈值开关 + 定高消息的限定范围。
 
 **P5 落地记录（2026-11-25）：**

@@ -40,6 +40,7 @@ import { ApprovalCard, type ApprovalState } from '../../components/ui/ApprovalCa
 import { Button } from '../../components/ui/Button'
 import { buttonGhost, buttonPrimary, buttonSecondary } from '../../components/ui/button-classes'
 import { RichText } from '../../components/ui/CodeBlock'
+import { DiffView } from '../../components/ui/DiffView'
 import { Field, fieldControl } from '../../components/ui/Field'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { Panel } from '../../components/ui/Panel'
@@ -84,6 +85,9 @@ const statuses = [
   { status: 'failed', label: 'failed' },
   { status: 'idle', label: 'idle' },
 ]
+
+const diffSample =
+  ' src/auth/session.ts | 14 +++++++++-----\n src/auth/cookie.ts  |  8 ++++----\n 2 files changed, 14 insertions(+), 8 deletions(-)'
 
 export function DevUiView() {
   const [elapsedMs, setElapsedMs] = createSignal(0)
@@ -446,6 +450,16 @@ export function DevUiView() {
                     'Patched the read order:\n\n```ts\nconst session = await jar.sync()\nif (session === undefined) redirect()\n```\n\nThen re-ran the auth suite.'
                   }
                 />
+              </div>
+            </div>
+
+            <div class="lg:col-span-2">
+              <p class={label}>Diff</p>
+              <p class="mt-1 text-badge text-ink-3">
+                Parsed from `git diff --stat`; the hub stores the stat, not the hunks.
+              </p>
+              <div class="mt-2">
+                <DiffView stat={diffSample} />
               </div>
             </div>
 
