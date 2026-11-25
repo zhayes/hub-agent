@@ -55,8 +55,12 @@ const threadRow =
   'grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 const emptyState =
   'rounded-panel border border-dashed border-line-strong px-4 py-4 text-meta text-ink-2'
+/* Empty states lean on a glyph instead of a paragraph: the shape says "nothing
+   here yet" without reading like a manual. */
+const emptyGlyph = 'grid size-11 shrink-0 place-items-center rounded-full bg-subtle text-ink-3'
+const emptyBlock = 'flex flex-col items-center gap-2 px-4 py-8 text-center text-meta text-ink-3'
 const centeredEmpty =
-  'flex min-h-[220px] flex-col items-center justify-center gap-2.5 px-8 py-8 text-center text-meta text-ink-2'
+  'flex min-h-[240px] flex-col items-center justify-center gap-3 px-8 py-10 text-center text-meta text-ink-2'
 const modeButton =
   'inline-flex h-[26px] items-center gap-1.5 rounded-control px-2 text-badge text-ink-2 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
@@ -601,7 +605,12 @@ export function ChatView(props: ChatViewProps) {
             )}
           </For>
           <Show when={filteredThreads().length === 0}>
-            <p class={emptyState}>{props.t('noThreads')}</p>
+            <div class={emptyBlock}>
+              <span class={emptyGlyph}>
+                <Icon name="message" size={18} />
+              </span>
+              <span>{props.t('noThreads')}</span>
+            </div>
           </Show>
         </div>
         <Show when={wide() && !leftCollapsed()}>
@@ -626,44 +635,39 @@ export function ChatView(props: ChatViewProps) {
         aria-label={props.t('chat')}
         style={columnStyle(2)}
       >
-        <header class="flex flex-none items-center justify-between gap-3 border-b border-line px-5 py-3">
-          <div class="min-w-0">
-            <div class="truncate text-section font-semibold text-ink">
-              {thread()?.title ?? props.t('chat')}
-            </div>
-            <div class="mt-1 flex items-center gap-2 text-badge text-ink-3">
-              <Show when={thread() !== undefined}>
-                <StatusBadge
-                  status={thread()?.status ?? 'active'}
-                  label={props.t(statusKey(thread()?.status ?? 'active'))}
-                />
-                <Show when={thread()?.taskId}>
-                  <span class="font-mono" title={thread()?.taskId}>
-                    {shortenId(thread()?.taskId ?? '')}
-                  </span>
-                </Show>
+        <header class="flex flex-none items-center gap-2 border-b border-line px-2.5 py-2">
+          {/* The pane toggle sits where a title would be: the screen already says
+              "Chat", so a second title here was pure repetition. */}
+          <IconButton
+            icon="panelLeft"
+            label={
+              wide()
+                ? leftCollapsed()
+                  ? props.t('expandThreads')
+                  : props.t('collapseThreads')
+                : props.t('threads')
+            }
+            pressed={wide() ? !leftCollapsed() : mobileThreads()}
+            onClick={() => {
+              if (wide()) setPane('left', !leftCollapsed())
+              else setMobileThreads(true)
+            }}
+          />
+          <div class="flex min-w-0 flex-1 items-center gap-2">
+            <Show when={thread() !== undefined}>
+              <span class="truncate text-section font-semibold text-ink">{thread()?.title}</span>
+              <StatusBadge
+                status={thread()?.status ?? 'active'}
+                label={props.t(statusKey(thread()?.status ?? 'active'))}
+              />
+              <Show when={thread()?.taskId}>
+                <span class="shrink-0 font-mono text-badge text-ink-3" title={thread()?.taskId}>
+                  {shortenId(thread()?.taskId ?? '')}
+                </span>
               </Show>
-            </div>
+            </Show>
           </div>
           <div class="flex flex-none items-center gap-0.5">
-            {/* The only two layout controls in the console: this one drives the
-                thread list (or opens it on phones), the next one the context
-                pane. The panes themselves carry no collapse buttons. */}
-            <IconButton
-              icon="panelLeft"
-              label={
-                wide()
-                  ? leftCollapsed()
-                    ? props.t('expandThreads')
-                    : props.t('collapseThreads')
-                  : props.t('threads')
-              }
-              pressed={wide() ? !leftCollapsed() : mobileThreads()}
-              onClick={() => {
-                if (wide()) setPane('left', !leftCollapsed())
-                else setMobileThreads(true)
-              }}
-            />
             <Show when={wideContext()}>
               <IconButton
                 icon="panelRight"
@@ -706,7 +710,9 @@ export function ChatView(props: ChatViewProps) {
               when={thread() !== undefined}
               fallback={
                 <div class={centeredEmpty}>
-                  <Icon name="message" size={20} />
+                  <span class={emptyGlyph}>
+                    <Icon name="message" size={20} />
+                  </span>
                   <p>{props.t('selectThread')}</p>
                   <Button onClick={() => void newThread()}>{props.t('newThread')}</Button>
                 </div>
@@ -740,8 +746,10 @@ export function ChatView(props: ChatViewProps) {
           </div>
         </div>
 
+        {/* No top border: the transcript and the composer read as one surface
+            instead of two stacked panels. */}
         <form
-          class="flex-none border-t border-line bg-surface px-4 pt-2.5 pb-3.5"
+          class="flex-none bg-surface px-4 pt-1 pb-4"
           onSubmit={(event) => {
             event.preventDefault()
             void send()
@@ -788,7 +796,7 @@ export function ChatView(props: ChatViewProps) {
             <textarea
               id="chat-composer"
               rows="2"
-              class="block max-h-[180px] min-h-[54px] w-full resize-none rounded-panel border border-line bg-canvas px-3 py-2.5 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+              class="block max-h-[200px] min-h-[68px] w-full resize-none rounded-panel border border-line bg-canvas px-3.5 py-3 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
               value={text()}
               placeholder={
                 mode() === 'run' ? props.t('chatPlaceholder') : props.t('chatAskPlaceholder')
@@ -817,17 +825,15 @@ export function ChatView(props: ChatViewProps) {
                   <span>{props.t('ask')}</span>
                 </button>
               </div>
-              <span class="flex-1 text-right text-badge text-ink-3 max-[560px]:hidden">
-                {props.t('chatHint')}
-              </span>
+              <span class="flex-1" />
               <button
                 type="submit"
-                class="grid size-[34px] flex-none place-items-center rounded-panel bg-ink text-canvas transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45"
+                class="grid size-9 flex-none place-items-center rounded-full bg-ink text-canvas transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:bg-subtle disabled:text-ink-3 disabled:hover:opacity-100"
                 aria-label={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
                 title={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
                 disabled={busy() || text().trim() === ''}
               >
-                <Icon name="arrowUp" size={15} />
+                <Icon name="arrowUp" size={16} />
               </button>
             </div>
           </div>

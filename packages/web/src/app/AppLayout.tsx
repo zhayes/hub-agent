@@ -66,19 +66,24 @@ export function AppLayout(props: { children?: JSX.Element }) {
   const note = (): string => {
     if (path().startsWith('/settings')) return ''
     if (path().startsWith('/agents')) {
+      if (app.agents().length === 0) return ''
       const noNetwork = app.agents().filter((agent) => agent.networkMode === 'deny').length
       const parts = [app.t('screenRegistered', { count: app.agents().length })]
       if (noNetwork > 0) parts.push(app.t('screenNoNetwork', { count: noNetwork }))
       return parts.join(' · ')
     }
     if (path().startsWith('/approvals')) {
-      return app.t('screenWaitingOnYou', { count: pendingApprovals() })
+      return pendingApprovals() === 0
+        ? ''
+        : app.t('screenWaitingOnYou', { count: pendingApprovals() })
     }
     const parts: string[] = []
     if (pendingApprovals() > 0) parts.push(app.t('screenApprovals', { count: pendingApprovals() }))
     if (runningTasks() > 0) parts.push(app.t('screenRunning', { count: runningTasks() }))
     if (failedTasks() > 0) parts.push(app.t('screenFailed', { count: failedTasks() }))
-    return parts.length === 0 ? app.t('allClear') : parts.join(' · ')
+    /* No "nothing needs you" filler: an empty subtitle is quieter than a
+       sentence that says nothing. */
+    return parts.join(' · ')
   }
 
   const connectionLabel = (): string => {
@@ -260,9 +265,6 @@ export function AppLayout(props: { children?: JSX.Element }) {
         <header class="flex h-12 flex-none items-center justify-between gap-4 border-b border-line px-6 max-[1100px]:px-4">
           <div class="flex min-w-0 items-baseline gap-2.5">
             <span class="text-meta font-semibold text-ink">{app.t('appName')}</span>
-            <span class="whitespace-nowrap text-badge text-ink-3 max-[560px]:hidden">
-              {app.t('workspaceScope')}
-            </span>
           </div>
           <div class="flex items-center gap-1.5">
             <span
@@ -308,13 +310,13 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
           <Show when={app.token() === ''}>
             <div
-              class="mx-6 mb-3 flex flex-none items-center justify-between gap-3 rounded-panel border border-line bg-surface px-3 py-2.5 max-[1100px]:mx-4"
+              class="mx-6 mb-3 flex flex-none items-center gap-3 rounded-panel border border-line bg-surface px-3 py-2 max-[1100px]:mx-4"
               role="status"
             >
-              <div class="min-w-0">
-                <strong class="text-meta font-semibold text-ink">{app.t('tokenRequired')}</strong>
-                <p class="mt-0.5 text-badge text-ink-2">{app.t('tokenRequiredHint')}</p>
-              </div>
+              <Icon name="key" size={16} class="shrink-0 text-ink-3" />
+              <strong class="min-w-0 flex-1 truncate text-meta font-semibold text-ink">
+                {app.t('tokenRequired')}
+              </strong>
               <a class={buttonPrimary} href="/settings">
                 {app.t('openSettings')}
               </a>

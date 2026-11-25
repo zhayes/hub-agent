@@ -272,8 +272,10 @@ export function SettingsView(props: SettingsViewProps) {
     <div class="max-w-[980px] pb-8">
       <section class={section}>
         <div>
-          <h2 class="text-section text-ink">{props.t('settingsAppearance')}</h2>
-          <p class="mt-1 text-meta text-ink-2">{props.t('appearanceHint')}</p>
+          <div class="flex items-center gap-2">
+            <Icon name="sun" size={15} class="text-ink-3" />
+            <h2 class="text-section text-ink">{props.t('settingsAppearance')}</h2>
+          </div>
         </div>
         <div class="flex flex-col gap-2">
           <fieldset class={segmented} aria-label={props.t('theme')}>
@@ -303,8 +305,10 @@ export function SettingsView(props: SettingsViewProps) {
 
       <section class={section}>
         <div>
-          <h2 class="text-section text-ink">{props.t('settingsLanguage')}</h2>
-          <p class="mt-1 text-meta text-ink-2">{props.t('languageHint')}</p>
+          <div class="flex items-center gap-2">
+            <Icon name="globe" size={15} class="text-ink-3" />
+            <h2 class="text-section text-ink">{props.t('settingsLanguage')}</h2>
+          </div>
         </div>
         <div class="flex flex-col gap-2">
           <fieldset class={segmented} aria-label={props.t('language')}>
@@ -327,8 +331,10 @@ export function SettingsView(props: SettingsViewProps) {
 
       <section class={section}>
         <div>
-          <h2 class="text-section text-ink">{props.t('settingsModel')}</h2>
-          <p class="mt-1 text-meta text-ink-2">{props.t('modelHint')}</p>
+          <div class="flex items-center gap-2">
+            <Icon name="key" size={15} class="text-ink-3" />
+            <h2 class="text-section text-ink">{props.t('settingsModel')}</h2>
+          </div>
           <Show when={model()?.agentDir !== undefined}>
             <p class="mt-1 truncate font-mono text-badge text-ink-3" title={model()?.agentDir}>
               {model()?.agentDir}
@@ -415,8 +421,10 @@ export function SettingsView(props: SettingsViewProps) {
 
       <section class={section}>
         <div>
-          <h2 class="text-section text-ink">{props.t('settingsConnection')}</h2>
-          <p class="mt-1 text-meta text-ink-2">{props.t('connectionHint')}</p>
+          <div class="flex items-center gap-2">
+            <Icon name="shield" size={15} class="text-ink-3" />
+            <h2 class="text-section text-ink">{props.t('settingsConnection')}</h2>
+          </div>
         </div>
         <div class="flex flex-col gap-2">
           <Field label={props.t('settingsToken')}>
