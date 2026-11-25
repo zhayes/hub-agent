@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   detectLocale,
@@ -23,6 +25,20 @@ describe('i18n', () => {
       expect(translate('en-US', key).length).toBeGreaterThan(0)
       expect(translate('zh-CN', key).length).toBeGreaterThan(0)
     }
+  })
+
+  it('zh 文案不超出自托管中文字体子集', () => {
+    // 子集只有 214 字，缺字会回退到系统字体、视觉上不一致。新增文案时改措辞
+    // 或用 ASCII 术语，不要重新生成字体（见 docs/UI-SPEC.md）。
+    const subsetPath = join(import.meta.dirname, '../src/assets/fonts/cjk-chars.txt')
+    const subset = new Set(readFileSync(subsetPath, 'utf8').trim().split(''))
+    const missing: string[] = []
+    for (const key of messageKeys) {
+      for (const char of translate('zh-CN', key)) {
+        if (/[\u4e00-\u9fff]/.test(char) && !subset.has(char)) missing.push(`${key}:${char}`)
+      }
+    }
+    expect(missing).toEqual([])
   })
 
   it('interpolates params and translates statuses', () => {

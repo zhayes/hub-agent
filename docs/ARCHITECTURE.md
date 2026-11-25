@@ -406,6 +406,8 @@ Runtime 校验（schema → 权限 → 预算 → 幂等）后才落库执行。
 - 每个元工具都是 Runtime 的瘦封装：参数校验 + 调用 Runtime + 精简返回。
 - `agentId` 只作为偏好透传，实际执行者由 Selection Engine 决定。
 - **`pi` 依赖只允许出现在 `src/brain/pi/`**，由 R3 规则强制（其余模块只看到 `orchestrator-brain.ts` 接口）。
+- **agent directory 归 hub 所有**：默认 `<hubDir>/pi-agent`（显式 `HUBAGENT_PI_AGENT_DIR` 仍优先），不再默认读写用户的 `~/.pi/agent`。控制台「设置 → Model」直接读写这个目录里的 `models.json` / `settings.json`——沿用 Pi 原生契约，既不新增私有格式，也不改写 `config.toml`（那会丢用户注释）。
+- **模型配置端点**（走统一 Bearer 中间件）：`GET /api/v1/settings/model` 只回 `apiKeySet` 与字面量 key 的后 4 位，**永不回传明文**；`PUT /api/v1/settings/model` 为合并写入（省略 `apiKey` 保留旧值，传 `''` 删除），两个文件以 `0600` 落盘。校验失败是 `CONFIG_INVALID`（HTTP 400），损坏的 JSON 不会被覆盖。
 
 ### 5.5 唤醒
 

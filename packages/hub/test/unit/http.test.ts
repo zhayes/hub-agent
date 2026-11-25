@@ -1,4 +1,6 @@
-import { resolve } from 'node:path'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../../src/domain/ids'
 import { emptyState } from '../../src/domain/machine'
@@ -104,6 +106,62 @@ describe('HTTP API', () => {
       expect(text).toContain('event: hubagent')
       expect(text).toContain('goal.created')
     }
+  })
+})
+
+describe('模型设置端点', () => {
+  function tempDir(): string {
+    return mkdtempSync(join(tmpdir(), 'hubagent-http-model-'))
+  }
+
+  it('GET 未配置时返回空视图，不读用户 home', async () => {
+    const app = createHttpApp({ db: seed(), token: 't', modelDir: tempDir() })
+    const response = await app.request('/api/v1/settings/model', {
+      headers: { authorization: 'Bearer t' },
+    })
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as {
+      model: { apiKeySet: boolean; providerId?: string }
+    }
+    expect(payload.model.apiKeySet).toBe(false)
+    expect(payload.model.providerId).toBeUndefined()
+  })
+
+  it('PUT 写入后 GET 能读回，且不回传明文 key', async () => {
+    const dir = tempDir()
+    const app = createHttpApp({ db: seed(), token: 't', modelDir: dir })
+    const put = await app.request('/api/v1/settings/model', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer t', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        providerId: 'local-proxy',
+        modelId: 'qwen2.5-coder:7b',
+        api: 'openai-completions',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKey: 'sk-secret-9876wxyz',
+      }),
+    })
+    expect(put.status).toBe(200)
+    const saved = (await put.json()) as { model: { apiKeyHint?: string } }
+    expect(saved.model.apiKeyHint).toBe('…wxyz')
+
+    const get = await app.request('/api/v1/settings/model', {
+      headers: { authorization: 'Bearer t' },
+    })
+    const text = await get.text()
+    expect(text).not.toContain('sk-secret-9876wxyz')
+    expect(text).toContain('local-proxy')
+  })
+
+  it('非法请求体返回 400 与稳定错误码', async () => {
+    const app = createHttpApp({ db: seed(), token: 't', modelDir: tempDir() })
+    const response = await app.request('/api/v1/settings/model', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer t', 'content-type': 'application/json' },
+      body: JSON.stringify({ providerId: 'Bad Id', modelId: 'm1' }),
+    })
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { code: string }).code).toBe('CONFIG_INVALID')
   })
 })
 

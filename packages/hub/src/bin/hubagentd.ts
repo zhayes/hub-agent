@@ -7,7 +7,7 @@ import { createChatService } from '../runtime/chat/chat-service'
 import { scanRecovery } from '../runtime/recovery/scan'
 import { createSrtProvider } from '../sandbox/srt-driver'
 import { acquireLock } from '../shared/lock'
-import { dbPath, hubDir, lockPath, tokenPath } from '../shared/paths'
+import { dbPath, hubDir, lockPath, resolvePiAgentDir, tokenPath } from '../shared/paths'
 import { openDatabase } from '../storage/db'
 import { migrate } from '../storage/migrate'
 
@@ -41,7 +41,15 @@ async function main(): Promise<void> {
     clientVersion: '0.0.0-m0',
     worktree: process.cwd(),
   })
-  const app = createHttpApp({ db, token: token.token, version: '0.0.0-m0', webDist, chat })
+  const app = createHttpApp({
+    db,
+    token: token.token,
+    version: '0.0.0-m0',
+    webDist,
+    chat,
+    // 与 createBrainFromEnv 同一解析结果：控制台设置的模型就是 Brain 用的模型。
+    modelDir: resolvePiAgentDir(),
+  })
   const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port })
 
   process.stdout.write(

@@ -13,6 +13,8 @@ export type IconName =
   | 'chevronRight'
   | 'copy'
   | 'external'
+  | 'eye'
+  | 'eyeOff'
   | 'globe'
   | 'key'
   | 'message'
@@ -43,6 +45,15 @@ const paths: Record<IconName, readonly string[]> = {
   clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z', 'M12 7v5l3 2'],
   copy: ['M9 9h11v11H9z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
   external: ['M14 3h7v7M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5'],
+  eye: [
+    'M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z',
+    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  ],
+  eyeOff: [
+    'M2 12s3.6-6.5 10-6.5c1.7 0 3.2.4 4.5 1M22 12s-3.6 6.5-10 6.5c-1.7 0-3.2-.4-4.5-1',
+    'M3 3l18 18',
+    'M9.9 9.9a3 3 0 0 0 4.2 4.2',
+  ],
   globe: [
     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
     'M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18',

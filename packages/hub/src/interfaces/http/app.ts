@@ -1,11 +1,19 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { asChatThreadId } from '../../domain/ids'
 import { listAgents } from '../../runtime/agent-registry'
 import { decideApproval, listApprovals } from '../../runtime/approval'
 import type { ChatService } from '../../runtime/chat/chat-service'
 import { listDecisions } from '../../runtime/decision-record'
+import {
+  parseModelPatch,
+  readModelConfig,
+  writeModelConfig,
+} from '../../runtime/model-config/model-config'
+import { HubError } from '../../shared/errors'
+import { resolvePiAgentDir } from '../../shared/paths'
 import type { Db } from '../../storage/db'
 import { getChatThread, listChatMessagesAfter } from '../../storage/queries/chat'
 import { listEventsSince } from '../../storage/queries/events'
@@ -20,11 +28,14 @@ export interface HttpAppOptions {
   webDist?: string
   /** Chat 需要 provider；测试可注入 fake，未注入时端点 501 */
   chat?: ChatService
+  /** Pi profile 目录（models.json / settings.json）；缺省见 resolvePiAgentDir */
+  modelDir?: string
 }
 
 export function createHttpApp(options: HttpAppOptions): Hono {
   const app = new Hono()
   const { db, token } = options
+  const modelDir = options.modelDir ?? resolvePiAgentDir()
 
   app.use('/api/v1/*', async (context, next) => {
     const header = context.req.header('authorization') ?? ''
@@ -38,6 +49,25 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   app.get('/api/v1/health', (context) =>
     context.json({ ok: true, version: options.version ?? '0.0.0' }),
   )
+
+  /* 模型设置就是 Pi profile 的 models.json / settings.json；永远不回传明文 key。 */
+  app.get('/api/v1/settings/model', (context) => {
+    try {
+      return context.json({ ok: true, model: readModelConfig(modelDir) })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
+  app.put('/api/v1/settings/model', async (context) => {
+    const body = await context.req.json<unknown>().catch((): unknown => undefined)
+    try {
+      const model = writeModelConfig(modelDir, parseModelPatch(body))
+      return context.json({ ok: true, model })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
 
   app.get('/api/v1/tasks', (context) => {
     const limit = Number.parseInt(context.req.query('limit') ?? '50', 10)
@@ -347,6 +377,20 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   }
 
   return app
+}
+
+/** 只向客户端暴露稳定错误码，不泄漏底层异常。 */
+function errorResponse(context: Context, error: unknown): Response {
+  if (error instanceof HubError) {
+    return context.json(
+      { code: error.code, message: error.message },
+      error.code === 'CONFIG_INVALID' ? 400 : 500,
+    )
+  }
+  return context.json(
+    { code: 'UNEXPECTED', message: error instanceof Error ? error.message : String(error) },
+    500,
+  )
 }
 
 function contentType(file: string): string {

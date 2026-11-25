@@ -322,6 +322,9 @@ POST /api/v1/tasks/:id/cancel
 POST /api/v1/tasks/:id/pause
 POST /api/v1/tasks/:id/resume
 POST /api/v1/clarifications/:id/answer
+
+GET  /api/v1/settings/model       读 Pi profile 的 provider/model（不回传明文 key）
+PUT  /api/v1/settings/model       写 provider/model/key（合并写入，0600）
 ```
 
 - 全部走统一 Bearer 中间件；SSE 可用 `?token=`，但写接口不允许 query token。

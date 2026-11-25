@@ -138,6 +138,14 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 - **可拖拽分栏**：左右栏宽存 state + localStorage（220–460px），拖拽用 pointer capture，键盘用 `role="separator"` + 方向键（Shift 加速），≤860px 仍走单列（内联宽度只在 ≥861px 应用）。手柄默认透明，不影响基线。
 - **`/` 与 `@`**：`/` 列命令（run / ask / new / context），`@` 列任务并按标题或 id 过滤；菜单由输入文本派生，不存平行状态，方向键 + Enter 选择、Esc 清空。列表用 `role=listbox` + `option`，焦点不离开输入框（所以选项是 `tabindex=-1`）。
 
+**设置页模型配置（2026-11-25）：**
+
+- **不改 `config.toml`，改 Pi 自己的文件。** 模型字段落在 `<hubDir>/pi-agent/{models.json,settings.json}`，格式就是 Pi 的 schema——用户填的值 Pi 真的会读，也不需要 hub 发明第二套配置格式。`HUBAGENT_PI_AGENT_DIR` 显式设置时仍优先（兼容旧部署），但默认不再碰用户的 `~/.pi/agent`。
+- **key 只进不出。** `GET /api/v1/settings/model` 只回 `apiKeySet` 与字面量 key 的后 4 位，`$ENV` / `!command` 连后 4 位都没有（那是变量名，不是凭据）。写入用临时文件 + rename，两个文件都 `0600`，目录 `0700`。
+- **省略 = 保留。** `PUT` 是合并语义：不传 `apiKey` 保留原值，传 `''` 才删除；`contextWindow`/`maxTokens`/`thinkingLevel` 传 `null` 回落到模型默认。这样表单不需要把 key 回填到 DOM 里也能改其他字段。
+- **没有「测试连接」。** hub 没有探测 provider 的能力，与其做个假按钮，不如不做；错的 baseUrl 会在下一次 Brain 回合以 `BRAIN_UNAVAILABLE` 暴露。
+- **中文文案限在字体子集内。** 214 字子集里没有「模型 / 密钥 / 显示 / 隐藏 / 删除」，所以该节标题与字段名用 ASCII 术语（`Model` / `Provider` / `API Key` / `Clear key`），提示语才用中文（`API 地址与 Token 保存在本机。`）。新增了单测把「中文文案 ⊆ cjk-chars.txt」钉住，避免以后静默缺字。
+
 **体积实测（生产包，raw / gzip）：** 主包 286.52 / 97.36 kB，命令面板单独成块 55.54 / 19.78 kB（首次 ⌘K 才加载）。SDK 的弹层基础是主要成本：只挂 Toast 大约 +83 kB，移除它主包回到 203.22 kB。若要再压，下一步是把 Toast 也改成按需（需一个待发队列避免首次提示丢失）。
 
 ## 7. 复审触发条件

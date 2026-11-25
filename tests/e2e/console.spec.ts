@@ -194,6 +194,59 @@ test('context pane collapses and composer remains usable', async ({ page }) => {
 })
 
 
+test('settings model form saves provider, model and key', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const stored = {
+    agentDir: '/tmp/pi-agent',
+    providerId: 'local-proxy',
+    modelId: 'qwen2.5-coder:7b',
+    api: 'openai-completions',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeySet: true,
+    apiKeyKind: 'literal',
+    apiKeyHint: '…wxyz',
+  }
+  let patch: Record<string, unknown> | undefined
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/settings/model') {
+      if (route.request().method() === 'PUT') {
+        patch = route.request().postDataJSON() as Record<string, unknown>
+        return route.fulfill({ json: { ok: true, model: stored } })
+      }
+      return route.fulfill({
+        json: { ok: true, model: { agentDir: '/tmp/pi-agent', apiKeySet: false, apiKeyKind: 'none' } },
+      })
+    }
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
+    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [] } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.goto('/settings')
+  // 未配置时 Save 不可用：Provider 与 Model ID 是必填项。
+  const saveModel = page.locator('form').getByRole('button', { name: 'Save' })
+  await expect(saveModel).toBeDisabled()
+
+  await page.getByLabel('Provider', { exact: true }).fill('local-proxy')
+  await page.getByLabel('Model ID', { exact: true }).fill('qwen2.5-coder:7b')
+  await page.getByLabel('Base URL', { exact: true }).fill('http://127.0.0.1:11434/v1')
+  await page.getByLabel('API Key', { exact: true }).fill('sk-1234wxyz')
+  await saveModel.click()
+
+  await expect.poll(() => patch?.['providerId']).toBe('local-proxy')
+  expect(patch?.['apiKey']).toBe('sk-1234wxyz')
+  expect(patch?.['api']).toBe('openai-completions')
+
+  // 保存后凭据从输入框清掉，只留提示，不再回显明文。
+  await expect(page.getByLabel('API Key', { exact: true })).toHaveValue('')
+  await expect(page.getByText('Key stored · …wxyz')).toBeVisible()
+  await expect(page.getByText('Saved.')).toBeVisible()
+})
+
 test('renders only the latest page and loads older messages', async ({ page }) => {
   await page.unroute('**/api/v1/**')
   const all = Array.from({ length: 1000 }, (_, index) => ({

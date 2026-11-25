@@ -101,6 +101,45 @@ export const api = {
   reject: (id: string) => request(`/api/v1/approvals/${id}/reject`, { method: 'POST' }),
 }
 
+export interface ModelConfigView {
+  agentDir: string
+  providerId?: string
+  providerName?: string
+  modelId?: string
+  modelName?: string
+  baseUrl?: string
+  api?: string
+  apiKeySet: boolean
+  apiKeyKind: 'literal' | 'env' | 'command' | 'none'
+  /** 只给字面量 key 的后 4 位 */
+  apiKeyHint?: string
+  contextWindow?: number
+  maxTokens?: number
+  thinkingLevel?: string
+}
+
+export interface ModelConfigPatch {
+  providerId: string
+  modelId: string
+  providerName?: string
+  baseUrl?: string
+  api?: string
+  /** 不传则保留旧 key；传空字符串则删除 */
+  apiKey?: string
+  contextWindow?: number | null
+  maxTokens?: number | null
+  thinkingLevel?: string | null
+}
+
+export const settingsApi = {
+  model: () => request<{ ok: boolean; model: ModelConfigView }>('/api/v1/settings/model'),
+  saveModel: (patch: ModelConfigPatch) =>
+    request<{ ok: boolean; model: ModelConfigView }>('/api/v1/settings/model', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+}
+
 export interface ChatThread {
   id: string
   title: string
