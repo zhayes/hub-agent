@@ -7,6 +7,7 @@ import {
   onSettled,
   useContext,
 } from 'solid-js'
+import { toast } from '../components/ui/Toaster'
 import {
   type AgentRow,
   type ApprovalRow,
@@ -117,6 +118,8 @@ export function AppProvider(props: { children: JSX.Element }) {
     try {
       await (action === 'approve' ? api.approve(id) : api.reject(id))
       await refresh()
+      /* The list re-renders without the row, so confirm the decision explicitly. */
+      toast(t(action))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }

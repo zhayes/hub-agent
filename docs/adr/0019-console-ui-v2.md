@@ -131,6 +131,13 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 - **Diff 视图未做。** diffstat 只在任务详情（`executions.evidence`）里有数据，聊天侧没有对应载荷；等 P4 之后单独补。
 - **窗口化放弃（有据）。** 试过消息行加 `content-visibility: auto`，视觉回归在手机视口出现 6% 像素偏移（固有尺寸改变滚动锚点），已回滚。聊天按 100 条分页，DOM 只随用户主动翻页增长；真正要窗口化时需阈值开关 + 定高消息的限定范围。
 
+**P5 落地记录（2026-11-25）：**
+
+- **Cmd+K**（`components/ui/CommandPalette.tsx`）：SDK 的 command 装在 dialog 内，过滤 / roving focus / Esc / 焦点归还都归 SDK；关闭走 `onFlush`，避免与导航争 owned scope。
+- **Toast**（`components/ui/Toaster.tsx`）：模块级单 toaster，壳层挂一次；审批决定成功后提示（`store.decide` 与聊天内 `decideApproval` 都覆盖）。文案复用 `approve` / `reject` 两个已有 key，不新增中文，子集无需重生成。
+- **可拖拽分栏**：左右栏宽存 state + localStorage（220–460px），拖拽用 pointer capture，键盘用 `role="separator"` + 方向键（Shift 加速），≤860px 仍走单列（内联宽度只在 ≥861px 应用）。手柄默认透明，不影响基线。
+- **`/` 与 `@`**：`/` 列命令（run / ask / new / context），`@` 列任务并按标题或 id 过滤；菜单由输入文本派生，不存平行状态，方向键 + Enter 选择、Esc 清空。列表用 `role=listbox` + `option`，焦点不离开输入框（所以选项是 `tabindex=-1`）。
+
 ## 7. 复审触发条件
 
 1. `@ui-sdk` beta 出现影响 Dialog/Select/Command 的破坏性变更；

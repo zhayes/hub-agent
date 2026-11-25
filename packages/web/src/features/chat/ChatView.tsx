@@ -8,6 +8,7 @@ import { IconButton } from '../../components/ui/IconButton'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
 import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
+import { toast } from '../../components/ui/Toaster'
 import { type ToolChip, ToolChips } from '../../components/ui/ToolChips'
 import {
   api,
@@ -31,18 +32,25 @@ export interface ChatViewProps {
   onOpenTask: (id: string) => void
 }
 
-/* The three panes are a 300 / 1fr / 300 grid; a collapsed pane shrinks to its
-   rail. Tailwind only emits classes it can see, so every state is spelled out. */
-const layoutCols = {
-  open: 'grid-cols-[300px_minmax(0,1fr)_300px] max-[1100px]:grid-cols-[264px_minmax(0,1fr)] max-[860px]:grid-cols-1',
-  left: 'grid-cols-[0px_minmax(0,1fr)_300px] max-[1100px]:grid-cols-[0px_minmax(0,1fr)] max-[860px]:grid-cols-1',
-  right:
-    'grid-cols-[300px_minmax(0,1fr)_48px] max-[1100px]:grid-cols-[264px_minmax(0,1fr)] max-[860px]:grid-cols-1',
-  both: 'grid-cols-[0px_minmax(0,1fr)_48px] max-[1100px]:grid-cols-[0px_minmax(0,1fr)] max-[860px]:grid-cols-1',
-} as const
+/* Pane widths live in state so they can be dragged; mobile stays a single
+   column through the max-width utility below. */
+const MOBILE_ONLY = 'hidden max-[860px]:grid'
+const DESKTOP_ONLY = 'max-[860px]:hidden'
 
-const mobileOnly = 'hidden max-[860px]:grid'
-const desktopOnly = 'max-[860px]:hidden'
+const LEFT_MIN = 220
+const LEFT_MAX = 460
+const RIGHT_MIN = 220
+const RIGHT_MAX = 460
+
+function clampWidth(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+function storedWidth(key: string, fallback: number, min: number, max: number): number {
+  const raw = localStorage.getItem(key)
+  const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) ? clampWidth(parsed, min, max) : fallback
+}
 
 const threadRow =
   'grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
@@ -64,11 +72,21 @@ export function ChatView(props: ChatViewProps) {
   const [error, setError] = createSignal('')
   const [hasMore, setHasMore] = createSignal(false)
   const [thinkingMs, setThinkingMs] = createSignal(0)
+  const [menuIndex, setMenuIndex] = createSignal(0)
   const [leftCollapsed, setLeftCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.left') === 'collapsed',
   )
   const [rightCollapsed, setRightCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.right') === 'collapsed',
+  )
+  const [leftWidth, setLeftWidth] = createSignal(
+    storedWidth('hubagent.chat.leftWidth', 300, LEFT_MIN, LEFT_MAX),
+  )
+  const [rightWidth, setRightWidth] = createSignal(
+    storedWidth('hubagent.chat.rightWidth', 300, RIGHT_MIN, RIGHT_MAX),
+  )
+  const [wide, setWide] = createSignal(
+    typeof window === 'undefined' ? false : window.matchMedia('(min-width: 861px)').matches,
   )
   const [mobileThreads, setMobileThreads] = createSignal(false)
   let poll: ReturnType<typeof setInterval> | undefined
@@ -258,6 +276,7 @@ export function ChatView(props: ChatViewProps) {
   ): Promise<void> => {
     try {
       await (action === 'approve' ? api.approve(approvalId) : api.reject(approvalId))
+      toast(props.t(action))
       const current = thread()
       if (current !== undefined) {
         if (action === 'approve') {
@@ -298,6 +317,17 @@ export function ChatView(props: ChatViewProps) {
     })
   })
 
+  /* Grid columns are inline only when the three-pane layout is on screen; on
+     phones the max-width utilities keep it a single column. */
+  onSettled(() => {
+    const query = window.matchMedia('(min-width: 861px)')
+    const update = (): void => {
+      setWide(query.matches)
+    }
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
+
   createEffect(
     () => props.threadId,
     (id) => {
@@ -330,7 +360,84 @@ export function ChatView(props: ChatViewProps) {
     return id === undefined ? undefined : props.tasks.find((task) => task.id === id)
   }
 
+  /* `/` at the start of the box lists commands; a trailing `@word` mentions a task.
+     The menu is derived from the text, so it cannot drift from what is typed. */
+  interface MenuItem {
+    id: string
+    label: string
+    hint?: string
+  }
+
+  const menu = (): { kind: 'slash' | 'mention'; items: MenuItem[] } | undefined => {
+    const value = text()
+    if (value.startsWith('/')) {
+      const query = value.slice(1).toLowerCase()
+      const commands: MenuItem[] = [
+        { id: 'run', label: props.t('run'), hint: '/run' },
+        { id: 'ask', label: props.t('ask'), hint: '/ask' },
+        { id: 'new', label: props.t('newThread'), hint: '/new' },
+        { id: 'context', label: props.t('threadContext'), hint: '/context' },
+      ]
+      return {
+        kind: 'slash',
+        items: commands.filter((item) => item.id.includes(query)),
+      }
+    }
+    const match = /(?:^|\s)@([^\s@]*)$/.exec(value)
+    if (match === null) return undefined
+    const query = (match[1] ?? '').toLowerCase()
+    return {
+      kind: 'mention',
+      items: props.tasks
+        .filter(
+          (task) =>
+            task.title.toLowerCase().includes(query) || task.id.toLowerCase().includes(query),
+        )
+        .slice(0, 6)
+        .map((task) => ({ id: task.id, label: task.title })),
+    }
+  }
+
+  const applyMenuItem = (item: MenuItem): void => {
+    const current = menu()
+    setMenuIndex(0)
+    if (current === undefined) return
+    if (current.kind === 'mention') {
+      setText((value) => value.replace(/@[^\s@]*$/, `@${item.label} `))
+      return
+    }
+    setText('')
+    if (item.id === 'run') setMode('run')
+    else if (item.id === 'ask') setMode('ask')
+    else if (item.id === 'new') void newThread()
+    else if (item.id === 'context') setPane('right', !rightCollapsed())
+  }
+
   const submitOnEnter = (event: KeyboardEvent): void => {
+    const current = menu()
+    if (current !== undefined && current.items.length > 0) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const delta = event.key === 'ArrowDown' ? 1 : -1
+        setMenuIndex((index) => {
+          const next = index + delta
+          if (next < 0) return current.items.length - 1
+          return next >= current.items.length ? 0 : next
+        })
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setText('')
+        return
+      }
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault()
+        const item = current.items[menuIndex()] ?? current.items[0]
+        if (item !== undefined) applyMenuItem(item)
+        return
+      }
+    }
     if (event.key !== 'Enter' || event.shiftKey) return
     event.preventDefault()
     if (event.isComposing || event.keyCode === 229) return
@@ -354,17 +461,57 @@ export function ChatView(props: ChatViewProps) {
     },
   )
 
-  const cols = (): string => {
-    if (leftCollapsed() && rightCollapsed()) return layoutCols.both
-    if (leftCollapsed()) return layoutCols.left
-    if (rightCollapsed()) return layoutCols.right
-    return layoutCols.open
+  const gridStyle = (): JSX.CSSProperties | undefined => {
+    if (!wide()) return undefined
+    const left = leftCollapsed() ? 0 : leftWidth()
+    const right = rightCollapsed() ? 48 : rightWidth()
+    return { 'grid-template-columns': `${left}px minmax(0,1fr) ${right}px` }
+  }
+
+  const startDrag = (side: 'left' | 'right', event: PointerEvent): void => {
+    if (!wide()) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = side === 'left' ? leftWidth() : rightWidth()
+    const target = event.currentTarget as HTMLElement
+    target.setPointerCapture(event.pointerId)
+    const move = (moveEvent: PointerEvent): void => {
+      const delta = moveEvent.clientX - startX
+      if (side === 'left') {
+        setLeftWidth(clampWidth(startWidth + delta, LEFT_MIN, LEFT_MAX))
+      } else {
+        setRightWidth(clampWidth(startWidth - delta, RIGHT_MIN, RIGHT_MAX))
+      }
+    }
+    const stop = (): void => {
+      target.releasePointerCapture?.(event.pointerId)
+      target.removeEventListener('pointermove', move)
+      target.removeEventListener('pointerup', stop)
+      target.removeEventListener('pointercancel', stop)
+      localStorage.setItem('hubagent.chat.leftWidth', String(leftWidth()))
+      localStorage.setItem('hubagent.chat.rightWidth', String(rightWidth()))
+    }
+    target.addEventListener('pointermove', move)
+    target.addEventListener('pointerup', stop)
+    target.addEventListener('pointercancel', stop)
+  }
+
+  const nudge = (side: 'left' | 'right', event: KeyboardEvent): void => {
+    const step = event.shiftKey ? 48 : 16
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    const grow = event.key === (side === 'left' ? 'ArrowRight' : 'ArrowLeft')
+    if (side === 'left') {
+      setLeftWidth(clampWidth(leftWidth() + (grow ? step : -step), LEFT_MIN, LEFT_MAX))
+    } else {
+      setRightWidth(clampWidth(rightWidth() + (grow ? step : -step), RIGHT_MIN, RIGHT_MAX))
+    }
   }
 
   return (
-    <div class={`grid min-h-0 flex-1 ${cols()}`}>
+    <div class="grid min-h-0 flex-1 max-[860px]:grid-cols-1" style={gridStyle()}>
       <aside
-        class={`min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-canvas max-[860px]:border-r-0 ${
+        class={`relative min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-canvas max-[860px]:border-r-0 ${
           leftCollapsed() ? 'hidden' : 'flex'
         } ${mobileThreads() ? 'max-[860px]:flex' : 'max-[860px]:hidden'}`}
         aria-label={props.t('threads')}
@@ -375,13 +522,13 @@ export function ChatView(props: ChatViewProps) {
             <IconButton
               icon="chevronLeft"
               label={props.t('chat')}
-              class={mobileOnly}
+              class={MOBILE_ONLY}
               onClick={() => setMobileThreads(false)}
             />
             <IconButton
               icon="panelLeft"
               label={props.t('collapseThreads')}
-              class={desktopOnly}
+              class={DESKTOP_ONLY}
               onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
@@ -433,6 +580,21 @@ export function ChatView(props: ChatViewProps) {
             <p class={emptyState}>{props.t('noThreads')}</p>
           </Show>
         </div>
+        <Show when={wide() && !leftCollapsed()}>
+          {/* biome-ignore lint/a11y/useSemanticElements: no native element resizes a pane; role=separator is the ARIA pattern for it */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={props.t('threads')}
+            aria-valuenow={leftWidth()}
+            aria-valuemin={LEFT_MIN}
+            aria-valuemax={LEFT_MAX}
+            tabindex="0"
+            class="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none"
+            onPointerDown={(event) => startDrag('left', event)}
+            onKeyDown={(event) => nudge('left', event)}
+          />
+        </Show>
       </aside>
 
       <section
@@ -462,19 +624,19 @@ export function ChatView(props: ChatViewProps) {
             <IconButton
               icon="panelLeft"
               label={props.t('threads')}
-              class={mobileOnly}
+              class={MOBILE_ONLY}
               onClick={() => setMobileThreads(true)}
             />
             <IconButton
               icon="panelLeft"
               label={props.t('collapseThreads')}
-              class={desktopOnly}
+              class={DESKTOP_ONLY}
               onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton
               icon="panelRight"
               label={props.t('collapseContext')}
-              class={`${desktopOnly} max-[1100px]:hidden`}
+              class={`${DESKTOP_ONLY} max-[1100px]:hidden`}
               onClick={() => setPane('right', !rightCollapsed())}
             />
             <Show when={thread()?.taskId}>
@@ -551,6 +713,38 @@ export function ChatView(props: ChatViewProps) {
           <label class="visually-hidden" for="chat-composer">
             {props.t('chatPlaceholder')}
           </label>
+          <Show when={(menu()?.items.length ?? 0) > 0}>
+            <div
+              class="mb-1.5 max-h-[220px] overflow-y-auto rounded-panel border border-line bg-surface p-1 shadow-popover"
+              role="listbox"
+              aria-label={menu()?.kind === 'slash' ? props.t('command') : props.t('tasks')}
+            >
+              <For each={menu()?.items ?? []}>
+                {(item, index) => (
+                  <>
+                    {/* biome-ignore lint/a11y/useFocusableInteractive: typeahead listbox; focus must stay in the textarea, options are chosen with arrows */}
+                    <div
+                      role="option"
+                      tabindex="-1"
+                      aria-selected={index() === menuIndex() ? 'true' : 'false'}
+                      class={`flex cursor-default items-center justify-between gap-3 rounded-control px-2 py-1.5 text-meta ${
+                        index() === menuIndex() ? 'bg-hover text-ink' : 'text-ink-2'
+                      }`}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        applyMenuItem(item)
+                      }}
+                    >
+                      <span class="truncate">{item.label}</span>
+                      <Show when={item.hint !== undefined}>
+                        <span class="shrink-0 font-mono text-badge text-ink-3">{item.hint}</span>
+                      </Show>
+                    </div>
+                  </>
+                )}
+              </For>
+            </div>
+          </Show>
           <textarea
             id="chat-composer"
             rows="2"
@@ -600,7 +794,7 @@ export function ChatView(props: ChatViewProps) {
       </section>
 
       <aside
-        class="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-canvas max-[1100px]:hidden"
+        class="relative flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-canvas max-[1100px]:hidden"
         aria-label={props.t('threadContext')}
       >
         <button
@@ -661,6 +855,21 @@ export function ChatView(props: ChatViewProps) {
             )}
           </Show>
         </div>
+        <Show when={wide() && !rightCollapsed()}>
+          {/* biome-ignore lint/a11y/useSemanticElements: no native element resizes a pane; role=separator is the ARIA pattern for it */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={props.t('threadContext')}
+            aria-valuenow={rightWidth()}
+            aria-valuemin={RIGHT_MIN}
+            aria-valuemax={RIGHT_MAX}
+            tabindex="0"
+            class="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none"
+            onPointerDown={(event) => startDrag('right', event)}
+            onKeyDown={(event) => nudge('right', event)}
+          />
+        </Show>
       </aside>
     </div>
   )

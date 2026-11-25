@@ -5,6 +5,7 @@ import { buttonPrimary } from '../components/ui/button-classes'
 import { CommandPalette, type PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
+import { Toaster } from '../components/ui/Toaster'
 import { useApp } from './store'
 
 const NAV: ReadonlyArray<{
@@ -139,6 +140,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
   return (
     <div class="grid h-dvh min-h-0 grid-cols-[56px_minmax(0,1fr)] max-[860px]:grid-cols-1">
+      <Toaster />
       <CommandPalette
         open={paletteOpen()}
         onOpenChange={setPaletteOpen}

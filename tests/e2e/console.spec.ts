@@ -94,6 +94,55 @@ test('chat stream appends pushed messages without polling', async ({ page }) => 
   await expect(page.getByText('Pushed over the stream')).toBeVisible()
 })
 
+test('composer slash menu and pane resize are keyboard reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat/t1')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  const composer = page.getByRole('textbox', { name: /Describe a task/ })
+  await composer.click()
+  await page.keyboard.type('/')
+  await expect(page.getByRole('listbox')).toBeVisible()
+  await expect(page.getByRole('option', { name: /Ask/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('listbox')).toBeHidden()
+
+  const leftSplitter = page.getByRole('separator', { name: 'Threads' })
+  await expect(leftSplitter).toBeVisible()
+  const before = Number(await leftSplitter.getAttribute('aria-valuenow'))
+  await leftSplitter.focus()
+  await page.keyboard.press('ArrowRight')
+  const after = Number(await leftSplitter.getAttribute('aria-valuenow'))
+  expect(after).toBeGreaterThan(before)
+})
+
+test('approving from the approvals page confirms with a toast', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const pending = {
+    id: 'ap1',
+    taskId: 'task1',
+    executionId: 'exe1',
+    reason: 'Push the fix to origin',
+    resource: 'git push origin fix/auth-redirect-loop',
+    status: 'pending',
+    riskLevel: 'high',
+  }
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [pending] } })
+    if (path.includes('/approve')) return route.fulfill({ json: { ok: true } })
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [] } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.goto('/approvals')
+  await page.getByRole('button', { name: 'Approve' }).first().click()
+  await expect(page.getByText('Approve', { exact: true }).last()).toBeVisible()
+})
+
 test('command palette jumps between screens and closes on escape', async ({ page }) => {
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
