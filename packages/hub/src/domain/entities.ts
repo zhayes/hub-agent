@@ -97,6 +97,8 @@ export interface ExecutionEvidence {
   diffstat?: string
   changedFiles?: string[]
   transcriptRef?: string
+  diff?: string
+  diffTruncated?: boolean
 }
 
 export type FailureCategory = 'protocol' | 'agent' | 'resource' | 'verification' | 'budget'

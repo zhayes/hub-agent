@@ -99,6 +99,8 @@ export const executionEvidenceSchema = z.object({
   diffstat: z.string().optional(),
   changedFiles: z.array(z.string()).optional(),
   transcriptRef: z.string().optional(),
+  diff: z.string().optional(),
+  diffTruncated: z.boolean().optional(),
 })
 
 export const executionSchema = z.object({

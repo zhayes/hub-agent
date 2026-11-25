@@ -133,6 +133,15 @@ async function mockApi(page: Page): Promise<void> {
                 commitSha: '9f2c41ad8123',
                 diffstat:
                   ' src/auth/session.ts | 14 +++++++++-----\n src/auth/cookie.ts  |  8 ++++----\n 2 files changed, 14 insertions(+), 8 deletions(-)',
+                diff: [
+                  'diff --git a/src/auth/session.ts b/src/auth/session.ts',
+                  '@@ -12,7 +12,9 @@ export async function requireSession()',
+                  '   const jar = await cookieJar()',
+                  '-  const session = readSession(jar)',
+                  '+  const synced = await jar.sync()',
+                  '+  const session = readSession(synced)',
+                  '   if (session === undefined) {',
+                ].join('\n'),
               },
             },
           ],

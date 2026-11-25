@@ -13,6 +13,23 @@ export interface GitEvidence {
   commitSha?: string
   diffstat?: string
   changedFiles?: string[]
+  /** Unified patch, capped: a huge generated-file diff must not fill the DB. */
+  diff?: string
+  diffTruncated?: boolean
+}
+
+const MAX_DIFF_CHARS = 256 * 1024
+
+/** Cap a patch before it reaches the DB; a lockfile diff can be megabytes. */
+export function capPatch(
+  text: string,
+  max: number = MAX_DIFF_CHARS,
+): {
+  diff: string
+  truncated: boolean
+} {
+  if (text.length <= max) return { diff: text, truncated: false }
+  return { diff: text.slice(0, max), truncated: true }
 }
 
 export interface GitSandboxOptions {
@@ -78,6 +95,13 @@ export async function collectGitEvidence(
   if (baseSha !== undefined && baseSha.length > 0) {
     const stat = await runGit(host, worktree, `diff --stat ${baseSha}`, sandbox)
     if (stat.ok && stat.stdout.length > 0) evidence.diffstat = stat.stdout
+
+    const patch = await runGit(host, worktree, `diff ${baseSha}`, sandbox)
+    if (patch.ok && patch.stdout.length > 0) {
+      const capped = capPatch(patch.stdout)
+      evidence.diff = capped.diff
+      if (capped.truncated) evidence.diffTruncated = true
+    }
 
     const tracked = await runGit(host, worktree, `diff --name-only ${baseSha}`, sandbox)
     const untracked = await runGit(host, worktree, 'ls-files --others --exclude-standard', sandbox)

@@ -38,6 +38,8 @@ export interface TaskView {
       diffstat?: string
       changedFiles?: string[]
       transcriptRef?: string
+      diff?: string
+      diffTruncated?: boolean
     }
   }>
   verifications: Array<{

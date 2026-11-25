@@ -40,6 +40,7 @@ import { ApprovalCard, type ApprovalState } from '../../components/ui/ApprovalCa
 import { Button } from '../../components/ui/Button'
 import { buttonGhost, buttonPrimary, buttonSecondary } from '../../components/ui/button-classes'
 import { RichText } from '../../components/ui/CodeBlock'
+import { DiffPatch } from '../../components/ui/DiffPatch'
 import { DiffView } from '../../components/ui/DiffView'
 import { Field, fieldControl } from '../../components/ui/Field'
 import { LoadingState } from '../../components/ui/LoadingState'
@@ -85,6 +86,20 @@ const statuses = [
   { status: 'failed', label: 'failed' },
   { status: 'idle', label: 'idle' },
 ]
+
+const patchSample = [
+  'diff --git a/src/auth/session.ts b/src/auth/session.ts',
+  '--- a/src/auth/session.ts',
+  '+++ b/src/auth/session.ts',
+  '@@ -12,7 +12,9 @@ export async function requireSession()',
+  '   const jar = await cookieJar()',
+  '-  const session = readSession(jar)',
+  '+  const synced = await jar.sync()',
+  '+  const session = readSession(synced)',
+  '   if (session === undefined) {',
+  '     redirect("/login")',
+  '     return undefined',
+].join('\n')
 
 const diffSample =
   ' src/auth/session.ts | 14 +++++++++-----\n src/auth/cookie.ts  |  8 ++++----\n 2 files changed, 14 insertions(+), 8 deletions(-)'
@@ -460,6 +475,9 @@ export function DevUiView() {
               </p>
               <div class="mt-2">
                 <DiffView stat={diffSample} />
+              </div>
+              <div class="mt-3">
+                <DiffPatch patch={patchSample} limitLabel="Limit reached — more not loaded" />
               </div>
             </div>
 

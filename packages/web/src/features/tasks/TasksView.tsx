@@ -1,5 +1,6 @@
 import { For, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
+import { DiffPatch } from '../../components/ui/DiffPatch'
 import { DiffView } from '../../components/ui/DiffView'
 import { Icon } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
@@ -341,6 +342,26 @@ export function TasksView(props: TasksViewProps) {
                             ? {}
                             : { files: execution.evidence.changedFiles })}
                         />
+                      </Show>
+                      <Show when={(execution.evidence?.diff ?? '') !== ''}>
+                        <details class="group mt-2">
+                          <summary class="flex cursor-pointer items-center gap-2 text-badge text-ink-2 [&::-webkit-details-marker]:hidden">
+                            <Icon
+                              name="chevronRight"
+                              size={11}
+                              class="text-ink-3 transition-transform group-open:rotate-90"
+                            />
+                            <span>{props.t('evidence')}</span>
+                          </summary>
+                          <DiffPatch
+                            class="mt-1.5"
+                            patch={execution.evidence?.diff ?? ''}
+                            limitLabel={props.t('patchLimit')}
+                            {...(execution.evidence?.diffTruncated === undefined
+                              ? {}
+                              : { truncated: execution.evidence.diffTruncated })}
+                          />
+                        </details>
                       </Show>
                       <Show when={execution.evidence?.transcriptRef}>
                         <div class="font-mono text-badge text-ink-3">
