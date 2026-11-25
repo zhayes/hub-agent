@@ -60,6 +60,25 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+test('command palette jumps between screens and closes on escape', async ({ page }) => {
+  await page.goto('/chat/t1')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  await page.keyboard.press('Meta+k')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  await page.keyboard.type('approv')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/approvals$/)
+  await expect(dialog).toBeHidden()
+
+  await page.keyboard.press('Control+k')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toBeHidden()
+})
+
 test('route-based chat, tasks navigation, theme and language controls', async ({ page }) => {
   await page.goto('/chat/t1')
   await expect(page).toHaveURL(/\/chat\/t1$/)

@@ -1,7 +1,8 @@
-import { useLocation } from '@solidjs/router'
+import { useLocation, useNavigate } from '@solidjs/router'
 import type { JSX } from '@solidjs/web'
-import { For, Show } from 'solid-js'
+import { createSignal, For, onFlush, onSettled, Show } from 'solid-js'
 import { buttonPrimary } from '../components/ui/button-classes'
+import { CommandPalette, type PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
 import { useApp } from './store'
@@ -28,7 +29,9 @@ const railButtonActive = 'bg-active text-ink'
 export function AppLayout(props: { children?: JSX.Element }) {
   const app = useApp()
   const location = useLocation()
+  const navigate = useNavigate()
   const path = () => location.pathname
+  const [paletteOpen, setPaletteOpen] = createSignal(false)
 
   const isChat = (): boolean => path() === '/' || path().startsWith('/chat')
   const isTasks = (): boolean => path().startsWith('/tasks')
@@ -85,8 +88,66 @@ export function AppLayout(props: { children?: JSX.Element }) {
   const themeIcon = (): 'sun' | 'moon' | 'monitor' =>
     app.theme.theme() === 'light' ? 'sun' : app.theme.theme() === 'dark' ? 'moon' : 'monitor'
 
+  /* Cmd/Ctrl+K anywhere in the console; the dialog owns Escape and focus return. */
+  onSettled(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const paletteGroups = (): PaletteGroup[] => [
+    {
+      label: app.t('primaryNavigation'),
+      items: [
+        { value: 'nav:/chat', label: app.t('navChat') },
+        { value: 'nav:/tasks', label: app.t('navTasks') },
+        { value: 'nav:/agents', label: app.t('navAgents') },
+        { value: 'nav:/approvals', label: app.t('navApprovals') },
+      ],
+    },
+    {
+      label: app.t('settings'),
+      items: [
+        { value: 'nav:/settings', label: app.t('navSettings') },
+        { value: 'action:theme', label: app.t('theme'), hint: themeLabel() },
+        {
+          value: 'action:language',
+          label: app.t('language'),
+          hint: app.locale() === 'zh-CN' ? '中' : 'EN',
+        },
+        { value: 'action:refresh', label: app.t('refresh'), hint: '⌘R' },
+      ],
+    },
+  ]
+
+  const runPalette = (value: string): void => {
+    onFlush(() => setPaletteOpen(false))
+    if (value.startsWith('nav:')) {
+      navigate(value.slice(4))
+      return
+    }
+    if (value === 'action:theme') app.theme.cycleTheme()
+    else if (value === 'action:language')
+      app.setLocale(app.locale() === 'zh-CN' ? 'en-US' : 'zh-CN')
+    else if (value === 'action:refresh') void app.refresh()
+  }
+
   return (
     <div class="grid h-dvh min-h-0 grid-cols-[56px_minmax(0,1fr)] max-[860px]:grid-cols-1">
+      <CommandPalette
+        open={paletteOpen()}
+        onOpenChange={setPaletteOpen}
+        title={app.t('command')}
+        placeholder={app.t('palettePlaceholder')}
+        empty={app.t('paletteEmpty')}
+        groups={paletteGroups()}
+        onRun={runPalette}
+      />
       <aside
         class="flex min-h-0 flex-col items-center gap-1 border-r border-line bg-canvas pt-2.5 pb-3.5 max-[860px]:fixed max-[860px]:inset-x-0 max-[860px]:bottom-0 max-[860px]:z-20 max-[860px]:h-[calc(52px+env(safe-area-inset-bottom))] max-[860px]:flex-row max-[860px]:items-center max-[860px]:justify-between max-[860px]:border-r-0 max-[860px]:border-t max-[860px]:px-2.5 max-[860px]:pt-0 max-[860px]:pb-[env(safe-area-inset-bottom)]"
         aria-label={app.t('appName')}
