@@ -1,6 +1,7 @@
 import { useLocation } from '@solidjs/router'
 import type { JSX } from '@solidjs/web'
 import { For, Show } from 'solid-js'
+import { buttonPrimary } from '../components/ui/button-classes'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
 import { useApp } from './store'
@@ -15,6 +16,14 @@ const NAV: ReadonlyArray<{
   { href: '/agents', key: 'navAgents', icon: 'agents' },
   { href: '/approvals', key: 'navApprovals', icon: 'approvals' },
 ]
+
+/* Shell chrome on tokens. The scroll container (.screen-body + chat/scroll
+   variants) stays legacy until P3 moves Tasks, because styles.css keys an
+   override off `.screen-body:has(.tasks-layout)`. */
+const railButton =
+  'relative grid size-10 place-items-center rounded-panel transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:border forced-colors:border-CanvasText'
+const railButtonIdle = 'text-ink-2 hover:bg-hover hover:text-ink'
+const railButtonActive = 'bg-active text-ink'
 
 export function AppLayout(props: { children?: JSX.Element }) {
   const app = useApp()
@@ -76,9 +85,16 @@ export function AppLayout(props: { children?: JSX.Element }) {
     app.theme.theme() === 'light' ? 'sun' : app.theme.theme() === 'dark' ? 'moon' : 'monitor'
 
   return (
-    <div class="app-shell">
-      <aside class="rail" aria-label={app.t('appName')}>
-        <a class="rail-brand" href="/chat" title={app.t('appName')}>
+    <div class="grid h-dvh min-h-0 grid-cols-[56px_minmax(0,1fr)] max-[860px]:grid-cols-1">
+      <aside
+        class="flex min-h-0 flex-col items-center gap-1 border-r border-line bg-canvas pt-2.5 pb-3.5 max-[860px]:fixed max-[860px]:inset-x-0 max-[860px]:bottom-0 max-[860px]:z-20 max-[860px]:h-[calc(52px+env(safe-area-inset-bottom))] max-[860px]:flex-row max-[860px]:items-center max-[860px]:justify-between max-[860px]:border-r-0 max-[860px]:border-t max-[860px]:px-2.5 max-[860px]:pt-0 max-[860px]:pb-[env(safe-area-inset-bottom)]"
+        aria-label={app.t('appName')}
+      >
+        <a
+          class="mb-2 grid size-[38px] place-items-center rounded-panel text-accent transition-colors hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[860px]:hidden"
+          href="/chat"
+          title={app.t('appName')}
+        >
           <svg
             viewBox="0 0 24 24"
             width="22"
@@ -97,12 +113,15 @@ export function AppLayout(props: { children?: JSX.Element }) {
           </svg>
           <span class="visually-hidden">{app.t('appName')}</span>
         </a>
-        <nav class="rail-nav" aria-label={app.t('primaryNavigation')}>
+        <nav
+          class="flex flex-col items-center gap-0.5 max-[860px]:flex-row"
+          aria-label={app.t('primaryNavigation')}
+        >
           <For each={NAV}>
             {(item) => (
               <a
                 href={item.href}
-                class={`rail-button${isActive(item.href) ? ' active' : ''}`}
+                class={`${railButton} ${isActive(item.href) ? railButtonActive : railButtonIdle}`}
                 aria-current={isActive(item.href) ? 'page' : undefined}
                 aria-label={
                   item.href === '/approvals' && pendingApprovals() > 0
@@ -117,7 +136,10 @@ export function AppLayout(props: { children?: JSX.Element }) {
               >
                 <Icon name={item.icon} size={18} />
                 <Show when={item.href === '/approvals' && pendingApprovals() > 0}>
-                  <span class="rail-count" aria-hidden="true">
+                  <span
+                    class="absolute top-px right-px grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-badge font-semibold tabular-nums text-canvas"
+                    aria-hidden="true"
+                  >
                     {pendingApprovals()}
                   </span>
                 </Show>
@@ -125,28 +147,31 @@ export function AppLayout(props: { children?: JSX.Element }) {
             )}
           </For>
         </nav>
-        <div class="rail-bottom">
+        <div class="mt-auto flex w-10 flex-col items-center gap-0.5 border-t border-line pt-2 max-[860px]:mt-0 max-[860px]:w-auto max-[860px]:flex-row max-[860px]:border-t-0 max-[860px]:pt-0">
           <IconButton
             icon={themeIcon()}
             label={themeLabel()}
-            class="rail-button"
+            class={`${railButton} ${railButtonIdle}`}
             onClick={() => app.theme.cycleTheme()}
           />
           <button
             type="button"
-            class="rail-button language-button"
+            class={`${railButton} ${railButtonIdle}`}
             aria-label={app.t('language')}
             title={app.t('language')}
             onClick={() => app.setLocale(app.locale() === 'zh-CN' ? 'en-US' : 'zh-CN')}
           >
             <Icon name="globe" size={17} />
-            <span class="rail-badge" aria-hidden="true">
+            <span
+              class="absolute right-0 bottom-0 rounded-control bg-canvas px-0.5 text-badge font-semibold text-ink-2"
+              aria-hidden="true"
+            >
               {app.locale() === 'zh-CN' ? '中' : 'EN'}
             </span>
           </button>
           <a
             href="/settings"
-            class={`rail-button${isActive('/settings') ? ' active' : ''}`}
+            class={`${railButton} ${isActive('/settings') ? railButtonActive : railButtonIdle}`}
             aria-current={isActive('/settings') ? 'page' : undefined}
             aria-label={app.t('navSettings')}
             title={app.t('navSettings')}
@@ -156,15 +181,17 @@ export function AppLayout(props: { children?: JSX.Element }) {
         </div>
       </aside>
 
-      <main class="main">
-        <header class="app-bar">
-          <div class="app-identity">
-            <span class="app-name">{app.t('appName')}</span>
-            <span class="app-scope">{app.t('workspaceScope')}</span>
+      <main class="flex min-h-0 min-w-0 flex-col max-[860px]:pb-[calc(52px+env(safe-area-inset-bottom))]">
+        <header class="flex h-12 flex-none items-center justify-between gap-4 border-b border-line px-6 max-[1100px]:px-4">
+          <div class="flex min-w-0 items-baseline gap-2.5">
+            <span class="text-meta font-semibold text-ink">{app.t('appName')}</span>
+            <span class="whitespace-nowrap text-badge text-ink-3 max-[560px]:hidden">
+              {app.t('workspaceScope')}
+            </span>
           </div>
-          <div class="app-bar-actions">
+          <div class="flex items-center gap-1.5">
             <span
-              class="connection-pill"
+              class="inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 text-badge text-ink-2"
               title={app.t('eventsCount', { count: app.events().length })}
             >
               <span class={`status-dot is-${app.connection()}`} aria-hidden="true" />
@@ -178,32 +205,42 @@ export function AppLayout(props: { children?: JSX.Element }) {
           </div>
         </header>
 
-        <div class="screen">
-          <div class="screen-head">
-            <div class="screen-title">
-              <h1>{title()}</h1>
+        <div class="flex min-h-0 flex-1 flex-col">
+          <div class="flex flex-none items-end justify-between gap-4 px-6 pt-[22px] pb-4 max-[1100px]:px-4 max-[860px]:items-start max-[860px]:pt-4 max-[860px]:pb-3 max-[560px]:pt-3.5 max-[560px]:pb-2.5">
+            <div class="min-w-0">
+              <h1 class="text-title text-ink">{title()}</h1>
               <Show when={note() !== ''}>
-                <p class="screen-note">{note()}</p>
+                <p class="mt-1.5 text-meta text-ink-2">{note()}</p>
               </Show>
             </div>
           </div>
 
           <Show when={app.error() !== ''}>
-            <div class="error-banner" role="alert">
-              <Icon name="alert" size={15} />
-              <span>
-                {app.t('errorPrefix')}: {app.error()}
+            <div
+              class="mx-6 mb-3 flex flex-none items-center justify-between gap-3 rounded-panel bg-danger-soft px-3 py-2.5 text-meta text-danger max-[1100px]:mx-4"
+              role="alert"
+            >
+              <span class="flex items-center gap-2">
+                <span class="shrink-0">
+                  <Icon name="alert" size={15} />
+                </span>
+                <span>
+                  {app.t('errorPrefix')}: {app.error()}
+                </span>
               </span>
             </div>
           </Show>
 
           <Show when={app.token() === ''}>
-            <div class="token-gate" role="status">
-              <div>
-                <strong>{app.t('tokenRequired')}</strong>
-                <p class="muted">{app.t('tokenRequiredHint')}</p>
+            <div
+              class="mx-6 mb-3 flex flex-none items-center justify-between gap-3 rounded-panel border border-line bg-surface px-3 py-2.5 max-[1100px]:mx-4"
+              role="status"
+            >
+              <div class="min-w-0">
+                <strong class="text-meta font-semibold text-ink">{app.t('tokenRequired')}</strong>
+                <p class="mt-0.5 text-badge text-ink-2">{app.t('tokenRequiredHint')}</p>
               </div>
-              <a class="solid-button" href="/settings">
+              <a class={buttonPrimary} href="/settings">
                 {app.t('openSettings')}
               </a>
             </div>

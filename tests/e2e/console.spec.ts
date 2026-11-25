@@ -76,7 +76,9 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
   expect(after).not.toBe(before)
 
   await page.getByRole('button', { name: 'Language' }).click()
-  await expect(page.locator('.rail-nav')).toBeVisible()
+  // The locale switch renames the controls; the shell must stay mounted and usable.
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '任务' })).toBeVisible()
 })
 
 test('context pane collapses and composer remains usable', async ({ page }) => {

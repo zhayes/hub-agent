@@ -175,182 +175,6 @@
 
   /* ---------------------------------------------------------------- shell */
 
-  .app-shell {
-    display: grid;
-    grid-template-columns: var(--rail) minmax(0, 1fr);
-    height: 100dvh;
-    min-height: 0;
-  }
-
-  .rail {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 10px 0 14px;
-    border-right: 1px solid var(--line);
-    background: var(--ground);
-    min-height: 0;
-  }
-
-  .rail-brand {
-    display: grid;
-    place-items: center;
-    width: 38px;
-    height: 38px;
-    margin-bottom: 8px;
-    border-radius: 9px;
-    color: var(--accent);
-  }
-
-  .rail-brand:hover {
-    background: var(--accent-soft);
-  }
-
-  .rail-nav,
-  .rail-bottom {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-  }
-
-  .rail-bottom {
-    margin-top: auto;
-    width: 40px;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
-  }
-
-  .rail-button {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 9px;
-    color: var(--muted);
-  }
-
-  .rail-button:hover {
-    background: var(--raised);
-    color: var(--text);
-  }
-
-  .rail-button.active {
-    background: var(--active);
-    color: var(--text);
-  }
-
-  .rail-count {
-    position: absolute;
-    top: 1px;
-    right: 1px;
-    display: grid;
-    place-items: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--accent);
-    color: var(--primary-ink);
-    font-size: 11px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .rail-badge {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    padding: 0 2px;
-    border-radius: 3px;
-    background: var(--ground);
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0;
-  }
-
-  .main {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-  }
-
-  .app-bar {
-    display: flex;
-    flex: none;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    height: 48px;
-    padding: 0 var(--pad);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .app-identity {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .app-name {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-
-  .app-scope {
-    font-size: 12px;
-    color: var(--faint);
-    white-space: nowrap;
-  }
-
-  .app-bar-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .connection-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--surface);
-    font-size: 12px;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-
-  .screen {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .screen-head {
-    display: flex;
-    flex: none;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 22px var(--pad) 16px;
-  }
-
-  .screen-note {
-    margin-top: 5px;
-    font-size: 13px;
-    color: var(--muted);
-  }
-
   .screen-body {
     flex: 1;
     min-height: 0;
@@ -512,43 +336,6 @@
   }
 
   /* ------------------------------------------------------------ notices */
-
-  .error-banner,
-  .token-gate {
-    display: flex;
-    flex: none;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin: 0 var(--pad) 12px;
-    padding: 10px 12px;
-    border-radius: var(--radius);
-    font-size: 13px;
-  }
-
-  .error-banner {
-    background: var(--negative-soft);
-    color: var(--negative);
-  }
-
-  .error-banner > svg {
-    flex: none;
-  }
-
-  .token-gate {
-    border: 1px solid var(--line);
-    background: var(--surface);
-  }
-
-  .token-gate strong {
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .token-gate p {
-    margin-top: 2px;
-    font-size: 12px;
-  }
 
   /* -------------------------------------------------------------- common */
 
@@ -1807,21 +1594,9 @@
   /* ---------------------------------------------------------- responsive */
 
   @media (max-width: 1100px) {
-    .app-bar,
-    .screen-head {
-      padding-right: 16px;
-      padding-left: 16px;
-    }
-
     .scroll-body {
       padding-right: 16px;
       padding-left: 16px;
-    }
-
-    .error-banner,
-    .token-gate {
-      margin-right: 16px;
-      margin-left: 16px;
     }
 
     .tasks-layout {
@@ -1849,67 +1624,12 @@
   }
 
   @media (max-width: 860px) {
-    .app-shell {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .rail {
-      position: fixed;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      z-index: 20;
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: center;
-      width: auto;
-      height: calc(52px + env(safe-area-inset-bottom));
-      padding: 0 10px env(safe-area-inset-bottom);
-      border-top: 1px solid var(--line);
-      border-right: 0;
-      background: var(--ground);
-    }
-
-    .rail-brand {
-      display: none;
-    }
-
-    .rail-nav,
-    .rail-bottom {
-      flex-direction: row;
-      gap: 2px;
-    }
-
-    .rail-bottom {
-      width: auto;
-      margin-top: 0;
-      padding-top: 0;
-      border-top: 0;
-    }
-
-    .main {
-      padding-bottom: calc(52px + env(safe-area-inset-bottom));
-    }
-
     .mobile-only.icon-button {
       display: grid;
     }
 
     .desktop-only.icon-button {
       display: none;
-    }
-
-    .screen-head {
-      align-items: flex-start;
-      padding: 16px 16px 12px;
-    }
-
-    .screen-head h1 {
-      font-size: 20px;
-    }
-
-    .screen-note {
-      font-size: 12px;
     }
 
     .tasks-layout {
@@ -1975,14 +1695,6 @@
   @media (max-width: 560px) {
     :root {
       --pad: 16px;
-    }
-
-    .app-scope {
-      display: none;
-    }
-
-    .screen-head {
-      padding: 14px 16px 10px;
     }
 
     .spine {
@@ -2062,7 +1774,6 @@
     .status-badge,
     .chip,
     .network-tag,
-    .rail-button.active,
     .task-row.selected {
       border: 1px solid CanvasText;
     }
