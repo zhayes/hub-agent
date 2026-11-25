@@ -11,6 +11,7 @@ import {
   type ChatThread,
   type ChatThreadSummary,
   chatApi,
+  getToken,
   type TaskRow,
 } from '../../shared/api'
 import { relativeTime, shortenId } from '../../shared/format'
@@ -67,6 +68,8 @@ export function ChatView(props: ChatViewProps) {
   )
   const [mobileThreads, setMobileThreads] = createSignal(false)
   let poll: ReturnType<typeof setInterval> | undefined
+  let stream: EventSource | undefined
+  let streamSeq: number | undefined
   let messagesEl: HTMLDivElement | undefined
   let stick = true
 
@@ -83,17 +86,78 @@ export function ChatView(props: ChatViewProps) {
     poll = undefined
   }
 
+  const stopStream = (): void => {
+    stream?.close()
+    stream = undefined
+  }
+
+  const stopWatching = (): void => {
+    stopStream()
+    stopPolling()
+  }
+
+  /* Incremental push. Messages are appended as the hub writes them, so the
+     transcript no longer re-renders the whole page every second. */
+  const watch = (id: string): void => {
+    stopWatching()
+    const token = getToken()
+    if (token === '' || typeof EventSource === 'undefined') {
+      startPolling(id)
+      return
+    }
+    const after = streamSeq === undefined ? '' : `&after=${streamSeq}`
+    const source = new EventSource(
+      `/api/v1/chat/threads/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(token)}${after}`,
+    )
+    stream = source
+
+    source.addEventListener('message', (event) => {
+      const message = JSON.parse((event as MessageEvent<string>).data) as ChatMessage
+      const id = Number.parseInt((event as MessageEvent<string>).lastEventId, 10)
+      if (Number.isFinite(id)) streamSeq = id
+      setMessages((previous) =>
+        previous.some((item) => item.id === message.id) ? previous : [...previous, message],
+      )
+      if (stick || isNearBottom()) queueMicrotask(scrollToBottom)
+    })
+
+    source.addEventListener('status', (event) => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as { status: string }
+      setThread((previous) =>
+        previous === undefined ? previous : { ...previous, status: payload.status },
+      )
+      if (payload.status !== 'active') {
+        stopStream()
+        void loadThreads()
+      }
+    })
+
+    source.addEventListener('error', () => {
+      /* Reconnect loops against a rejected token or a missing route are worse
+         than a slow poll; fall back once and let the poll carry it. */
+      stopStream()
+      if (poll === undefined) startPolling(id)
+    })
+  }
+
   const loadThread = async (id: string): Promise<void> => {
     try {
       setError('')
       const shouldStick = stick
       const detail = await chatApi.thread(id, { limit: 100 })
+      streamSeq = undefined
       setThread(detail.thread)
-      setMessages(detail.messages)
+      /* Same thread → merge, so a refresh cannot drop a message the stream
+         already delivered. Different thread → replace outright. */
+      setMessages((previous) => {
+        if (previous[0]?.threadId !== detail.thread.id) return detail.messages
+        const seen = new Set(previous.map((message) => message.id))
+        return [...previous, ...detail.messages.filter((message) => !seen.has(message.id))]
+      })
       setHasMore(detail.messages.length === 100)
       if (shouldStick) queueMicrotask(scrollToBottom)
-      if (detail.thread.status === 'active') startPolling(id)
-      else stopPolling()
+      if (detail.thread.status === 'active') watch(id)
+      else stopWatching()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -175,7 +239,7 @@ export function ChatView(props: ChatViewProps) {
       setText('')
       stick = true
       queueMicrotask(scrollToBottom)
-      startPolling(id)
+      watch(id)
       await loadThreads()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -198,7 +262,7 @@ export function ChatView(props: ChatViewProps) {
           setMessages(resumed.messages)
           stick = true
           queueMicrotask(scrollToBottom)
-          startPolling(current.id)
+          watch(current.id)
         } else {
           await loadThread(current.id)
         }
@@ -217,7 +281,7 @@ export function ChatView(props: ChatViewProps) {
       setMessages(result.messages)
       stick = true
       queueMicrotask(scrollToBottom)
-      startPolling(current.id)
+      watch(current.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -241,7 +305,7 @@ export function ChatView(props: ChatViewProps) {
   )
 
   onCleanup(() => {
-    stopPolling()
+    stopWatching()
   })
 
   const setPane = (side: 'left' | 'right', value: boolean): void => {

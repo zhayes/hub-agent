@@ -1,11 +1,13 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
 import { Hono } from 'hono'
+import { asChatThreadId } from '../../domain/ids'
 import { listAgents } from '../../runtime/agent-registry'
 import { decideApproval, listApprovals } from '../../runtime/approval'
 import type { ChatService } from '../../runtime/chat/chat-service'
 import { listDecisions } from '../../runtime/decision-record'
 import type { Db } from '../../storage/db'
+import { getChatThread, listChatMessagesAfter } from '../../storage/queries/chat'
 import { listEventsSince } from '../../storage/queries/events'
 import { getTaskEvidence } from '../../storage/queries/evidence'
 import { listTasks } from '../../storage/queries/tasks'
@@ -104,6 +106,72 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     return value === undefined
       ? context.json({ code: 'NOT_FOUND', message: 'thread not found' }, 404)
       : context.json({ ok: true, ...value })
+  })
+
+  /* 消息增量推送：客户端不再轮询整页。游标形如 `<createdAt>~<messageId>`。 */
+  app.get('/api/v1/chat/threads/:id/stream', (context) => {
+    const threadId = asChatThreadId(context.req.param('id'))
+    if (getChatThread(db, threadId) === undefined) {
+      return context.json({ code: 'NOT_FOUND', message: 'thread not found' }, 404)
+    }
+    const raw = context.req.header('last-event-id') ?? context.req.query('after') ?? ''
+    const parsed = Number.parseInt(raw, 10)
+    let cursor = Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        let closed = false
+        let lastStatus = ''
+        const send = (event: string, data: unknown, id?: number) => {
+          const frame = `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+          controller.enqueue(encoder.encode(frame))
+        }
+        /* Drain the backlog before reporting the thread status, so a finished
+           thread still delivers its final messages before the stream closes. */
+        const flush = (): void => {
+          for (;;) {
+            const batch = listChatMessagesAfter(db, threadId, cursor, 100)
+            for (const entry of batch) {
+              send('message', entry.message, entry.seq)
+              cursor = entry.seq
+            }
+            if (batch.length < 100) return
+          }
+        }
+        const close = () => {
+          if (closed) return
+          closed = true
+          clearInterval(timer)
+          try {
+            controller.close()
+          } catch {
+            // already closed
+          }
+        }
+        const tick = () => {
+          if (closed) return
+          flush()
+          const thread = getChatThread(db, threadId)
+          if (thread === undefined) return close()
+          if (thread.status !== lastStatus) {
+            lastStatus = thread.status
+            send('status', { status: thread.status })
+          }
+          if (thread.status !== 'active') close()
+        }
+        const timer = setInterval(tick, 400)
+        tick()
+        context.req.raw.signal.addEventListener('abort', close, { once: true })
+      },
+    })
+    return new Response(stream, {
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      },
+    })
   })
 
   app.post('/api/v1/chat/threads/:id/messages', async (context) => {

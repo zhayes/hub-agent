@@ -315,6 +315,7 @@ packages/web/src/
 POST /api/v1/chat/threads
 GET  /api/v1/chat/threads
 GET  /api/v1/chat/threads/:id
+GET  /api/v1/chat/threads/:id/stream      SSE：消息增量 + 线程状态（`after=<seq>` 或 `Last-Event-ID`）
 POST /api/v1/chat/threads/:id/messages   { text, mode: run|ask }
 
 POST /api/v1/tasks/:id/cancel

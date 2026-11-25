@@ -165,6 +165,37 @@ export function listChatMessages(
   return rows.reverse().map(toMessage)
 }
 
+export interface ChatMessageCursor {
+  /** Monotonic insert order (SQLite rowid), not the ULID: ULIDs are not
+      monotonic within the same millisecond, so they cannot order a stream. */
+  seq: number
+}
+
+/** Ascending page used by the chat stream: everything after `after.seq`. */
+export function listChatMessagesAfter(
+  db: Db,
+  threadId: ChatThreadId,
+  afterSeq: number | undefined,
+  limit = 100,
+): Array<{ seq: number; message: ChatMessage }> {
+  const rows = (
+    afterSeq === undefined
+      ? db
+          .prepare(
+            `SELECT rowid AS seq, * FROM chat_messages WHERE thread_id = ? ORDER BY rowid ASC LIMIT ?`,
+          )
+          .all(threadId, limit)
+      : db
+          .prepare(
+            `SELECT rowid AS seq, * FROM chat_messages
+             WHERE thread_id = ? AND rowid > ?
+             ORDER BY rowid ASC LIMIT ?`,
+          )
+          .all(threadId, afterSeq, limit)
+  ) as Array<MessageRow & { seq: number }>
+  return rows.map((row) => ({ seq: row.seq, message: toMessage(row) }))
+}
+
 export function appendChatMessage(
   db: Db,
   input: {

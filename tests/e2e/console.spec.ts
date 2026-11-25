@@ -60,6 +60,40 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+test('chat stream appends pushed messages without polling', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const activeThread = { ...thread, status: 'active' }
+  const streamed = {
+    id: 'm-stream-1',
+    threadId: 't1',
+    role: 'assistant',
+    kind: 'text',
+    content: 'Pushed over the stream',
+    createdAt: new Date().toISOString(),
+  }
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/chat/threads/t1/stream') {
+      return route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+        body: `id: 7\nevent: message\ndata: ${JSON.stringify(streamed)}\n\n`,
+      })
+    }
+    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [{ ...activeThread, messageCount: 2 }] } })
+    if (path === '/api/v1/chat/threads/t1') return route.fulfill({ json: { ok: true, thread: activeThread, messages } })
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.goto('/chat/t1')
+  await expect(page.getByText('Task completed: task1')).toBeVisible()
+  await expect(page.getByText('Pushed over the stream')).toBeVisible()
+})
+
 test('command palette jumps between screens and closes on escape', async ({ page }) => {
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
