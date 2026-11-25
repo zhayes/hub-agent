@@ -33,7 +33,7 @@
 | `--bg-active` | `#E9E5DE` | `#26221E` | 选中填充 | — |
 | `--fg-default` | `#16181B` | `#F2EFEA` | 正文、标题 | 16.89 / 17.15 |
 | `--fg-muted` | `#575E68` | `#A8A29A` | 次级文字 | 6.22 / 7.77 |
-| `--fg-subtle` | `#6B7280` | `#8F8A82` | 元信息（最低档） | **4.59 / 5.74** |
+| `--fg-subtle` | `#5F6672` | `#8F8A82` | 元信息（最低档） | **5.35 / 4.60** |
 | `--line-subtle` | `#E6E3DC` | `#262320` | 面板边界、表格行线 | 1.22 / 1.26 |
 | `--line-default` | `#DAD5CB` | `#33302B` | 分组线 | ≈1.4 |
 | `--line-control` | `#8A8175` | `#6B645B` | 输入框/控件边界 | **3.83 / 3.18** |
@@ -50,7 +50,7 @@
 ### 2.2 使用规则
 
 - **正文只用 `--fg-default`。** 整段灰字视为未完成状态。
-- **`--fg-subtle` 只能用于 12–13px 的元信息**，且必须落在 `--bg-canvas` 或 `--bg-surface` 上。
+- **`--fg-subtle` 只能用于 12–13px 的元信息**。实测下限来自选中行（`bg-active`）：4.60:1，刚过 AA；若背景再深一档，此档位需要重新取值。
 - **边框三档：**
   - 面板/表格行：`--line-subtle`（1.2:1，靠 tone 分离即可）；
   - 分组：`--line-default`；
@@ -211,9 +211,10 @@
 - [ ] 间距全部落在 4/8/12/16/24/32/48。
 - [ ] 一个页面只有一个主操作；三种信号不共用一色。
 - [x] Inter / JetBrains Mono / Noto SC 子集实际加载（P1 起 legacy `--font` / `--mono` 指向自托管字体）。
-- [ ] 每页 axe 0 critical / serious（当前仅 gallery 覆盖）。
+- [ ] 每页 axe 0 critical / serious（当前 gallery + Chat/Tasks 已覆盖）。
 - [x] 视觉回归：1440 / 768 / 390 × 明暗，基线随代码入库。
   - 基线在 `tests/visual/**/*-snapshots/`，只在 macOS 上用 `pnpm test:visual:update` 更新，改基线必须在 PR 里看清图片 diff。
+  - 覆盖：`dev-ui.spec.ts`（组件画廊）+ `console.spec.ts`（Chat 与 Tasks 真实页面，mock 接口 + 固定时钟 + reduced motion）。Agents / Approvals / Settings 待补。
 - [ ] 10k 消息滚动不掉帧；流式期间无长任务。
 - [ ] `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直接引用。
   - 当前唯一例外是 `features/dev/DevUiView.tsx`：gallery 的用途就是展示 SDK 裸行为，且已被 `import.meta.env.DEV` 从生产包剔除。P3 把它移出 `features/`（或改成只经门面）后即可勾上。
