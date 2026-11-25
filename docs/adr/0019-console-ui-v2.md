@@ -57,7 +57,8 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
    - `@axe-core/playwright`：critical / serious 直接失败。
    - 基线按平台后缀保存**并随代码入库**（当前仅 `-darwin`，8 张约 1.5 MB）；CI 的 `visual (macos)` job 跑同一套 darwin 基线，失败时把 actual/diff 作为 artifact 上传。
    - 更新基线：在 macOS 上 `pnpm test:visual:update`，人工确认 PR 里的图片 diff 后再提交。非 macOS 环境由 `ignoreSnapshots` 跳过比对，只跑 axe。
-   - 基线增长须控制：每页一套（4 宽度 × 明暗）；新增页面时同步评估是否需要减宽度或改用局部元素截图。
+   - 基线增长须控制：每页一套（1440 / 768 / 390 × 明暗）；新增页面时同步评估是否需要减宽度或改用局部元素截图。
+   - 首跑（2026-11-25）runner 与本机基线像素一致，因此该 job 保持阻塞；job 内打印 `sw_vers`，日后镜像漂移时可据此钉版本或重出基线。
 8. **左栏保持 56px 纯图标 rail。**
    - 以 tooltip、计数、`aria-label` 与快捷键补足可发现性；不改为文字侧栏。
 
