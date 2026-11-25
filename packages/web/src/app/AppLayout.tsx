@@ -5,6 +5,7 @@ import { buttonPrimary } from '../components/ui/button-classes'
 import { CommandPalette, type PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
+import { ConnectionDot } from '../components/ui/StatusBadge'
 import { Toaster } from '../components/ui/Toaster'
 import { useApp } from './store'
 
@@ -258,7 +259,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
               class="inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 text-badge text-ink-2"
               title={app.t('eventsCount', { count: app.events().length })}
             >
-              <span class={`status-dot is-${app.connection()}`} aria-hidden="true" />
+              <ConnectionDot state={app.connection()} />
               <span>{connectionLabel()}</span>
             </span>
             <IconButton

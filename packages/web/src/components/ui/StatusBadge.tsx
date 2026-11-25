@@ -49,12 +49,12 @@ const dotTones: Record<StatusTone, string> = {
   neutral: 'bg-ink-3',
 }
 
-/* The legacy class names stay on purpose: `styles.css` still keys layout and
-   forced-colors rules off `.status-badge` / `.status-dot`. Colours come from
-   tokens, which win because the utilities layer is declared last. P3 removes both. */
+/* The legacy `.status-badge` / `.status-dot` rules are gone: colour, size and
+   radius all come from utilities, and forced-colors is a variant now. */
 const badgeBase =
-  'status-badge inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full px-2 text-badge'
-const dotBase = 'status-dot inline-block size-[7px] shrink-0 rounded-full'
+  'inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full px-2 text-badge forced-colors:border forced-colors:border-CanvasText'
+const dotBase =
+  'inline-block size-[7px] shrink-0 rounded-full forced-colors:[forced-color-adjust:none]'
 
 export interface StatusBadgeProps {
   status: string
@@ -70,6 +70,20 @@ export function StatusBadge(props: StatusBadgeProps) {
       <span>{props.label}</span>
     </span>
   )
+}
+
+export interface ConnectionDotProps {
+  state: 'live' | 'connecting' | 'offline'
+}
+
+/** The daemon link is not a task status, so it gets its own tone map. */
+export function ConnectionDot(props: ConnectionDotProps) {
+  const tone = (): string => {
+    if (props.state === 'live') return 'bg-success'
+    if (props.state === 'connecting') return 'bg-warning'
+    return 'bg-ink-3'
+  }
+  return <span class={`${dotBase} ${tone()}`} aria-hidden="true" />
 }
 
 export interface StatusDotProps {

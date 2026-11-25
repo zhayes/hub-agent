@@ -191,42 +191,6 @@
 
   /* --------------------------------------------------------------- status */
 
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: 999px;
-    background: var(--raised);
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1;
-    white-space: nowrap;
-    flex: none;
-  }
-
-  .status-dot {
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--faint);
-    flex: none;
-  }
-
-  .status-dot.is-live {
-    background: var(--positive);
-  }
-
-  .status-dot.is-connecting {
-    background: var(--warning);
-  }
-
-  .status-dot.is-offline {
-    background: var(--faint);
-  }
-
   /* ---------------------------------------------------------- responsive */
 
   @media (max-width: 1100px) {
@@ -255,15 +219,5 @@
   :lang(zh-CN) h1,
   :lang(zh-CN) h2 {
     letter-spacing: 0;
-  }
-
-  @media (forced-colors: active) {
-    .status-badge {
-      border: 1px solid CanvasText;
-    }
-
-    .status-dot {
-      forced-color-adjust: none;
-    }
   }
 }

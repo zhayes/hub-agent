@@ -6,7 +6,7 @@ const listClass =
   'inline-flex items-center gap-0.5 rounded-control border border-line bg-canvas p-1'
 
 const tabClass =
-  'inline-flex h-7 items-center rounded-[5px] px-2.5 text-meta text-ink-2 transition-colors hover:text-ink disabled:opacity-45 aria-selected:bg-surface aria-selected:text-ink aria-selected:shadow-[0_1px_2px_rgb(0_0_0/0.1)]'
+  'inline-flex h-7 items-center rounded-control px-2.5 text-meta text-ink-2 transition-colors hover:text-ink disabled:opacity-45 aria-selected:bg-surface aria-selected:text-ink aria-selected:shadow-[0_1px_2px_rgb(0_0_0/0.1)]'
 
 export interface TabsProps {
   defaultValue?: string
