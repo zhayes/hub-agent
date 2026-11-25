@@ -17,7 +17,6 @@ import {
 import { type ErrorCode, HubError } from '../../shared/errors'
 import { resolvePiAgentDir } from '../../shared/paths'
 import type { Db } from '../../storage/db'
-import { listAgentPresence } from '../../storage/queries/agent-presence'
 import { getChatThread, listChatMessagesAfter } from '../../storage/queries/chat'
 import { listEventsSince } from '../../storage/queries/events'
 import { getTaskEvidence } from '../../storage/queries/evidence'
@@ -298,11 +297,6 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   })
 
   app.get('/api/v1/agents', (context) => context.json({ ok: true, agents: listAgents(db) }))
-
-  /* Agent Office 舞台的只读 presence（PLAN-AGENT-OFFICE §3.1）；不写库。 */
-  app.get('/api/v1/agents/presence', (context) =>
-    context.json({ ok: true, ...listAgentPresence(db) }),
-  )
 
   app.get('/api/v1/approvals', (context) =>
     context.json({ ok: true, approvals: listApprovals(db) }),
