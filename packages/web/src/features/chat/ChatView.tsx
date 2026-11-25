@@ -88,6 +88,12 @@ export function ChatView(props: ChatViewProps) {
   const [wide, setWide] = createSignal(
     typeof window === 'undefined' ? false : window.matchMedia('(min-width: 861px)').matches,
   )
+  /* The context pane is CSS-hidden below 1100px (`max-[1100px]:hidden`), so the
+     grid must not reserve a column for it there — otherwise the transcript gets
+     squeezed by an invisible 300px gutter. */
+  const [wideContext, setWideContext] = createSignal(
+    typeof window === 'undefined' ? false : window.matchMedia('(min-width: 1100px)').matches,
+  )
   const [mobileThreads, setMobileThreads] = createSignal(false)
   let poll: ReturnType<typeof setInterval> | undefined
   let stream: EventSource | undefined
@@ -320,12 +326,20 @@ export function ChatView(props: ChatViewProps) {
   /* Grid columns are inline only when the three-pane layout is on screen; on
      phones the max-width utilities keep it a single column. */
   onSettled(() => {
-    const query = window.matchMedia('(min-width: 861px)')
-    const update = (): void => {
-      setWide(query.matches)
+    const wideQuery = window.matchMedia('(min-width: 861px)')
+    const contextQuery = window.matchMedia('(min-width: 1100px)')
+    const updateWide = (): void => {
+      setWide(wideQuery.matches)
     }
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
+    const updateContext = (): void => {
+      setWideContext(contextQuery.matches)
+    }
+    wideQuery.addEventListener('change', updateWide)
+    contextQuery.addEventListener('change', updateContext)
+    return () => {
+      wideQuery.removeEventListener('change', updateWide)
+      contextQuery.removeEventListener('change', updateContext)
+    }
   })
 
   createEffect(
@@ -461,12 +475,21 @@ export function ChatView(props: ChatViewProps) {
     },
   )
 
+  /* Each pane is pinned to its own column. A collapsed pane renders with
+     `display: none`, which takes it out of the grid — and then auto-placement
+     pulls the remaining panes one column left: the transcript would get 0px and
+     the context pane would swallow the middle. Pinning makes collapse purely
+     visual. */
   const gridStyle = (): JSX.CSSProperties | undefined => {
     if (!wide()) return undefined
     const left = leftCollapsed() ? 0 : leftWidth()
-    const right = rightCollapsed() ? 48 : rightWidth()
+    /* Below 1100px the context pane is not on screen at all. */
+    const right = wideContext() ? (rightCollapsed() ? 48 : rightWidth()) : 0
     return { 'grid-template-columns': `${left}px minmax(0,1fr) ${right}px` }
   }
+
+  const columnStyle = (index: 1 | 2 | 3): JSX.CSSProperties | undefined =>
+    wide() ? { 'grid-column': String(index) } : undefined
 
   const startDrag = (side: 'left' | 'right', event: PointerEvent): void => {
     if (!wide()) return
@@ -515,6 +538,7 @@ export function ChatView(props: ChatViewProps) {
           leftCollapsed() ? 'hidden' : 'flex'
         } ${mobileThreads() ? 'max-[860px]:flex' : 'max-[860px]:hidden'}`}
         aria-label={props.t('threads')}
+        style={columnStyle(1)}
       >
         <div class="flex flex-none items-center justify-between gap-2 px-4 pt-3.5 pb-2.5">
           <span class="text-meta font-semibold text-ink">{props.t('threads')}</span>
@@ -600,6 +624,7 @@ export function ChatView(props: ChatViewProps) {
       <section
         class={`min-h-0 min-w-0 flex-col bg-surface ${mobileThreads() ? 'max-[860px]:hidden' : 'flex max-[860px]:flex'}`}
         aria-label={props.t('chat')}
+        style={columnStyle(2)}
       >
         <header class="flex flex-none items-center justify-between gap-3 border-b border-line px-5 py-3">
           <div class="min-w-0">
@@ -796,6 +821,7 @@ export function ChatView(props: ChatViewProps) {
       <aside
         class="relative flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-canvas max-[1100px]:hidden"
         aria-label={props.t('threadContext')}
+        style={columnStyle(3)}
       >
         <button
           type="button"

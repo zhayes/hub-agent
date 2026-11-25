@@ -312,6 +312,39 @@ test('deleting a provider asks first, then removes it', async ({ page }) => {
   await expect(page.getByText('Beta', { exact: true })).toBeVisible()
 })
 
+test('collapsing the threads pane keeps the transcript column wide', async ({ page }) => {
+  await page.setViewportSize({ width: 1456, height: 900 })
+  await page.goto('/chat/t1')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Collapse threads' }).first().click()
+
+  /* Regression: a collapsed pane is display:none, so the grid's auto-placement
+     used to pull the remaining panes a column left — transcript 0px wide and the
+     context pane swallowing the middle. */
+  const transcript = await page.getByRole('region', { name: 'Chat' }).boundingBox()
+  const context = await page.getByRole('complementary', { name: 'Thread context' }).boundingBox()
+  expect(transcript?.width ?? 0).toBeGreaterThan(600)
+  expect(context?.width ?? 0).toBeLessThan(400)
+  await expect(page.getByRole('textbox', { name: /Describe a task/ })).toBeVisible()
+})
+
+test('below 1100px the context pane reserves no empty gutter', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 900 })
+  await page.goto('/chat/t1')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  /* The context pane is hidden below 1100px; the grid must not keep its column
+     alive, or the transcript is squeezed by an invisible 300px strip. */
+  const transcript = await page.getByRole('region', { name: 'Chat' }).boundingBox()
+  const main = await page.getByRole('main').boundingBox()
+  expect(transcript).not.toBeNull()
+  expect(main).not.toBeNull()
+  if (transcript !== null && main !== null) {
+    expect(Math.abs(transcript.x + transcript.width - (main.x + main.width))).toBeLessThan(2)
+  }
+})
+
 test('renders only the latest page and loads older messages', async ({ page }) => {
   await page.unroute('**/api/v1/**')
   const all = Array.from({ length: 1000 }, (_, index) => ({
