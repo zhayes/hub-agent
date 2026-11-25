@@ -210,12 +210,13 @@
 - [ ] 圆角只有 6 / 10 / 999 三种。
 - [ ] 间距全部落在 4/8/12/16/24/32/48。
 - [ ] 一个页面只有一个主操作；三种信号不共用一色。
-- [ ] Inter / JetBrains Mono / Noto SC 子集实际加载（DevTools 验证）。
-- [ ] 每页 axe 0 critical / serious。
-- [ ] 视觉回归：1440 / 1024 / 768 / 390 × 明暗，基线评审通过。
-  - 基线随代码入库（`tests/visual/**/*-snapshots/`），只在 macOS 上用 `pnpm test:visual:update` 更新，改基线必须在 PR 里看清图片 diff。
+- [x] Inter / JetBrains Mono / Noto SC 子集实际加载（P1 起 legacy `--font` / `--mono` 指向自托管字体）。
+- [ ] 每页 axe 0 critical / serious（当前仅 gallery 覆盖）。
+- [x] 视觉回归：1440 / 768 / 390 × 明暗，基线随代码入库。
+  - 基线在 `tests/visual/**/*-snapshots/`，只在 macOS 上用 `pnpm test:visual:update` 更新，改基线必须在 PR 里看清图片 diff。
 - [ ] 10k 消息滚动不掉帧；流式期间无长任务。
 - [ ] `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直接引用。
+  - 当前唯一例外是 `features/dev/DevUiView.tsx`：gallery 的用途就是展示 SDK 裸行为，且已被 `import.meta.env.DEV` 从生产包剔除。P3 把它移出 `features/`（或改成只经门面）后即可勾上。
 
 ---
 

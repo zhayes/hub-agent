@@ -37,20 +37,18 @@ import {
 } from '@ui-sdk/solid/toast'
 import { createSignal, For, onCleanup, Show } from 'solid-js'
 import { ApprovalCard, type ApprovalState } from '../../components/ui/ApprovalCard'
-import {
-  buttonDanger,
-  buttonGhost,
-  buttonPrimary,
-  buttonSecondary,
-  fieldInput,
-} from '../../components/ui/button-classes'
+import { Button } from '../../components/ui/Button'
+import { buttonGhost, buttonPrimary, buttonSecondary } from '../../components/ui/button-classes'
+import { Field, fieldControl } from '../../components/ui/Field'
 import { LoadingState } from '../../components/ui/LoadingState'
+import { Panel } from '../../components/ui/Panel'
+import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
 import { StreamingText } from '../../components/ui/StreamingText'
+import { Tab, TabList, TabPanel, Tabs } from '../../components/ui/Tabs'
 
 const section = 'mt-10 border-t border-line pt-6'
 const card = 'rounded-panel border border-line bg-surface p-4'
 const label = 'text-meta font-medium text-ink-2'
-const chip = 'inline-flex h-5 items-center rounded-full px-2 text-badge'
 const commandItem =
   'flex h-8 cursor-default items-center rounded-control px-2 text-body data-[highlighted]:bg-hover'
 
@@ -77,11 +75,11 @@ const swatches = [
 ]
 
 const statuses = [
-  { label: 'running', class: 'bg-accent-soft text-accent', dot: 'bg-accent' },
-  { label: 'waiting on you', class: 'bg-warning-soft text-warning', dot: 'bg-warning' },
-  { label: 'completed', class: 'bg-success-soft text-success', dot: 'bg-success' },
-  { label: 'failed', class: 'bg-danger-soft text-danger', dot: 'bg-danger' },
-  { label: 'idle', class: 'bg-subtle text-ink-2', dot: 'bg-ink-3' },
+  { status: 'running', label: 'running' },
+  { status: 'waiting_approval', label: 'waiting on you' },
+  { status: 'completed', label: 'completed' },
+  { status: 'failed', label: 'failed' },
+  { status: 'idle', label: 'idle' },
 ]
 
 export function DevUiView() {
@@ -122,11 +120,12 @@ export function DevUiView() {
       <div class="mx-auto max-w-[1120px] px-6 py-8 font-sans text-body text-ink">
         <header class="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p class="text-meta text-ink-3">P0 spike · not shipped</p>
+            <p class="text-meta text-ink-3">P1 · not shipped</p>
             <h1 class="text-title text-ink">UI gallery</h1>
             <p class="mt-1 max-w-[70ch] text-meta text-ink-2">
-              Tailwind tokens, @ui-sdk behaviors, and three chat primitives ported from Beautiful UI
-              (MIT). Every demo is driven by explicit state, not a self-playing loop.
+              Tailwind tokens, five primitives, @ui-sdk behaviors and three chat primitives ported
+              from Beautiful UI (MIT). Every demo is driven by explicit state, not a self-playing
+              loop.
             </p>
           </div>
           <a class={buttonSecondary} href="/chat">
@@ -169,52 +168,84 @@ export function DevUiView() {
           </div>
         </Section>
 
-        <Section title="Controls" note="One primary per screen; ghost for secondary actions.">
+        <Section
+          title="Primitives"
+          note="The five P1 primitives. One primary per screen; ghost for secondary actions."
+        >
           <div class="flex flex-wrap items-center gap-2">
-            <button type="button" class={buttonPrimary}>
-              Approve
-            </button>
-            <button type="button" class={buttonSecondary}>
-              Open task
-            </button>
-            <button type="button" class={buttonGhost}>
-              Reject
-            </button>
-            <button type="button" class={buttonDanger}>
-              Cancel run
-            </button>
-            <button type="button" class={buttonPrimary} disabled>
-              Disabled
-            </button>
+            <Button>Approve</Button>
+            <Button variant="secondary">Open task</Button>
+            <Button variant="ghost">Reject</Button>
+            <Button variant="danger">Cancel run</Button>
+            <Button disabled>Disabled</Button>
+            <Button variant="secondary" size="sm">
+              Small
+            </Button>
           </div>
 
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
-            <label class="flex flex-col gap-1.5">
-              <span class={label}>Bearer token</span>
-              <input
-                class={fieldInput}
-                type="password"
-                value="local-token"
-                aria-label="Bearer token"
-              />
-              <span class="text-badge text-ink-3">Stored on this device.</span>
-            </label>
-            <div class="flex flex-col gap-1.5">
-              <span class={label}>Status</span>
-              <div class="flex flex-wrap gap-2">
-                <For each={statuses}>
-                  {(status) => (
-                    <span class={`${chip} ${status.class}`}>
-                      <span
-                        class={`mr-1.5 size-1.5 rounded-full ${status.dot}`}
-                        aria-hidden="true"
-                      />
-                      {status.label}
-                    </span>
-                  )}
-                </For>
-              </div>
-            </div>
+            <Field label="Bearer token" hint="Stored on this device.">
+              {(control) => (
+                <input class={fieldControl} type="password" value="local-token" {...control} />
+              )}
+            </Field>
+            <Field label="Daemon URL" error="Must be a loopback address.">
+              {(control) => <input class={fieldControl} value="http://0.0.0.0:8787" {...control} />}
+            </Field>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <For each={statuses}>
+              {(item) => <StatusBadge status={item.status} label={item.label} />}
+            </For>
+            <span class="h-4 w-px bg-line" aria-hidden="true" />
+            <For each={statuses}>
+              {(item) => (
+                <span class="inline-flex items-center gap-1.5">
+                  <StatusDot status={item.status} />
+                  <span class="text-meta text-ink-2">{item.label}</span>
+                </span>
+              )}
+            </For>
+          </div>
+        </Section>
+
+        <Section
+          title="Tabs and panels"
+          note="Behaviour from @ui-sdk/solid/tabs; surface, track and thumb from tokens."
+        >
+          <div class="grid gap-4 lg:grid-cols-2">
+            <Panel
+              title="Execution"
+              subtitle="run_…CZDN · 4 minutes ago"
+              actions={
+                <Button variant="secondary" size="sm">
+                  Open
+                </Button>
+              }
+              footer={<span class="text-badge text-ink-3">Verified by runtime</span>}
+            >
+              <Tabs defaultValue="plan">
+                <TabList label="Execution sections">
+                  <Tab value="plan">Plan</Tab>
+                  <Tab value="evidence">Evidence</Tab>
+                  <Tab value="logs">Logs</Tab>
+                </TabList>
+                <TabPanel value="plan">Three steps: reproduce, patch, verify.</TabPanel>
+                <TabPanel value="evidence">9f2c41ad8 · +14 / −8</TabPanel>
+                <TabPanel value="logs">pnpm vitest run auth --reporter=dot</TabPanel>
+              </Tabs>
+            </Panel>
+            <Panel
+              tone="raised"
+              title="Needs your decision"
+              subtitle="Push the fix to origin"
+              footer={<span class="text-badge text-ink-3">Risk · high</span>}
+            >
+              <p class="text-meta text-ink-2">
+                Approving runs <span class="font-mono">git push</span> on fix/auth-redirect-loop.
+              </p>
+            </Panel>
           </div>
         </Section>
 
@@ -255,7 +286,7 @@ export function DevUiView() {
                   ]}
                 >
                   <SelectLabel class={label}>Agent</SelectLabel>
-                  <SelectTrigger class={`${fieldInput} mt-1.5 flex items-center justify-between`}>
+                  <SelectTrigger class={`${fieldControl} mt-1.5 flex items-center justify-between`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent class="z-50 min-w-[var(--anchor-width)] rounded-panel border border-line bg-surface p-1 shadow-popover">

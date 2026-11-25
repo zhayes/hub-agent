@@ -34,9 +34,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
           <Show when={approved()} fallback={<X size={16} class="text-danger" aria-hidden="true" />}>
             <Check size={16} class="text-success" aria-hidden="true" />
           </Show>
-          <span class="text-[13px] font-medium text-ink">
-            {approved() ? 'Approved' : 'Rejected'}
-          </span>
+          <span class="text-meta font-medium text-ink">{approved() ? 'Approved' : 'Rejected'}</span>
           <span class="min-w-0 truncate font-mono text-meta text-ink-3">{props.resource}</span>
         </div>
       }
@@ -50,7 +48,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
           </span>
           <div class="min-w-0 flex-1">
             <div class="flex items-start justify-between gap-3">
-              <h3 class="text-[15px] font-semibold leading-snug text-ink">{props.title}</h3>
+              <h3 class="text-body font-semibold leading-snug text-ink">{props.title}</h3>
               <Show when={props.risk !== undefined}>
                 <span class={`shrink-0 rounded px-1.5 py-0.5 text-badge capitalize ${riskTone()}`}>
                   {props.risk}

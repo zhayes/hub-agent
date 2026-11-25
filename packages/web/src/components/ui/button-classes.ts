@@ -1,5 +1,5 @@
-/* Shared button recipes for the P0 gallery. P2 replaces these with a typed
-   Button primitive; keeping them in one place avoids five copies of the string. */
+/* Shared button recipes for the plugin surfaces that still use legacy markup.
+   New code uses <Button> from components/ui/Button; P3 replaces the rest. */
 
 export const buttonPrimary =
   'inline-flex h-8 items-center justify-center gap-1.5 rounded-control bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45'
@@ -12,6 +12,3 @@ export const buttonGhost =
 
 export const buttonDanger =
   'inline-flex h-8 items-center justify-center gap-1.5 rounded-control bg-danger px-3 text-[13px] font-medium text-canvas transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45'
-
-export const fieldInput =
-  'h-9 w-full rounded-control border border-control bg-surface px-3 text-body text-ink placeholder:text-ink-3 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-ring'

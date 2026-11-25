@@ -33,6 +33,29 @@ export function statusTone(status: string): StatusTone {
   return 'neutral'
 }
 
+const badgeTones: Record<StatusTone, string> = {
+  running: 'bg-accent-soft text-accent',
+  success: 'bg-success-soft text-success',
+  failed: 'bg-danger-soft text-danger',
+  waiting: 'bg-warning-soft text-warning',
+  neutral: 'bg-subtle text-ink-2',
+}
+
+const dotTones: Record<StatusTone, string> = {
+  running: 'bg-accent',
+  success: 'bg-success',
+  failed: 'bg-danger',
+  waiting: 'bg-warning',
+  neutral: 'bg-ink-3',
+}
+
+/* The legacy class names stay on purpose: `styles.css` still keys layout and
+   forced-colors rules off `.status-badge` / `.status-dot`. Colours come from
+   tokens, which win because the utilities layer is declared last. P3 removes both. */
+const badgeBase =
+  'status-badge inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full px-2 text-badge'
+const dotBase = 'status-dot inline-block size-[7px] shrink-0 rounded-full'
+
 export interface StatusBadgeProps {
   status: string
   label: string
@@ -40,7 +63,7 @@ export interface StatusBadgeProps {
 
 export function StatusBadge(props: StatusBadgeProps) {
   return (
-    <span class={`status-badge tone-${statusTone(props.status)}`}>
+    <span class={`${badgeBase} ${badgeTones[statusTone(props.status)]}`}>
       <span>{props.label}</span>
     </span>
   )
@@ -51,5 +74,5 @@ export interface StatusDotProps {
 }
 
 export function StatusDot(props: StatusDotProps) {
-  return <span class={`status-dot tone-${statusTone(props.status)}`} aria-hidden="true" />
+  return <span class={`${dotBase} ${dotTones[statusTone(props.status)]}`} aria-hidden="true" />
 }
