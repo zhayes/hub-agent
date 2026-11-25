@@ -108,13 +108,13 @@ export function AppLayout(props: { children?: JSX.Element }) {
         { value: 'nav:/tasks', label: app.t('navTasks') },
         { value: 'nav:/agents', label: app.t('navAgents') },
         { value: 'nav:/approvals', label: app.t('navApprovals') },
+        { value: 'nav:/settings', label: app.t('navSettings') },
       ],
     },
     {
-      label: app.t('settings'),
+      label: app.t('paletteMore'),
       items: [
-        { value: 'nav:/settings', label: app.t('navSettings') },
-        { value: 'action:theme', label: app.t('theme'), hint: themeLabel() },
+        { value: 'action:theme', label: app.t('theme'), hint: app.theme.theme() },
         {
           value: 'action:language',
           label: app.t('language'),
