@@ -31,6 +31,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
   const path = () => location.pathname
 
   const isChat = (): boolean => path() === '/' || path().startsWith('/chat')
+  const isTasks = (): boolean => path().startsWith('/tasks')
 
   const title = (): string => {
     if (path().startsWith('/agents')) return app.t('agents')
@@ -246,7 +247,15 @@ export function AppLayout(props: { children?: JSX.Element }) {
             </div>
           </Show>
 
-          <div class={`screen-body${isChat() ? ' chat-body' : ' scroll-body'}`}>
+          <div
+            class={`screen-body ${
+              isChat()
+                ? 'chat-body'
+                : isTasks()
+                  ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                  : 'scroll-body'
+            }`}
+          >
             {props.children}
           </div>
         </div>
