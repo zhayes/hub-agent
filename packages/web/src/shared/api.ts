@@ -88,6 +88,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const text = await response.text().catch(() => '')
     throw new Error(`${response.status}: ${text}`)
   }
+  /* A dev server answers unknown /api routes with index.html, which used to
+     surface as `Unexpected token '<'`. Name the real problem instead. */
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('json')) {
+    const preview = (await response.text().catch(() => '')).slice(0, 80)
+    throw new Error(
+      `${response.status}: expected JSON from ${path}, got ${contentType || 'no content-type'}${
+        preview === '' ? '' : ` — ${preview}`
+      }`,
+    )
+  }
   return (await response.json()) as T
 }
 

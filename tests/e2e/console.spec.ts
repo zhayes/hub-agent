@@ -194,13 +194,18 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
   await expect(page.getByRole('link', { name: '任务' })).toBeVisible()
 })
 
-test('context pane collapses and composer remains usable', async ({ page }) => {
+test('context pane collapses and reopens from the chat header', async ({ page }) => {
   await page.goto('/chat/t1')
   const context = page.getByRole('complementary', { name: 'Thread context' })
   await expect(context).toBeVisible()
+
+  /* One toggle in the chat header owns the pane: collapsing removes it entirely
+     (no 48px rail carrying its own expand button). */
   await page.getByRole('button', { name: 'Collapse context' }).click()
-  // Collapsed leaves the vertical rail in place, so the pane can be reopened.
-  await expect(context.getByRole('button', { name: 'Expand context' }).first()).toBeVisible()
+  await expect(context).toBeHidden()
+
+  await page.getByRole('button', { name: 'Expand context' }).click()
+  await expect(context).toBeVisible()
   await expect(
     page.getByRole('textbox', { name: 'Describe a task, or ask what is happening…' }),
   ).toBeVisible()
@@ -343,6 +348,22 @@ test('below 1100px the context pane reserves no empty gutter', async ({ page }) 
   if (transcript !== null && main !== null) {
     expect(Math.abs(transcript.x + transcript.width - (main.x + main.width))).toBeLessThan(2)
   }
+})
+
+test('transcript and composer keep a readable measure on wide screens', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/chat/t1')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  const transcript = await page.getByRole('region', { name: 'Chat' }).boundingBox()
+  const composer = await page.getByRole('textbox', { name: /Describe a task/ }).boundingBox()
+  const message = await page.getByRole('article').first().boundingBox()
+  // The pane is wide, but the text column is capped so lines stay scannable...
+  expect(transcript?.width ?? 0).toBeGreaterThan(900)
+  expect(composer?.width ?? 0).toBeLessThanOrEqual(700)
+  // ...and the composer shares that measure, so both edges line up.
+  expect(Math.abs((composer?.x ?? 0) - (message?.x ?? 0))).toBeLessThan(2)
+  expect(Math.abs((composer?.width ?? 0) - (message?.width ?? 0))).toBeLessThan(2)
 })
 
 test('renders only the latest page and loads older messages', async ({ page }) => {

@@ -35,7 +35,6 @@ export interface ChatViewProps {
 /* Pane widths live in state so they can be dragged; mobile stays a single
    column through the max-width utility below. */
 const MOBILE_ONLY = 'hidden max-[860px]:grid'
-const DESKTOP_ONLY = 'max-[860px]:hidden'
 
 const LEFT_MIN = 220
 const LEFT_MAX = 460
@@ -169,6 +168,10 @@ export function ChatView(props: ChatViewProps) {
   }
 
   const loadThread = async (id: string): Promise<void> => {
+    /* Without credentials the request falls through to the dev server's HTML
+       fallback and surfaces as "Unexpected token '<'". The shell already shows
+       the token banner, so stay quiet instead of painting a decode error. */
+    if (getToken() === '') return
     try {
       setError('')
       const shouldStick = stick
@@ -192,6 +195,7 @@ export function ChatView(props: ChatViewProps) {
   }
 
   const loadThreads = async (): Promise<void> => {
+    if (getToken() === '') return
     try {
       const result = await chatApi.threads()
       setThreads(result.threads)
@@ -483,8 +487,10 @@ export function ChatView(props: ChatViewProps) {
   const gridStyle = (): JSX.CSSProperties | undefined => {
     if (!wide()) return undefined
     const left = leftCollapsed() ? 0 : leftWidth()
-    /* Below 1100px the context pane is not on screen at all. */
-    const right = wideContext() ? (rightCollapsed() ? 48 : rightWidth()) : 0
+    /* Below 1100px the context pane is not on screen at all. Collapsed means
+       gone, not a 48px rail: the toggle in the chat header is the only control
+       for it, so nothing needs to stay visible inside the pane. */
+    const right = wideContext() && !rightCollapsed() ? rightWidth() : 0
     return { 'grid-template-columns': `${left}px minmax(0,1fr) ${right}px` }
   }
 
@@ -548,12 +554,6 @@ export function ChatView(props: ChatViewProps) {
               label={props.t('chat')}
               class={MOBILE_ONLY}
               onClick={() => setMobileThreads(false)}
-            />
-            <IconButton
-              icon="panelLeft"
-              label={props.t('collapseThreads')}
-              class={DESKTOP_ONLY}
-              onClick={() => setPane('left', !leftCollapsed())}
             />
             <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
           </div>
@@ -646,24 +646,32 @@ export function ChatView(props: ChatViewProps) {
             </div>
           </div>
           <div class="flex flex-none items-center gap-0.5">
+            {/* The only two layout controls in the console: this one drives the
+                thread list (or opens it on phones), the next one the context
+                pane. The panes themselves carry no collapse buttons. */}
             <IconButton
               icon="panelLeft"
-              label={props.t('threads')}
-              class={MOBILE_ONLY}
-              onClick={() => setMobileThreads(true)}
+              label={
+                wide()
+                  ? leftCollapsed()
+                    ? props.t('expandThreads')
+                    : props.t('collapseThreads')
+                  : props.t('threads')
+              }
+              pressed={wide() ? !leftCollapsed() : mobileThreads()}
+              onClick={() => {
+                if (wide()) setPane('left', !leftCollapsed())
+                else setMobileThreads(true)
+              }}
             />
-            <IconButton
-              icon="panelLeft"
-              label={props.t('collapseThreads')}
-              class={DESKTOP_ONLY}
-              onClick={() => setPane('left', !leftCollapsed())}
-            />
-            <IconButton
-              icon="panelRight"
-              label={props.t('collapseContext')}
-              class={`${DESKTOP_ONLY} max-[1100px]:hidden`}
-              onClick={() => setPane('right', !rightCollapsed())}
-            />
+            <Show when={wideContext()}>
+              <IconButton
+                icon="panelRight"
+                label={rightCollapsed() ? props.t('expandContext') : props.t('collapseContext')}
+                pressed={!rightCollapsed()}
+                onClick={() => setPane('right', !rightCollapsed())}
+              />
+            </Show>
             <Show when={thread()?.taskId}>
               <IconButton
                 icon="external"
@@ -681,7 +689,7 @@ export function ChatView(props: ChatViewProps) {
         </Show>
 
         <div
-          class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5 max-[860px]:px-4 max-[860px]:pt-4 max-[860px]:pb-1"
+          class="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 max-[860px]:px-4 max-[860px]:pt-4 max-[860px]:pb-1"
           role="log"
           aria-live="polite"
           ref={(el) => {
@@ -691,41 +699,45 @@ export function ChatView(props: ChatViewProps) {
             stick = isNearBottom()
           }}
         >
-          <Show
-            when={thread() !== undefined}
-            fallback={
-              <div class={centeredEmpty}>
-                <Icon name="message" size={20} />
-                <p>{props.t('selectThread')}</p>
-                <Button onClick={() => void newThread()}>{props.t('newThread')}</Button>
-              </div>
-            }
-          >
-            <Show when={hasMore()}>
-              <div class="flex justify-center pb-1">
-                <Button variant="ghost" size="sm" onClick={() => void loadOlder()}>
-                  {props.t('loadOlder')}
-                </Button>
-              </div>
+          {/* Reading measure, matching MessageRow's 74ch so the transcript and
+              the composer line up instead of the composer running full-bleed. */}
+          <div class="mx-auto flex w-full max-w-[74ch] flex-col gap-4">
+            <Show
+              when={thread() !== undefined}
+              fallback={
+                <div class={centeredEmpty}>
+                  <Icon name="message" size={20} />
+                  <p>{props.t('selectThread')}</p>
+                  <Button onClick={() => void newThread()}>{props.t('newThread')}</Button>
+                </div>
+              }
+            >
+              <Show when={hasMore()}>
+                <div class="flex justify-center pb-1">
+                  <Button variant="ghost" size="sm" onClick={() => void loadOlder()}>
+                    {props.t('loadOlder')}
+                  </Button>
+                </div>
+              </Show>
+              <For each={messages()}>
+                {(message) => (
+                  <MessageRow
+                    message={message}
+                    t={props.t}
+                    locale={props.locale}
+                    streaming={active() && messages().at(-1)?.id === message.id}
+                    onOpenTask={props.onOpenTask}
+                    onApprove={(id) => void decideApproval(id, 'approve')}
+                    onReject={(id) => void decideApproval(id, 'reject')}
+                    onAnswer={(id, answer) => void answerClarification(id, answer)}
+                  />
+                )}
+              </For>
+              <Show when={active()}>
+                <LoadingState label={props.t('loading')} elapsedMs={thinkingMs()} />
+              </Show>
             </Show>
-            <For each={messages()}>
-              {(message) => (
-                <MessageRow
-                  message={message}
-                  t={props.t}
-                  locale={props.locale}
-                  streaming={active() && messages().at(-1)?.id === message.id}
-                  onOpenTask={props.onOpenTask}
-                  onApprove={(id) => void decideApproval(id, 'approve')}
-                  onReject={(id) => void decideApproval(id, 'reject')}
-                  onAnswer={(id, answer) => void answerClarification(id, answer)}
-                />
-              )}
-            </For>
-            <Show when={active()}>
-              <LoadingState label={props.t('loading')} elapsedMs={thinkingMs()} />
-            </Show>
-          </Show>
+          </div>
         </div>
 
         <form
@@ -735,115 +747,103 @@ export function ChatView(props: ChatViewProps) {
             void send()
           }}
         >
-          <label class="visually-hidden" for="chat-composer">
-            {props.t('chatPlaceholder')}
-          </label>
-          <Show when={(menu()?.items.length ?? 0) > 0}>
-            <div
-              class="mb-1.5 max-h-[220px] overflow-y-auto rounded-panel border border-line bg-surface p-1 shadow-popover"
-              role="listbox"
-              aria-label={menu()?.kind === 'slash' ? props.t('command') : props.t('tasks')}
-            >
-              <For each={menu()?.items ?? []}>
-                {(item, index) => (
-                  <>
-                    {/* biome-ignore lint/a11y/useFocusableInteractive: typeahead listbox; focus must stay in the textarea, options are chosen with arrows */}
-                    <div
-                      role="option"
-                      tabindex="-1"
-                      aria-selected={index() === menuIndex() ? 'true' : 'false'}
-                      class={`flex cursor-default items-center justify-between gap-3 rounded-control px-2 py-1.5 text-meta ${
-                        index() === menuIndex() ? 'bg-hover text-ink' : 'text-ink-2'
-                      }`}
-                      onMouseDown={(event) => {
-                        event.preventDefault()
-                        applyMenuItem(item)
-                      }}
-                    >
-                      <span class="truncate">{item.label}</span>
-                      <Show when={item.hint !== undefined}>
-                        <span class="shrink-0 font-mono text-badge text-ink-3">{item.hint}</span>
-                      </Show>
-                    </div>
-                  </>
-                )}
-              </For>
-            </div>
-          </Show>
-          <textarea
-            id="chat-composer"
-            rows="2"
-            class="block max-h-[180px] min-h-[54px] w-full resize-none rounded-panel border border-line bg-canvas px-3 py-2.5 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
-            value={text()}
-            placeholder={
-              mode() === 'run' ? props.t('chatPlaceholder') : props.t('chatAskPlaceholder')
-            }
-            onInput={(event) => setText(event.currentTarget.value)}
-            onKeyDown={submitOnEnter}
-          />
-          <div class="mt-2 flex items-center gap-2.5">
-            <div class="flex flex-none gap-0.5 rounded-panel bg-subtle p-0.5">
-              <button
-                type="button"
-                class={`${modeButton} ${mode() === 'run' ? 'bg-surface font-medium text-ink' : ''}`}
-                aria-pressed={mode() === 'run' ? 'true' : 'false'}
-                onClick={() => setMode('run')}
+          {/* Same measure as the transcript, so the composer sits under the text
+              instead of stretching across the whole pane. */}
+          <div class="mx-auto flex w-full max-w-[74ch] flex-col">
+            <label class="visually-hidden" for="chat-composer">
+              {props.t('chatPlaceholder')}
+            </label>
+            <Show when={(menu()?.items.length ?? 0) > 0}>
+              <div
+                class="mb-1.5 max-h-[220px] overflow-y-auto rounded-panel border border-line bg-surface p-1 shadow-popover"
+                role="listbox"
+                aria-label={menu()?.kind === 'slash' ? props.t('command') : props.t('tasks')}
               >
-                <Icon name="play" size={12} />
-                <span>{props.t('run')}</span>
-              </button>
+                <For each={menu()?.items ?? []}>
+                  {(item, index) => (
+                    <>
+                      {/* biome-ignore lint/a11y/useFocusableInteractive: typeahead listbox; focus must stay in the textarea, options are chosen with arrows */}
+                      <div
+                        role="option"
+                        tabindex="-1"
+                        aria-selected={index() === menuIndex() ? 'true' : 'false'}
+                        class={`flex cursor-default items-center justify-between gap-3 rounded-control px-2 py-1.5 text-meta ${
+                          index() === menuIndex() ? 'bg-hover text-ink' : 'text-ink-2'
+                        }`}
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          applyMenuItem(item)
+                        }}
+                      >
+                        <span class="truncate">{item.label}</span>
+                        <Show when={item.hint !== undefined}>
+                          <span class="shrink-0 font-mono text-badge text-ink-3">{item.hint}</span>
+                        </Show>
+                      </div>
+                    </>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <textarea
+              id="chat-composer"
+              rows="2"
+              class="block max-h-[180px] min-h-[54px] w-full resize-none rounded-panel border border-line bg-canvas px-3 py-2.5 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+              value={text()}
+              placeholder={
+                mode() === 'run' ? props.t('chatPlaceholder') : props.t('chatAskPlaceholder')
+              }
+              onInput={(event) => setText(event.currentTarget.value)}
+              onKeyDown={submitOnEnter}
+            />
+            <div class="mt-2 flex items-center gap-2.5">
+              <div class="flex flex-none gap-0.5 rounded-panel bg-subtle p-0.5">
+                <button
+                  type="button"
+                  class={`${modeButton} ${mode() === 'run' ? 'bg-surface font-medium text-ink' : ''}`}
+                  aria-pressed={mode() === 'run' ? 'true' : 'false'}
+                  onClick={() => setMode('run')}
+                >
+                  <Icon name="play" size={12} />
+                  <span>{props.t('run')}</span>
+                </button>
+                <button
+                  type="button"
+                  class={`${modeButton} ${mode() === 'ask' ? 'bg-surface font-medium text-ink' : ''}`}
+                  aria-pressed={mode() === 'ask' ? 'true' : 'false'}
+                  onClick={() => setMode('ask')}
+                >
+                  <Icon name="message" size={12} />
+                  <span>{props.t('ask')}</span>
+                </button>
+              </div>
+              <span class="flex-1 text-right text-badge text-ink-3 max-[560px]:hidden">
+                {props.t('chatHint')}
+              </span>
               <button
-                type="button"
-                class={`${modeButton} ${mode() === 'ask' ? 'bg-surface font-medium text-ink' : ''}`}
-                aria-pressed={mode() === 'ask' ? 'true' : 'false'}
-                onClick={() => setMode('ask')}
+                type="submit"
+                class="grid size-[34px] flex-none place-items-center rounded-panel bg-ink text-canvas transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45"
+                aria-label={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
+                title={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
+                disabled={busy() || text().trim() === ''}
               >
-                <Icon name="message" size={12} />
-                <span>{props.t('ask')}</span>
+                <Icon name="arrowUp" size={15} />
               </button>
             </div>
-            <span class="flex-1 text-right text-badge text-ink-3 max-[560px]:hidden">
-              {props.t('chatHint')}
-            </span>
-            <button
-              type="submit"
-              class="grid size-[34px] flex-none place-items-center rounded-panel bg-ink text-canvas transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45"
-              aria-label={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
-              title={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
-              disabled={busy() || text().trim() === ''}
-            >
-              <Icon name="arrowUp" size={15} />
-            </button>
           </div>
         </form>
       </section>
 
       <aside
-        class="relative flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-canvas max-[1100px]:hidden"
+        class={`relative min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-canvas max-[1100px]:hidden ${
+          rightCollapsed() ? 'hidden' : 'flex'
+        }`}
         aria-label={props.t('threadContext')}
         style={columnStyle(3)}
       >
-        <button
-          type="button"
-          class={`w-full items-center gap-2.5 text-badge text-ink-2 [writing-mode:vertical-rl] hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-            rightCollapsed() ? 'flex flex-col py-3.5' : 'hidden'
-          }`}
-          aria-label={props.t('expandContext')}
-          onClick={() => setPane('right', false)}
-        >
-          <Icon name="panelRight" size={14} />
-          <span>{props.t('threadContext')}</span>
-        </button>
-        <div
-          class={`min-h-0 flex-1 overflow-y-auto px-4 py-3.5 ${rightCollapsed() ? 'hidden' : 'block'}`}
-        >
-          <div class="mb-3 flex items-center justify-between">
+        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
+          <div class="mb-3">
             <span class="text-meta font-semibold text-ink">{props.t('threadContext')}</span>
-            <IconButton
-              icon="panelRight"
-              label={props.t('expandContext')}
-              onClick={() => setPane('right', true)}
-            />
           </div>
           <Show when={thread()} fallback={<p class={emptyState}>{props.t('selectThread')}</p>}>
             {(current) => (
