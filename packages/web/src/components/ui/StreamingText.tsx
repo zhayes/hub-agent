@@ -3,12 +3,18 @@ export interface StreamingTextProps {
   text: string
   /** Shows the caret while the stream is open. */
   streaming?: boolean
+  /** Assistant plan/result copy sits one step quieter than user text. */
+  quiet?: boolean
 }
 
 /** Ported from Beautiful UI's Streaming Text (MIT), reduced to text + caret. */
 export function StreamingText(props: StreamingTextProps) {
   return (
-    <p class="max-w-[72ch] whitespace-pre-wrap text-body leading-relaxed text-ink">
+    <p
+      class={`max-w-[72ch] whitespace-pre-wrap text-body leading-relaxed ${
+        props.quiet === true ? 'text-ink-2' : 'text-ink'
+      }`}
+    >
       {props.text}
       {props.streaming === true ? (
         <span

@@ -39,12 +39,15 @@ import { createSignal, For, onCleanup, Show } from 'solid-js'
 import { ApprovalCard, type ApprovalState } from '../../components/ui/ApprovalCard'
 import { Button } from '../../components/ui/Button'
 import { buttonGhost, buttonPrimary, buttonSecondary } from '../../components/ui/button-classes'
+import { RichText } from '../../components/ui/CodeBlock'
 import { Field, fieldControl } from '../../components/ui/Field'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
 import { StreamingText } from '../../components/ui/StreamingText'
 import { Tab, TabList, TabPanel, Tabs } from '../../components/ui/Tabs'
+import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
+import { ToolChips } from '../../components/ui/ToolChips'
 
 const section = 'mt-10 border-t border-line pt-6'
 const card = 'rounded-panel border border-line bg-surface p-4'
@@ -407,6 +410,42 @@ export function DevUiView() {
                 <button type="button" class={buttonGhost} onClick={() => setStreaming(false)}>
                   Close stream
                 </button>
+              </div>
+            </div>
+
+            <div class="lg:col-span-2">
+              <p class={label}>Thinking and tool chips</p>
+              <div class="mt-2 flex flex-col gap-3">
+                <ThinkingTrace title="Plan" meta="3 subtasks" summary="Reproduce, patch, verify">
+                  <p>1. Reproduce the redirect with a session cookie.</p>
+                  <p>2. Move the cookie read after the jar sync.</p>
+                  <p>3. Verify /dashboard no longer bounces.</p>
+                </ThinkingTrace>
+                <ToolChips
+                  chips={[
+                    {
+                      label: 'Task ID',
+                      icon: 'tasks',
+                      id: 'task_…CZDN',
+                      href: '/tasks',
+                      title: 'task_01HZX9K4CZDN5M2Q',
+                    },
+                    { label: 'Approvals', icon: 'alert', title: 'ap_1' },
+                    { label: 'Clarification', icon: 'message', title: 'cl_1' },
+                  ]}
+                />
+              </div>
+            </div>
+
+            <div class="lg:col-span-2">
+              <p class={label}>Code blocks</p>
+              <div class="mt-2">
+                <RichText
+                  copyLabel="Copy"
+                  text={
+                    'Patched the read order:\n\n```ts\nconst session = await jar.sync()\nif (session === undefined) redirect()\n```\n\nThen re-ran the auth suite.'
+                  }
+                />
               </div>
             </div>
 

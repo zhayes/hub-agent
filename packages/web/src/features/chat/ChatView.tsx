@@ -1,10 +1,14 @@
+import type { JSX } from '@solidjs/web'
 import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
+import { RichText } from '../../components/ui/CodeBlock'
 import { fieldControl } from '../../components/ui/Field'
 import { Icon } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
+import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
+import { type ToolChip, ToolChips } from '../../components/ui/ToolChips'
 import {
   api,
   type ChatMessage,
@@ -523,6 +527,7 @@ export function ChatView(props: ChatViewProps) {
                   message={message}
                   t={props.t}
                   locale={props.locale}
+                  streaming={active() && messages().at(-1)?.id === message.id}
                   onOpenTask={props.onOpenTask}
                   onApprove={(id) => void decideApproval(id, 'approve')}
                   onReject={(id) => void decideApproval(id, 'reject')}
@@ -665,44 +670,81 @@ function MessageRow(props: {
   message: ChatMessage
   t: Translator
   locale: Locale
+  /** Last message of a running thread: its tail is genuinely still arriving. */
+  streaming: boolean
   onOpenTask: (id: string) => void
   onApprove: (id: string) => void
   onReject: (id: string) => void
   onAnswer: (id: string, answer: string) => void
 }) {
-  const meta = (who: string): string =>
-    `mb-1.5 flex items-baseline gap-1.5 text-badge text-ink-3 ${
-      props.message.role === 'user' && who === 'you' ? 'text-ink' : ''
-    }`
+  const chips = (): ToolChip[] => {
+    const message = props.message
+    const list: ToolChip[] = []
+    if (message.taskId !== undefined) {
+      list.push({
+        label: props.t('taskId'),
+        icon: 'tasks',
+        id: shortenId(message.taskId),
+        href: `/tasks/${message.taskId}`,
+        title: message.taskId,
+      })
+    }
+    if (message.approvalId !== undefined) {
+      list.push({ label: props.t('approvalItems'), icon: 'alert', title: message.approvalId })
+    }
+    if (message.clarificationId !== undefined) {
+      list.push({
+        label: props.t('clarification'),
+        icon: 'message',
+        title: message.clarificationId,
+      })
+    }
+    return list
+  }
+
+  const time = (): JSX.Element => <time>{relativeTime(props.locale, props.message.createdAt)}</time>
 
   if (props.message.role === 'user') {
     return (
       <article class="max-w-[min(100%,74ch)]">
-        <div class={meta('you')}>
+        <div class="mb-1.5 flex items-baseline gap-1.5 text-badge text-ink">
           <span class="font-medium">{props.t('you')}</span>
           <span aria-hidden="true">·</span>
-          <time>{relativeTime(props.locale, props.message.createdAt)}</time>
+          {time()}
         </div>
-        <p class="whitespace-pre-wrap text-body leading-relaxed text-ink">
-          {props.message.content}
-        </p>
+        <RichText text={props.message.content} copyLabel={props.t('copy')} />
       </article>
     )
   }
+
+  const plan = (): boolean => props.message.kind === 'plan'
+
   return (
     <article class="max-w-[min(100%,74ch)]">
       <div class="mb-1.5 flex items-baseline gap-1.5 text-badge text-ink-3">
         <span>{props.t('appName')}</span>
         <span aria-hidden="true">·</span>
-        <time>{relativeTime(props.locale, props.message.createdAt)}</time>
+        {time()}
       </div>
+
+      <Show
+        when={
+          chips().length > 0 &&
+          props.message.kind !== 'task' &&
+          props.message.kind !== 'approval' &&
+          props.message.kind !== 'clarification'
+        }
+      >
+        <ToolChips chips={chips()} class="mb-2" />
+      </Show>
+
       <Show
         when={props.message.kind === 'clarification' && props.message.clarificationId !== undefined}
       >
         <ClarificationCard message={props.message} t={props.t} onAnswer={props.onAnswer} />
       </Show>
       <Show when={props.message.kind === 'approval' && props.message.approvalId !== undefined}>
-        <div class="mt-2 rounded-panel border border-line bg-canvas p-3">
+        <div class="rounded-panel border border-line bg-canvas p-3">
           <div class="flex items-center gap-2 text-meta font-medium text-warning">
             <Icon name="alert" size={14} />
             <span>{props.message.content}</span>
@@ -718,7 +760,7 @@ function MessageRow(props: {
         </div>
       </Show>
       <Show when={props.message.kind === 'task' && props.message.taskId !== undefined}>
-        <div class="mt-2 rounded-panel border border-line bg-canvas p-3">
+        <div class="rounded-panel border border-line bg-canvas p-3">
           <div class="flex items-center gap-2 text-meta font-medium text-ink">
             <Icon name="tasks" size={14} />
             <span>{props.message.content}</span>
@@ -734,22 +776,32 @@ function MessageRow(props: {
           </div>
         </div>
       </Show>
+
+      <Show when={plan()}>
+        <ThinkingTrace title={props.t('stepPlan')} summary={props.message.content.split('\n')[0]}>
+          <RichText
+            text={props.message.content}
+            copyLabel={props.t('copy')}
+            streaming={props.streaming}
+            quiet
+          />
+        </ThinkingTrace>
+      </Show>
+
       <Show
         when={
           props.message.kind !== 'task' &&
           props.message.kind !== 'approval' &&
-          props.message.kind !== 'clarification'
+          props.message.kind !== 'clarification' &&
+          !plan()
         }
       >
-        <p
-          class={`whitespace-pre-wrap text-body leading-relaxed ${
-            props.message.kind === 'plan' || props.message.kind === 'result'
-              ? 'text-ink-2'
-              : 'text-ink'
-          }`}
-        >
-          {props.message.content}
-        </p>
+        <RichText
+          text={props.message.content}
+          copyLabel={props.t('copy')}
+          streaming={props.streaming}
+          quiet={props.message.kind === 'result'}
+        />
       </Show>
     </article>
   )

@@ -89,6 +89,15 @@ const messages = [
     clarificationId: 'cl1',
     createdAt: '2026-01-01T11:57:00Z',
   },
+  {
+    id: 'm6',
+    threadId: 't1',
+    role: 'assistant',
+    kind: 'result',
+    content: 'Task completed: task1',
+    taskId: 'task1',
+    createdAt: '2026-01-01T11:58:00Z',
+  },
 ]
 
 async function mockApi(page: Page): Promise<void> {
