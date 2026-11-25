@@ -36,6 +36,9 @@ jobs:
   visual:
     name: visual (macos)
     runs-on: macos-latest
+    # 基线在本地 macOS 上生成，runner 镜像的文字栅格化可能不同。
+    # 首次落地期间允许失败，以便拿到 artifact 判断差异量；确认镜像后再翻回阻塞。
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
