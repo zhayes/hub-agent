@@ -5,9 +5,15 @@ export default defineConfig({
   timeout: 60_000,
   fullyParallel: false,
   reporter: 'line',
-  // 基线按平台后缀入库（当前仅 -darwin）。非 macOS 环境跳过截图比对，
-  // 只保留 axe 断言，避免在 Linux 容器里出现 "snapshot doesn't exist" 的假失败。
-  ignoreSnapshots: process.platform !== 'darwin',
+  // 基线**不入库**：截图是本地开发时的比对工具，不是仓库资产（几百 KB 的
+  // PNG 只会让 clone 变重，且换个镜像版本就全部失效）。
+  //
+  //   pnpm test:visual                       → 只跑 axe（CI 用的就是这个）
+  //   VISUAL_SNAPSHOTS=1 pnpm test:visual    → 额外比对本地基线
+  //   VISUAL_SNAPSHOTS=1 pnpm test:visual:update → 刷新本地基线
+  //
+  // 本地基线落在 tests/visual/*-snapshots/，与 test-results/ 一样被 gitignore。
+  ignoreSnapshots: process.env.VISUAL_SNAPSHOTS !== '1',
   use: {
     baseURL: 'http://127.0.0.1:4173',
     viewport: { width: 1440, height: 1000 },

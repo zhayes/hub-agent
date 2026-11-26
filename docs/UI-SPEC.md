@@ -212,8 +212,8 @@
 - [ ] 一个页面只有一个主操作；三种信号不共用一色。
 - [x] Inter / JetBrains Mono / Noto SC 子集实际加载（P1 起 legacy `--font` / `--mono` 指向自托管字体）。
 - [ ] 每页 axe 0 critical / serious（当前 gallery + Chat/Tasks 已覆盖）。
-- [x] 视觉回归：1440 / 768 / 390 × 明暗，基线随代码入库。
-  - 基线在 `tests/visual/**/*-snapshots/`，只在 macOS 上用 `pnpm test:visual:update` 更新，改基线必须在 PR 里看清图片 diff。
+- [x] 视觉回归：1440 / 768 / 390 × 明暗覆盖 chat / tasks / settings / gallery。
+  - **基线不入库**：`pnpm test:visual` 默认只跑 axe；像素比对要 `VISUAL_SNAPSHOTS=1`，产物写到 `tests/visual/*-snapshots/`（已 gitignore）。
   - 覆盖：`dev-ui.spec.ts`（组件画廊）+ `console.spec.ts`（Chat 与 Tasks 真实页面，mock 接口 + 固定时钟 + reduced motion）。Agents / Approvals / Settings 待补。
 - [ ] 10k 消息滚动不掉帧；流式期间无长任务。
 - [ ] `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直接引用。

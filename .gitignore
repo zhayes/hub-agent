@@ -14,3 +14,6 @@ playwright-report/
 
 # 测试临时工作区（agent/acp 用例会写 db、token、worktree）
 .tmp/
+
+# 视觉回归基线：本地工具，不入库（VISUAL_SNAPSHOTS=1 时生成）
+tests/visual/**/*-snapshots/

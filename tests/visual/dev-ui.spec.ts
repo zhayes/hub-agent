@@ -2,8 +2,8 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
 // Three widths are enough to catch a broken breakpoint: 1440 (rail + content),
-// 768 (stacked), 390 (single column). 1024 rarely fails on its own and costs
-// two more committed baselines per surface.
+// 768 (stacked), 390 (single column). Baselines are local-only now: the
+// screenshot expectation is inert unless VISUAL_SNAPSHOTS=1.
 const cases = [
   { name: 'desktop', width: 1440, height: 1000 },
   { name: 'tablet', width: 768, height: 1024 },

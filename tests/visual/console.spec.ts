@@ -1,9 +1,10 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page, test } from '@playwright/test'
 
-/* Page-level baselines. Everything time-relative is pinned: the clock is fixed,
-   the mocked threads are completed (no polling, no ticking loading line) and
-   motion is reduced, so a diff means the layout or colours actually changed. */
+/* Page-level screenshots are local-only (VISUAL_SNAPSHOTS=1). Everything
+   time-relative is pinned regardless: the clock is fixed, the mocked threads
+   are completed (no polling, no ticking loading line) and motion is reduced,
+   so a diff means the layout or colours actually changed. */
 const FIXED_NOW = new Date('2026-01-01T12:00:00Z')
 
 const task = {

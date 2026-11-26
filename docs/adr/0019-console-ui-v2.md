@@ -55,10 +55,9 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 7. **视觉回归与 a11y 进 CI。**
    - Playwright 截图：1440 / 1024 / 768 / 390 × 明暗；固定容器、冻结时钟、遮罩动态值。
    - `@axe-core/playwright`：critical / serious 直接失败。
-   - 基线按平台后缀保存**并随代码入库**（当前仅 `-darwin`，8 张约 1.5 MB）；CI 的 `visual (macos)` job 跑同一套 darwin 基线，失败时把 actual/diff 作为 artifact 上传。
-   - 更新基线：在 macOS 上 `pnpm test:visual:update`，人工确认 PR 里的图片 diff 后再提交。非 macOS 环境由 `ignoreSnapshots` 跳过比对，只跑 axe。
-   - 基线增长须控制：每页一套（1440 / 768 / 390 × 明暗）；新增页面时同步评估是否需要减宽度或改用局部元素截图。
-   - 首跑（2026-11-25）runner 与本机基线像素一致，因此该 job 保持阻塞；job 内打印 `sw_vers`，日后镜像漂移时可据此钉版本或重出基线。
+   - 基线**不入库**（2026-11-26 调整）：PNG 是本地比对工具，不该随代码分发——几百 KB × 平台后缀只会让 clone 变重，换一个 runner 镜像就全部失效。默认 `pnpm test:visual` 只跑 axe（CI 的 `visual (macos)` job 跑的就是它）；截图比对要显式开启。
+   - 本地比对：`VISUAL_SNAPSHOTS=1 pnpm test:visual`（首次/刷新用 `VISUAL_SNAPSHOTS=1 pnpm test:visual:update`）。产物落在 `tests/visual/*-snapshots/`，与 `test-results/` 一起被 gitignore。
+   - 代价要写清楚：**仓库不再拦像素回归**，只拦无障碍与结构。需要时再把截图 job 恢复成阻塞项，并配一套基线托管（artifact/对象存储）。
 8. **左栏保持 56px 纯图标 rail。**
    - 以 tooltip、计数、`aria-label` 与快捷键补足可发现性；不改为文字侧栏。
 
