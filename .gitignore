@@ -11,3 +11,6 @@ reports/
 
 test-results/
 playwright-report/
+
+# 测试临时工作区（agent/acp 用例会写 db、token、worktree）
+.tmp/
