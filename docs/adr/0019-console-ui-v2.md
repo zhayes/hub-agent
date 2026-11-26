@@ -154,7 +154,10 @@ ADR 0004 已决定 UI 采用「`@ui-sdk` 行为层 + 自研视觉 + Tailwind v4�
 - **设置页从单表单改成 provider 列表 + 弹框**：一行一个 provider（名称、`自定义`/`默认` 徽章、密钥状态点、编辑/删除），底部虚线「添加模型提供商」，空列表时给 DeepSeek 预填项但不落盘。新增 `GET` 返回 `providers[]`、`DELETE /api/v1/settings/model/providers/:id`（删默认会顺位补选，全删清掉默认值）。保存时 `makeDefault` 由表单里的「默认」勾选决定，避免“改个别的密钥把默认悄改了”。
 - **中文字体子集终于可复现**：新增 `scripts/build-cjk-subset.mjs`（`pnpm fonts` / `pnpm fonts:write`），从 `packages/web/src` 提取非注释行的汉字 + 固定标点，走 Google Fonts `text=` 取单文件变量字体。子集 214 → 267 字，59 → 73 kB。没有它就没法把「模型 / 删除 / 编辑 / 添加提供商」写进 UI（旧约束是“缺字就换措辞”）。
 
-**体积实测（生产包，raw / gzip）：** 主包 286.52 / 97.36 kB，命令面板单独成块 55.54 / 19.78 kB（首次 ⌘K 才加载）。SDK 的弹层基础是主要成本：只挂 Toast 大约 +83 kB，移除它主包回到 203.22 kB。若要再压，下一步是把 Toast 也改成按需（需一个待发队列避免首次提示丢失）。
+- **Toast 改成按需（2026-11-26）**：`Toaster.tsx` 只剩一个极薄的表面，第一次 `toast()` 才 `import('./toast-region')`（那里持有 `createToaster` 与 `ToastRegion`）。提前到达的调用带文案入队，区域挂载后在 `onSettled` 里 flush——首次提示晚一拍，不会丢。主包 344.1 → 253.3 kB（raw，gzip 78.5），toast 基础变成 22.1 / 8.7 kB 的独立块，多数会话根本不会拉。
+- **P6（2026-11-26）**：`styles.css` 删除，`@layer legacy` 不复存在。重置留在 `styles/base.css`（layer 顺序改成 `base, ui-sdk, theme, utilities`——`base` 放最后会盖掉所有 utility）。`.visually-hidden` 与 `::selection` 也在那里，删文件时最容易漏。
+
+**体积实测（生产包，raw / gzip）：** 主包 253.3 / 78.5 kB，命令面板 55.5 / 19.8 kB（首次 ⌘K），toast 22.1 / 8.7 kB（首次提示），3D 场景 520.9 / 132.6 kB（首次进 `/agents` 且通过 WebGL2 预检）。
 
 ## 7. 复审触发条件
 
