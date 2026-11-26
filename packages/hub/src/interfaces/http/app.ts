@@ -17,12 +17,18 @@ import {
   readModelConfig,
   writeModelConfig,
 } from '../../runtime/model-config/model-config'
+import { readTaskFile } from '../../runtime/task-files'
 import type { SandboxProvider } from '../../sandbox/types'
 import { type ErrorCode, HubError } from '../../shared/errors'
 import { hubDir, resolvePiAgentDir } from '../../shared/paths'
 import type { Db } from '../../storage/db'
 import { listAgentPresence } from '../../storage/queries/agent-presence'
-import { getChatThread, listChatMessagesAfter } from '../../storage/queries/chat'
+import {
+  getChatThread,
+  listChatMessagesAfter,
+  listChatMessagesUpdatedAfter,
+  maxChatUpdatedAt,
+} from '../../storage/queries/chat'
 import { listEventsSince } from '../../storage/queries/events'
 import { getTaskEvidence } from '../../storage/queries/evidence'
 import { listTasks } from '../../storage/queries/tasks'
@@ -98,6 +104,18 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     return context.json({ ok: true, tasks: listTasks(db, Number.isFinite(limit) ? limit : 50) })
   })
 
+  app.get('/api/v1/tasks/:id/file', (context) => {
+    const path = context.req.query('path')
+    if (path === undefined || path === '') {
+      return context.json({ code: 'ACTION_REJECTED', message: '缺少 path' }, 400)
+    }
+    try {
+      return context.json({ ok: true, file: readTaskFile(db, context.req.param('id'), path) })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
   app.get('/api/v1/tasks/:id', (context) => {
     const view = getTaskEvidence(db, context.req.param('id'))
     return view === undefined
@@ -170,6 +188,50 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       : context.json({ ok: true, ...value })
   })
 
+  app.patch('/api/v1/chat/threads/:id', async (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const body = await context.req
+      .json<{ title?: unknown; archived?: unknown }>()
+      .catch((): { title?: unknown; archived?: unknown } => ({}))
+    try {
+      let thread = options.chat.getThread(context.req.param('id'))?.thread
+      if (thread === undefined) {
+        return context.json({ code: 'NOT_FOUND', message: 'thread not found' }, 404)
+      }
+      if (typeof body.title === 'string') {
+        thread = options.chat.renameThread(context.req.param('id'), body.title)
+      }
+      if (body.archived === true) {
+        thread = options.chat.archiveThread(context.req.param('id'))
+      }
+      return context.json({ ok: true, thread })
+    } catch (error) {
+      return context.json(
+        {
+          code: 'CHAT_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
+  })
+
+  app.delete('/api/v1/chat/threads/:id', (context) => {
+    if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    try {
+      options.chat.deleteThread(context.req.param('id'))
+      return context.json({ ok: true })
+    } catch (error) {
+      return context.json(
+        {
+          code: 'CHAT_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
+  })
+
   /* 消息增量推送：客户端不再轮询整页。游标形如 `<createdAt>~<messageId>`。 */
   app.get('/api/v1/chat/threads/:id/stream', (context) => {
     const threadId = asChatThreadId(context.req.param('id'))
@@ -185,6 +247,7 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       start(controller) {
         let closed = false
         let lastStatus = ''
+        let updateCursor = ''
         const send = (event: string, data: unknown, id?: number) => {
           const frame = `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
           controller.enqueue(encoder.encode(frame))
@@ -197,6 +260,8 @@ export function createHttpApp(options: HttpAppOptions): Hono {
             for (const entry of batch) {
               send('message', entry.message, entry.seq)
               cursor = entry.seq
+              const stamp = entry.message.updatedAt
+              if (stamp !== undefined && stamp > updateCursor) updateCursor = stamp
             }
             if (batch.length < 100) return
           }
@@ -213,7 +278,16 @@ export function createHttpApp(options: HttpAppOptions): Hono {
         }
         const tick = () => {
           if (closed) return
+          /* 首帧前把所有已存在的消息当成“已读”，只推之后的原地更新。 */
+          if (updateCursor === '') updateCursor = maxChatUpdatedAt(db, threadId) ?? ''
           flush()
+          if (updateCursor !== '') {
+            for (const message of listChatMessagesUpdatedAfter(db, threadId, updateCursor, 100)) {
+              const stamp = message.updatedAt
+              if (stamp !== undefined) updateCursor = stamp > updateCursor ? stamp : updateCursor
+              send('message.update', message)
+            }
+          }
           const thread = getChatThread(db, threadId)
           if (thread === undefined) return close()
           if (thread.status !== lastStatus) {
@@ -266,8 +340,14 @@ export function createHttpApp(options: HttpAppOptions): Hono {
 
   app.post('/api/v1/chat/threads/:id/resume', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
+    const body = await context.req
+      .json<{ agentName?: unknown }>()
+      .catch((): { agentName?: unknown } => ({}))
     try {
-      const thread = await options.chat.resume(context.req.param('id'))
+      const thread = await options.chat.resume(
+        context.req.param('id'),
+        typeof body.agentName === 'string' && body.agentName !== '' ? body.agentName : undefined,
+      )
       return context.json(
         { ok: true, thread, messages: options.chat.getThread(thread.id)?.messages ?? [] },
         202,

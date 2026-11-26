@@ -5,6 +5,8 @@ import { HubError } from '../../shared/errors'
 export interface PiSession {
   prompt(text: string): Promise<void>
   getLastAssistantText(): string | undefined
+  /** 订阅 assistant 的 text/thinking 增量；返回取消函数。 */
+  subscribe?(listener: (delta: { kind: 'text' | 'thinking'; text: string }) => void): () => void
   dispose(): void
 }
 
@@ -62,6 +64,15 @@ export function createPiSessionFactory(options: { agentDir?: string } = {}): PiS
         return {
           prompt: (text) => session.prompt(text),
           getLastAssistantText: () => session.getLastAssistantText(),
+          subscribe: (listener) =>
+            session.subscribe((event) => {
+              if (event.type !== 'message_update') return
+              const delta = event.assistantMessageEvent
+              if (delta.type === 'text_delta') listener({ kind: 'text', text: delta.delta })
+              else if (delta.type === 'thinking_delta') {
+                listener({ kind: 'thinking', text: delta.delta })
+              }
+            }),
           dispose: () => session.dispose(),
         }
       } catch (error) {

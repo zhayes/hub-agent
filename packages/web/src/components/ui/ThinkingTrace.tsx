@@ -26,12 +26,12 @@ export function ThinkingTrace(props: ThinkingTraceProps) {
           size={12}
           class="text-ink-3 transition-transform group-open:rotate-90"
         />
-        <span>{props.title}</span>
+        <span class="shrink-0 whitespace-nowrap">{props.title}</span>
         {props.meta === undefined ? null : (
-          <span class="text-badge font-normal text-ink-3">{props.meta}</span>
+          <span class="shrink-0 text-badge font-normal text-ink-3">{props.meta}</span>
         )}
         {props.summary === undefined ? null : (
-          <span class="ml-1 min-w-0 truncate text-badge font-normal text-ink-3">
+          <span class="ml-1 min-w-0 flex-1 truncate text-badge font-normal text-ink-3">
             {props.summary}
           </span>
         )}

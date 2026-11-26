@@ -1,6 +1,15 @@
-import type { ChatTurn, OrchestratorBrain } from '../../brain/types'
-import type { ChatMessage, ChatThread } from '../../domain/chat'
-import { asChatThreadId, type ChatThreadId } from '../../domain/ids'
+import type { AcpExecutionEvent } from '../../adapters/acp/event'
+import type { BrainDelta, ChatTurn, OrchestratorBrain } from '../../brain/types'
+import type { ChatMessage, ChatProgressStage, ChatThread } from '../../domain/chat'
+import type { Approval } from '../../domain/entities'
+import {
+  asChatMessageId,
+  asChatThreadId,
+  asSubtaskId,
+  asTaskId,
+  asTimestamp,
+  type ChatThreadId,
+} from '../../domain/ids'
 import type { SandboxProvider } from '../../sandbox/types'
 import { HubError } from '../../shared/errors'
 import type { Db } from '../../storage/db'
@@ -8,14 +17,22 @@ import {
   appendChatMessage,
   type ChatThreadSummary,
   createChatThread,
+  deleteChatThread,
   getChatThread,
   listChatMessages,
   listChatThreads,
+  updateChatMessage,
   updateChatThread,
 } from '../../storage/queries/chat'
+import { loadState } from '../../storage/queries/state'
+import { appendEvent } from '../../storage/write/events'
+import { runAcpWithRetry } from '../acp-retry'
 import { listAgents, resolveAgent, setAgentStatus } from '../agent-registry'
 import { runGoalWithBrain } from '../brain-run'
 import { answerClarification } from '../clarify'
+import { failTask } from '../recovery/fail'
+import { resumeExecution } from '../resume-execution'
+import { completeTaskAfterDelivery } from '../workspace/finalize'
 
 export interface ChatServiceOptions {
   db: Db
@@ -47,6 +64,79 @@ const HISTORY_CHARS = 6_000
  * 需要用户补充信息时落 Clarification，由 UI 渲染成可点选项。
  * 只有真正执行时才建 Task，不存在“问一句话也必须建任务”的路径。
  */
+function toolDetail(raw: unknown): string | undefined {
+  const value = raw as
+    | {
+        kind?: string
+        rawInput?: Record<string, unknown>
+        content?: Array<{ content?: { text?: string } }>
+      }
+    | undefined
+  const input = value?.rawInput ?? {}
+  const command = typeof input.command === 'string' ? input.command : undefined
+  const path =
+    typeof (input.path ?? input.file_path ?? input.filePath) === 'string'
+      ? String(input.path ?? input.file_path ?? input.filePath)
+      : undefined
+  const output = (value?.content ?? [])
+    .map((item) => item.content?.text)
+    .filter((text): text is string => typeof text === 'string' && text !== '')
+    .join('\n')
+  const payload = {
+    ...(command === undefined ? {} : { command }),
+    ...(path === undefined ? {} : { path }),
+    ...(value?.kind === undefined ? {} : { kind: value.kind }),
+    ...(output === '' ? {} : { output: output.slice(0, 8_000) }),
+  }
+  return Object.keys(payload).length === 0 ? undefined : JSON.stringify(payload)
+}
+
+function mergeToolDetail(
+  previous: string | undefined,
+  next: string | undefined,
+): string | undefined {
+  if (previous === undefined) return next
+  if (next === undefined) return previous
+  try {
+    return JSON.stringify({
+      ...(JSON.parse(previous) as Record<string, unknown>),
+      ...(JSON.parse(next) as Record<string, unknown>),
+    })
+  } catch {
+    return next
+  }
+}
+
+function toolLabel(raw: unknown): string {
+  const value = raw as { kind?: string; rawInput?: Record<string, unknown> } | undefined
+  const input = value?.rawInput
+  if (input !== undefined) {
+    const command = input.command ?? input.cmd
+    if (typeof command === 'string' && command.trim() !== '') {
+      return `执行 ${command.split('\n')[0]?.slice(0, 80) ?? ''}`
+    }
+    const path = input.path ?? input.file_path ?? input.filePath
+    if (typeof path === 'string' && path !== '') {
+      const verb = value?.kind === 'edit' ? '编辑' : value?.kind === 'read' ? '读取' : '访问'
+      return `${verb} ${path}`
+    }
+  }
+  switch (value?.kind) {
+    case 'execute':
+      return '执行命令'
+    case 'read':
+      return '读取文件'
+    case 'edit':
+      return '编辑文件'
+    case 'search':
+      return '搜索'
+    case 'fetch':
+      return '抓取'
+    default:
+      return '工具调用'
+  }
+}
+
 export class ChatService {
   private readonly active = new Set<string>()
 
@@ -74,6 +164,46 @@ export class ChatService {
         limit: page.limit ?? 100,
         ...(page.before === undefined ? {} : { before: page.before }),
       }),
+    }
+  }
+
+  renameThread(id: string, title: string): ChatThread {
+    const threadId = asChatThreadId(id)
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
+    }
+    const value = title.trim().slice(0, 120)
+    if (value.length === 0) {
+      throw new HubError('ACTION_REJECTED', 'thread title is empty', { threadId: id })
+    }
+    updateChatThread(this.options.db, threadId, { title: value })
+    return getChatThread(this.options.db, threadId) ?? thread
+  }
+
+  /** 归档：从侧栏消失，消息保留；运行中的 thread 不允许归档，避免写一半没人看。 */
+  archiveThread(id: string): ChatThread {
+    const threadId = asChatThreadId(id)
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
+    }
+    if (this.active.has(id)) {
+      throw new HubError('ACTION_REJECTED', 'thread already has an active run', { threadId: id })
+    }
+    if (thread.archivedAt === undefined) {
+      updateChatThread(this.options.db, threadId, { archivedAt: new Date().toISOString() })
+    }
+    return getChatThread(this.options.db, threadId) ?? thread
+  }
+
+  deleteThread(id: string): void {
+    const threadId = asChatThreadId(id)
+    if (this.active.has(id)) {
+      throw new HubError('ACTION_REJECTED', 'thread already has an active run', { threadId: id })
+    }
+    if (!deleteChatThread(this.options.db, threadId)) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
     }
   }
 
@@ -148,12 +278,126 @@ export class ChatService {
     if (agent === undefined) {
       throw new HubError('NO_AGENT_AVAILABLE', '没有可用的 Agent', { threadId: id })
     }
+    const waiting = this.waitingSubtask(thread)
+    if (waiting !== undefined) {
+      this.active.add(id)
+      updateChatThread(this.options.db, threadId, { status: 'active' })
+      void this.continueWaitingTask(
+        threadId,
+        waiting.taskId,
+        String(thread.goalId ?? ''),
+        waiting.subtaskId,
+        answer,
+        agent.name,
+      )
+      return getChatThread(this.options.db, threadId) ?? thread
+    }
     this.start(threadId, answer, agent.name, userMessage, conversation)
     return getChatThread(this.options.db, threadId) ?? thread
   }
 
-  /** 审批后继续：重跑最后一条用户消息（新 attempt，见 ADR 0018）。 */
-  async resume(id: string): Promise<ChatThread> {
+  private waitingSubtask(thread: ChatThread): { taskId: string; subtaskId: string } | undefined {
+    if (thread.taskId === undefined) return undefined
+    const state = loadState(this.options.db)
+    const task = state.tasks[thread.taskId]
+    if (task === undefined || task.status !== 'waiting_input') return undefined
+    const subtask = Object.values(state.subtasks).find(
+      (item) => item.taskId === task.id && item.status === 'waiting_input',
+    )
+    return subtask === undefined ? undefined : { taskId: task.id, subtaskId: subtask.id }
+  }
+
+  /**
+   * 澄清后的继续：沿用同一 Task/Subtask，只对等待中的子任务开新 attempt。
+   * 不新建 Goal、不重新分解计划；能复用现场就复用，Agent session 结束属于已知边界。
+   */
+  private async continueWaitingTask(
+    threadId: ChatThreadId,
+    taskId: string,
+    goalId: string,
+    subtaskId: string,
+    answer: string,
+    agentName: string,
+  ): Promise<void> {
+    const db = this.options.db
+    const sink = this.createEventSink(threadId, agentName)
+    try {
+      let state = loadState(db)
+      const at = (): ReturnType<typeof asTimestamp> => asTimestamp(new Date().toISOString())
+      state = appendEvent(db, state, {
+        type: 'subtask.status',
+        subtaskId: asSubtaskId(subtaskId),
+        to: 'running',
+        at: at(),
+      }).state
+      state = appendEvent(db, state, {
+        type: 'task.status',
+        taskId: asTaskId(taskId),
+        to: 'running',
+        at: at(),
+      }).state
+      appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: 'progress',
+        stage: 'dispatching',
+        content: `继续任务（沿用 task ${taskId.slice(-6)}，只重跑等待中的子任务）。`,
+      })
+      const subtask = state.subtasks[asSubtaskId(subtaskId)]
+      const agent = resolveAgent(db, agentName)
+      const result = await runAcpWithRetry({
+        db,
+        provider: this.options.provider,
+        agent,
+        goalId,
+        taskId,
+        subtaskId,
+        objective: `${subtask?.description ?? ''}
+
+用户补充：${answer}`,
+        worktree: this.options.worktree ?? process.cwd(),
+        checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+        clientVersion: this.options.clientVersion,
+        onEvent: sink.onEvent,
+      })
+      if (result.ok) {
+        completeTaskAfterDelivery(db, taskId, goalId)
+      } else {
+        failTask(db, { taskId, goalId, subtaskId })
+      }
+      appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: result.ok ? 'result' : 'error',
+        content: result.ok
+          ? '继续执行完成（沿用同一 task，未重新计划）。'
+          : `继续执行没有通过（${result.stopReason}），任务停在失败。`,
+        taskId,
+        goalId,
+      })
+      updateChatThread(db, threadId, {
+        status: result.ok ? 'completed' : 'failed',
+        taskId,
+        goalId,
+      })
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: 'error',
+        content: `继续任务失败：${message}`,
+      })
+      failTask(db, { taskId, goalId, subtaskId })
+      updateChatThread(db, threadId, { status: 'failed' })
+    } finally {
+      sink.flush()
+      this.active.delete(threadId)
+    }
+  }
+
+  /** 审批/澄清后继续；agentName 可换一个 Agent 重跑。 */
+  async resume(id: string, agentName?: string): Promise<ChatThread> {
     const threadId = asChatThreadId(id)
     const thread = getChatThread(this.options.db, threadId)
     if (thread === undefined) {
@@ -162,19 +406,94 @@ export class ChatService {
     if (this.active.has(id)) {
       throw new HubError('ACTION_REJECTED', 'thread already has an active run', { threadId: id })
     }
+    const exact = this.exactResumeApproval(threadId)
+    if (exact !== undefined) {
+      this.active.add(id)
+      try {
+        return await this.finishExactResume(threadId, exact)
+      } finally {
+        this.active.delete(id)
+      }
+    }
     const messages = listChatMessages(this.options.db, threadId)
     const index = messages.findLastIndex((message) => message.role === 'user')
     const lastUser = index === -1 ? undefined : messages[index]
     if (lastUser === undefined) {
       throw new HubError('ACTION_REJECTED', 'thread has no user message', { threadId: id })
     }
-    const agent = this.pickAgent()
+    const agent = this.pickAgent(agentName)
     if (agent === undefined) {
       throw new HubError('NO_AGENT_AVAILABLE', '没有可用的 Agent', { threadId: id })
     }
     const conversation = this.turnsOf(messages.slice(0, index))
     this.start(threadId, lastUser.content, agent.name, lastUser, conversation)
     return getChatThread(this.options.db, threadId) ?? thread
+  }
+
+  /** 已批准、且执行还停在 waiting_permission：可以原地续跑，不必重开任务。 */
+  private exactResumeApproval(threadId: ChatThreadId): Approval | undefined {
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined || thread.taskId === undefined) return undefined
+    const state = loadState(this.options.db)
+    return Object.values(state.approvals).find(
+      (approval) =>
+        approval.taskId === thread.taskId &&
+        approval.status === 'approved' &&
+        approval.executionId !== undefined &&
+        state.executions[approval.executionId]?.status === 'waiting_permission',
+    )
+  }
+
+  private async finishExactResume(threadId: ChatThreadId, approval: Approval): Promise<ChatThread> {
+    const db = this.options.db
+    updateChatThread(db, threadId, { status: 'active' })
+    appendChatMessage(db, {
+      threadId,
+      role: 'assistant',
+      kind: 'progress',
+      stage: 'waiting',
+      content: '审批已通过：续跑同一 execution 的验收（不重跑 Agent）。',
+    })
+    try {
+      const outcome = await resumeExecution({
+        db,
+        provider: this.options.provider,
+        approvalId: approval.id,
+      })
+      appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: outcome.ok ? 'result' : 'error',
+        content: outcome.ok
+          ? '验收通过，任务已完成（沿用同一 execution）。'
+          : `验收仍未通过（${outcome.verdict}），任务停在失败；可以重新执行。`,
+        taskId: outcome.taskId,
+        goalId: outcome.goalId,
+      })
+      updateChatThread(db, threadId, {
+        status: outcome.ok ? 'completed' : 'failed',
+        taskId: outcome.taskId,
+        goalId: outcome.goalId,
+      })
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: 'error',
+        content: `无法精确续跑：${message}`,
+      })
+      updateChatThread(db, threadId, { status: 'failed' })
+    }
+    return getChatThread(db, threadId) ?? (await this.requireThread(threadId))
+  }
+
+  private async requireThread(threadId: ChatThreadId): Promise<ChatThread> {
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${threadId}`, { threadId })
+    }
+    return thread
   }
 
   private pickAgent(name?: string) {
@@ -219,6 +538,302 @@ export class ChatService {
     return turns.reduce((total, turn) => total + turn.content.length, 0)
   }
 
+  /**
+   * Chat 首轮 Brain 的逐字输出。
+   * - 模型按对话模式输出自然语言时，边写边更新同一条消息；
+   * - 一旦开头像 JSON（模型没遵守协议），停止流式，等解析结果，避免把 JSON 喷到界面；
+   * - 回合结束仍没有 reply（说明只是"我来处理"的前言）时，降级为 thinking 步骤。
+   */
+  private createBrainStream(threadId: ChatThreadId, analysisId: string) {
+    const db = this.options.db
+    let textId: string | undefined
+    let text = ''
+    let thought = ''
+    let thoughtVisible = false
+    let suppressed = false
+    let done = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const clearTimer = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+    }
+
+    const flush = (): void => {
+      clearTimer()
+      try {
+        if (thoughtVisible) {
+          updateChatMessage(db, asChatMessageId(analysisId), {
+            content: thought.slice(0, 4_000),
+          })
+        }
+        if (textId !== undefined) {
+          updateChatMessage(db, asChatMessageId(textId), { content: text.slice(0, 20_000) })
+        }
+      } catch {
+        // 流式展示失败不影响回合结果。
+      }
+    }
+
+    const schedule = (): void => {
+      if (timer === undefined) timer = setTimeout(flush, 80)
+    }
+
+    const onDelta = (delta: BrainDelta): void => {
+      if (done) return
+      try {
+        if (delta.kind === 'thinking') {
+          /* 已经转成回答行后，迟到的思考不能覆盖正文。 */
+          if (textId === analysisId) return
+          thought += delta.text
+          if (!thoughtVisible) {
+            thoughtVisible = true
+            updateChatMessage(db, asChatMessageId(analysisId), {
+              stage: 'thought',
+              content: thought.slice(0, 4_000),
+            })
+          } else {
+            schedule()
+          }
+          return
+        }
+        text += delta.text
+        if (suppressed) return
+        if (textId === undefined) {
+          if (/^\s*(\{|```)/.test(text.slice(0, 24))) {
+            suppressed = true
+            return
+          }
+          if (thoughtVisible) {
+            const created = appendChatMessage(db, {
+              threadId,
+              role: 'assistant',
+              kind: 'text',
+              content: text,
+            })
+            textId = created.id
+          } else {
+            /* 还没有思考内容：复用“正在分析…”那一行，避免多出一条空步骤。 */
+            textId = analysisId
+            updateChatMessage(db, asChatMessageId(analysisId), {
+              kind: 'text',
+              stage: undefined,
+              content: text,
+            })
+          }
+        }
+        schedule()
+      } catch {
+        // 同上
+      }
+    }
+
+    const finish = (finalText: string | undefined): { streamed: boolean; messageId?: string } => {
+      clearTimer()
+      if (done) {
+        return messageIdOf(textId)
+      }
+      done = true
+      try {
+        if (finalText !== undefined) {
+          if (textId !== undefined) {
+            updateChatMessage(db, asChatMessageId(textId), { content: finalText })
+            return { streamed: true, messageId: textId }
+          }
+          if (!thoughtVisible) {
+            updateChatMessage(db, asChatMessageId(analysisId), {
+              kind: 'text',
+              stage: undefined,
+              content: finalText,
+            })
+            return { streamed: true, messageId: analysisId }
+          }
+          return { streamed: false }
+        }
+        if (textId !== undefined) {
+          /* 有前言的回合最后转人工/审批：把前言收回 thinking，别当最终回答。 */
+          updateChatMessage(db, asChatMessageId(textId), {
+            kind: 'progress',
+            stage: 'thinking',
+            content: text.slice(0, 4_000),
+          })
+          return { streamed: true, messageId: textId }
+        }
+        if (!thoughtVisible) {
+          updateChatMessage(db, asChatMessageId(analysisId), {
+            stage: 'thinking',
+            content: '已进入执行阶段，进度见下方步骤。',
+          })
+        }
+      } catch {
+        // ignore
+      }
+      return messageIdOf(textId)
+    }
+
+    const messageIdOf = (id: string | undefined): { streamed: boolean; messageId?: string } =>
+      id === undefined ? { streamed: false } : { streamed: true, messageId: id }
+
+    const dispose = (): void => {
+      done = true
+      clearTimer()
+    }
+
+    return { onDelta, finish, dispose }
+  }
+
+  /**
+   * 把 ACP 的 session/update 折叠成可读的进度行：
+   * 工具调用一条（原地更新状态），思考/输出各一条（最多 450ms 刷一次）。
+   * 高频 delta 直接落库会写爆 SQLite，所以按时间片合并。
+   */
+  private createEventSink(threadId: ChatThreadId, agentName: string) {
+    const db = this.options.db
+    const tools = new Map<string, { messageId: string; title: string; detail?: string }>()
+    let agentOutput = ''
+    let outputFinalized = false
+    let afterTool = false
+    let thoughtId: string | undefined
+    let thoughtText = ''
+    let outputId: string | undefined
+    let outputText = ''
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const append = (stage: ChatProgressStage, text: string, detail?: string): string =>
+      appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: 'progress',
+        content: text,
+        agentName,
+        stage,
+        ...(detail === undefined ? {} : { detail }),
+      }).id
+
+    const flush = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      try {
+        if (thoughtId !== undefined) {
+          updateChatMessage(db, asChatMessageId(thoughtId), {
+            content: thoughtText.slice(0, 6_000),
+          })
+        }
+        if (outputId !== undefined && !outputFinalized) {
+          updateChatMessage(db, asChatMessageId(outputId), {
+            content: outputText.slice(0, 6_000),
+          })
+        }
+      } catch {
+        // 过程展示失败不能影响任务执行。
+      }
+    }
+
+    const schedule = (): void => {
+      if (timer !== undefined) return
+      timer = setTimeout(flush, 80)
+    }
+
+    const onEvent = (event: AcpExecutionEvent): void => {
+      try {
+        handle(event)
+      } catch {
+        // 同上：事件折叠是旁路，不能拖垮 ACP。
+      }
+    }
+
+    const handle = (event: AcpExecutionEvent): void => {
+      switch (event.kind) {
+        case 'tool.call': {
+          afterTool = true
+          const title = event.title ?? toolLabel(event.raw)
+          const detail = toolDetail(event.raw)
+          const id = append(
+            'tool',
+            `${title}${event.status === undefined ? '' : ` · ${event.status}`}`,
+            detail,
+          )
+          tools.set(event.toolCallId, {
+            messageId: id,
+            title,
+            ...(detail === undefined ? {} : { detail }),
+          })
+          break
+        }
+        case 'tool.call.update': {
+          afterTool = true
+          const entry = tools.get(event.toolCallId)
+          if (entry === undefined) break
+          const title = event.title ?? entry.title
+          const detail = mergeToolDetail(entry.detail, toolDetail(event.raw))
+          tools.set(event.toolCallId, {
+            messageId: entry.messageId,
+            title,
+            ...(detail === undefined ? {} : { detail }),
+          })
+          updateChatMessage(db, asChatMessageId(entry.messageId), {
+            content: `${title}${event.status === undefined ? '' : ` · ${event.status}`}`,
+            ...(detail === undefined ? {} : { detail }),
+          })
+          break
+        }
+        case 'message.delta': {
+          if (event.role === 'thought') {
+            if (thoughtId === undefined) {
+              thoughtText = event.text
+              thoughtId = append('thought', thoughtText)
+            } else {
+              thoughtText += event.text
+              schedule()
+            }
+          } else if (event.role === 'agent') {
+            if (afterTool && agentOutput !== '') agentOutput += '\n\n'
+            afterTool = false
+            agentOutput += event.text
+            if (outputId === undefined) {
+              outputText = event.text
+              outputId = append('output', outputText)
+            } else {
+              outputText += event.text
+              schedule()
+            }
+          }
+          break
+        }
+        case 'process.exit': {
+          append(
+            'failed',
+            `ACP 进程退出（${event.reason}${event.code === null ? '' : ` · code ${event.code}`}）`,
+          )
+          break
+        }
+        case 'plan.updated': {
+          const text = event.entries
+            .map((entry) => entry.content)
+            .join(' / ')
+            .slice(0, 240)
+          if (text !== '') append('planned', `计划：${text}`)
+          break
+        }
+        default:
+          break
+      }
+    }
+
+    /** 成功的任务把 Agent 的最终输出当作回答，而不是只报一个任务编号。 */
+    const finalizeOutput = (): { id: string; text: string } | undefined => {
+      outputFinalized = true
+      const text = agentOutput.trim()
+      return outputId === undefined || text === '' ? undefined : { id: outputId, text }
+    }
+
+    return { onEvent, flush, finalizeOutput }
+  }
+
   private async run(
     threadId: ChatThreadId,
     objective: string,
@@ -227,9 +842,21 @@ export class ChatService {
     conversation: ChatTurn[],
   ): Promise<void> {
     const db = this.options.db
+    let sink: ReturnType<ChatService['createEventSink']> | undefined
+    let brainStream: ReturnType<ChatService['createBrainStream']> | undefined
+    let stderrTail: string[] = []
     try {
       const agent = resolveAgent(db, agentName)
       const agents = listAgents(db)
+      const sink = this.createEventSink(threadId, agentName)
+      const analysis = appendChatMessage(db, {
+        threadId,
+        role: 'assistant',
+        kind: 'progress',
+        stage: 'thinking',
+        content: '正在分析你的请求…',
+      })
+      brainStream = this.createBrainStream(threadId, analysis.id)
       const result = await runGoalWithBrain({
         db,
         provider: this.options.provider,
@@ -238,6 +865,7 @@ export class ChatService {
         availableAgents: agents,
         objective,
         conversation,
+        onBrainDelta: brainStream.onDelta,
         worktree: this.options.worktree ?? process.cwd(),
         checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
         clientVersion: this.options.clientVersion,
@@ -248,8 +876,14 @@ export class ChatService {
             role: 'assistant',
             kind: 'progress',
             content: step.text,
+            stage: step.stage,
             ...(step.agent === undefined ? {} : { agentName: step.agent }),
           })
+        },
+        onEvent: sink.onEvent,
+        onStderr: (line) => {
+          if (line.trim() === '') return
+          stderrTail = [...stderrTail.slice(-14), line]
         },
         onGoalCreated: (goalId) => {
           updateChatThread(db, threadId, { goalId })
@@ -275,7 +909,37 @@ export class ChatService {
         ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
         ...(result.goalId === undefined ? {} : { goalId: result.goalId }),
       })
-      if (result.approval !== undefined) {
+      /* 任务成功时，最终回答用 Agent 自己的输出，而不是 Brain 的“任务完成/编号”总结。 */
+      const produced = result.ok ? sink.finalizeOutput() : undefined
+      if (produced !== undefined) {
+        brainStream?.finish(undefined)
+        /* 流式输出行收成一句提示，完整结果追加到回合末尾（保证是最后一条回答）。 */
+        updateChatMessage(db, asChatMessageId(produced.id), {
+          kind: 'progress',
+          stage: 'output',
+          content: 'Agent 输出已生成，完整内容见下方回答。',
+        })
+        appendChatMessage(db, {
+          threadId,
+          role: 'assistant',
+          kind: 'text',
+          content: produced.text.slice(0, 20_000),
+          ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
+          ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
+        })
+      }
+      /* 有卡/无 reply 时，流式文本只是前言：收起成 thinking 步骤。 */
+      if (
+        produced === undefined &&
+        (result.reply === undefined ||
+          result.approval !== undefined ||
+          result.clarification !== undefined)
+      ) {
+        brainStream?.finish(undefined)
+      }
+      if (produced !== undefined) {
+        /* 已用 Agent 输出作为回答，跳过 Brain 总结与“任务完成”卡片。 */
+      } else if (result.approval !== undefined) {
         appendChatMessage(db, {
           threadId,
           role: 'assistant',
@@ -296,27 +960,31 @@ export class ChatService {
           clarificationId: result.clarification.id,
         })
       } else if (result.reply !== undefined) {
-        appendChatMessage(db, {
-          threadId,
-          role: 'assistant',
-          kind: 'text',
-          content: result.reply,
-          ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
-          ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
-        })
+        const streamed = brainStream?.finish(result.reply) ?? { streamed: false }
+        if (!streamed.streamed) {
+          appendChatMessage(db, {
+            threadId,
+            role: 'assistant',
+            kind: 'text',
+            content: result.reply,
+            ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
+            ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
+          })
+        }
       } else {
         appendChatMessage(db, {
           threadId,
           role: 'assistant',
           kind: result.ok ? 'result' : 'error',
           content: result.ok
-            ? `任务完成：${result.taskId ?? ''}`
+            ? `任务已完成（验收通过）。详情见任务 ${result.taskId ?? ''}`
             : `任务没有完成（${result.stopReason}）${result.taskId === undefined ? '' : `，任务 ${result.taskId} 还留着现场`}。`,
           ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
           ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
         })
       }
     } catch (cause) {
+      brainStream?.finish(undefined)
       const message = cause instanceof Error ? cause.message : String(cause)
       /* Agent 需要登录不是“任务失败”，是可操作的等待态：卡片里直接授权后重试。 */
       if (/authentication required|not authenticated|login required|需要登录/i.test(message)) {
@@ -331,14 +999,24 @@ export class ChatService {
         })
       } else {
         updateChatThread(db, threadId, { status: 'failed' })
+        const detail = stderrTail.length === 0 ? '' : `\n\n${stderrTail.join('\n')}`
+        const sandboxIssue = stderrTail.some((line) =>
+          /sandbox_apply|Operation not permitted/i.test(line),
+        )
         appendChatMessage(db, {
           threadId,
           role: 'assistant',
           kind: 'error',
-          content: message,
+          content: `${message}${detail}${
+            sandboxIssue
+              ? '\n\n提示：沙箱无法应用，HubAgent 很可能本身运行在另一个沙箱里（例如从 DSH 终端启动）。请从系统终端重启 pnpm ha web。'
+              : ''
+          }`,
         })
       }
     } finally {
+      sink?.flush()
+      brainStream?.dispose()
       this.active.delete(userMessage.threadId)
     }
   }

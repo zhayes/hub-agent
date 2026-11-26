@@ -9,6 +9,11 @@ import { MIGRATION_007_CHAT_APPROVAL } from './migrations/007-chat-approval'
 import { MIGRATION_008_CHAT_CLARIFICATION } from './migrations/008-chat-clarification'
 import { MIGRATION_009_AGENT_CATALOG } from './migrations/009-agent-catalog'
 import { MIGRATION_010_CHAT_AGENT } from './migrations/010-chat-agent'
+import { MIGRATION_011_CHAT_ARCHIVE } from './migrations/011-chat-archive'
+import { MIGRATION_012_CHAT_STREAM } from './migrations/012-chat-stream'
+import { MIGRATION_013_EXECUTION_RESUME } from './migrations/013-execution-resume'
+import { MIGRATION_014_CHAT_TOOL_DETAIL } from './migrations/014-chat-tool-detail'
+import { MIGRATION_015_DSH_PERMISSION_MODE } from './migrations/015-dsh-permission-mode'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -22,6 +27,11 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_008_CHAT_CLARIFICATION,
   MIGRATION_009_AGENT_CATALOG,
   MIGRATION_010_CHAT_AGENT,
+  MIGRATION_011_CHAT_ARCHIVE,
+  MIGRATION_012_CHAT_STREAM,
+  MIGRATION_013_EXECUTION_RESUME,
+  MIGRATION_014_CHAT_TOOL_DETAIL,
+  MIGRATION_015_DSH_PERMISSION_MODE,
 ]
 
 export interface MigrateResult {

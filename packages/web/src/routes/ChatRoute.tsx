@@ -29,6 +29,7 @@ export function ChatRoute() {
       tasks={app.tasks()}
       onOpenThread={(id) => navigate(`/chat/${id}`)}
       onOpenTask={(id) => navigate(`/tasks/${id}`)}
+      onClearThread={() => navigate('/chat')}
     />
   )
 }

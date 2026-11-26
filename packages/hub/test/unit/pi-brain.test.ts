@@ -39,13 +39,23 @@ class FakeFactory implements PiSessionFactory {
   text =
     '{"actions":[{"type":"revise_plan","subtasks":[{"title":"修 bug","description":"修 bug","requiredCapabilities":[]}],"reason":"单子任务"}]}'
 
+  deltas: { kind: 'text' | 'thinking'; text: string }[] = []
+
   async create(input: CreatePiSessionInput): Promise<PiSession> {
     this.inputs.push(input)
+    let listener: ((delta: { kind: 'text' | 'thinking'; text: string }) => void) | undefined
     return {
       prompt: async (value) => {
         this.prompts.push(value)
+        for (const delta of this.deltas) listener?.(delta)
       },
       getLastAssistantText: () => this.text,
+      subscribe: (next) => {
+        listener = next
+        return () => {
+          listener = undefined
+        }
+      },
       dispose: () => {
         this.disposed += 1
       },
@@ -89,6 +99,21 @@ describe('PiBrain：官方 Pi SDK 适配器', () => {
 })
 
 describe('createBrainFromEnv', () => {
+  it('把 text/thinking 增量转给 sink，并在结束时退订', async () => {
+    const factory = new FakeFactory()
+    factory.deltas = [
+      { kind: 'thinking', text: '想一下' },
+      { kind: 'text', text: '你' },
+      { kind: 'text', text: '好' },
+    ]
+    const received: string[] = []
+    await new PiBrain({ factory }).step(input(), (delta) =>
+      received.push(`${delta.kind}:${delta.text}`),
+    )
+    expect(received).toEqual(['thinking:想一下', 'text:你', 'text:好'])
+    expect(factory.disposed).toBe(1)
+  })
+
   it('默认 PiBrain；显式 scripted 才降级', () => {
     expect(createBrainFromEnv({}).constructor.name).toBe('PiBrain')
     expect(createBrainFromEnv({ HUBAGENT_BRAIN_MODE: 'scripted' }).constructor.name).toBe(

@@ -34,6 +34,7 @@ import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
 import { hubDir } from '../shared/paths'
 import type { Db } from '../storage/db'
+import { saveExecutionResume } from '../storage/queries/execution-resume'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
 import { type AgentRecord, markAgentSeen } from './agent-registry'
@@ -181,7 +182,10 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       command: agent.command,
       // cwd 由 AgentHost 强制；写授权包含 worktree。
       sandbox: {
-        allowedWrite: options.allowedWrite ?? [],
+        /* Agent 自己的状态目录（如 dsh 的 ~/.dsh）必须可写，否则 profile boot 直接退出。 */
+        allowedWrite: [
+          ...new Set([...(options.allowedWrite ?? []), ...(agent.allowedWrite ?? [])]),
+        ],
         networkMode,
         ...(options.allowedDomains === undefined ? {} : { allowedDomains: options.allowedDomains }),
       },
@@ -439,6 +443,12 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       }
     }
 
+    /* 记录验收现场：审批通过后可以原地重跑验收，而不是重开任务。 */
+    saveExecutionResume(options.db, {
+      executionId,
+      worktree,
+      checks: options.checks ?? [],
+    })
     const verification = await runVerification({
       executionId,
       worktree,

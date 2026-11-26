@@ -78,6 +78,11 @@ describe('数据库与迁移', () => {
         '008-chat-clarification',
         '009-agent-catalog',
         '010-chat-agent',
+        '011-chat-archive',
+        '012-chat-stream',
+        '013-execution-resume',
+        '014-chat-tool-detail',
+        '015-dsh-permission-mode',
       ])
 
       const second = migrate(db)
@@ -93,6 +98,11 @@ describe('数据库与迁移', () => {
         '008-chat-clarification',
         '009-agent-catalog',
         '010-chat-agent',
+        '011-chat-archive',
+        '012-chat-stream',
+        '013-execution-resume',
+        '014-chat-tool-detail',
+        '015-dsh-permission-mode',
       ])
     } finally {
       db.close()

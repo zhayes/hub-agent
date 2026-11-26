@@ -18,7 +18,10 @@ import {
   getChatThread,
   listChatMessages,
   listChatMessagesAfter,
+  listChatMessagesUpdatedAfter,
   listChatThreads,
+  maxChatUpdatedAt,
+  updateChatMessage,
   updateChatThread,
 } from '../../src/storage/queries/chat'
 
@@ -42,6 +45,28 @@ const provider = {
   },
   dispose: async () => undefined,
 } as unknown as SandboxProvider
+
+class StreamingBrain implements OrchestratorBrain {
+  private readonly chunks: string[]
+  private readonly action: BrainAction
+
+  constructor(chunks: string[], action: BrainAction) {
+    this.chunks = chunks
+    this.action = action
+  }
+
+  async step(
+    _input: BrainInput,
+    sink?: (delta: { kind: 'text' | 'thinking'; text: string }) => void,
+  ) {
+    for (const chunk of this.chunks) sink?.({ kind: 'text', text: chunk })
+    return [this.action]
+  }
+
+  async explain(): Promise<DecisionRationale[]> {
+    return []
+  }
+}
 
 class RecordingBrain implements OrchestratorBrain {
   readonly inputs: BrainInput[] = []
@@ -204,6 +229,87 @@ describe('chat storage', () => {
     ])
   })
 
+  it('回复逐字流入同一条消息，不产生重复气泡', async () => {
+    const db = database()
+    addAgent(db, { name: 'mock', command: 'mock-acp' })
+    const chat = new ChatService({
+      db,
+      provider,
+      clientVersion: 'test',
+      brain: new StreamingBrain(['你', '好', '，', '在的'], { type: 'reply', text: '你好，在的' }),
+    })
+    const thread = chat.createThread({})
+    await chat.postMessage(thread.id, { text: 'hi' })
+    await waitFor(() => getChatThread(db, thread.id)?.status === 'completed')
+
+    const messages = chat.getThread(thread.id)?.messages ?? []
+    expect(messages.map((message) => message.kind)).toEqual(['text', 'text'])
+    expect(messages[1]?.content).toBe('你好，在的')
+    expect(messages[1]?.updatedAt).toBeDefined()
+  })
+
+  it('只输出前言就转人工：流式内容收进 thinking，不当成最终回答', async () => {
+    const db = database()
+    addAgent(db, { name: 'mock', command: 'mock-acp' })
+    const chat = new ChatService({
+      db,
+      provider,
+      clientVersion: 'test',
+      brain: new StreamingBrain(['我', '先', '确认', '一下'], {
+        type: 'request_human',
+        question: '继续吗？',
+        options: ['继续', '停'],
+      }),
+    })
+    const thread = chat.createThread({})
+    await chat.postMessage(thread.id, { text: '做点事' })
+    await waitFor(() => getChatThread(db, thread.id)?.status === 'waiting')
+
+    const messages = chat.getThread(thread.id)?.messages ?? []
+    const thinking = messages.find((message) => message.stage === 'thinking')
+    expect(thinking?.content).toBe('我先确认一下')
+    expect(thinking?.kind).toBe('progress')
+    expect(messages.some((message) => message.kind === 'clarification')).toBe(true)
+    expect(messages.filter((message) => message.kind === 'text')).toHaveLength(1)
+  })
+
+  it('模型吐 JSON 时不把 JSON 流到界面', async () => {
+    const db = database()
+    addAgent(db, { name: 'mock', command: 'mock-acp' })
+    const chat = new ChatService({
+      db,
+      provider,
+      clientVersion: 'test',
+      brain: new StreamingBrain(['{"type":"reply","text":"hi"}'], { type: 'reply', text: 'hi' }),
+    })
+    const thread = chat.createThread({})
+    await chat.postMessage(thread.id, { text: 'hi' })
+    await waitFor(() => getChatThread(db, thread.id)?.status === 'completed')
+
+    const messages = chat.getThread(thread.id)?.messages ?? []
+    expect(messages[1]?.content).toBe('hi')
+    expect(messages.some((message) => message.content.includes('"type"'))).toBe(false)
+  })
+
+  it('重命名/归档/删除：归档不出现在列表，删除清掉消息', async () => {
+    const db = database()
+    const chat = new ChatService({ db, provider, clientVersion: 'test' })
+    const kept = chat.createThread({ title: 'Kept' })
+    const archived = chat.createThread({ title: 'Archived' })
+    appendChatMessage(db, { threadId: archived.id, role: 'user', kind: 'text', content: 'hi' })
+
+    expect(chat.renameThread(kept.id, 'Renamed').title).toBe('Renamed')
+    chat.archiveThread(archived.id)
+    expect(chat.listThreads().map((item) => item.id)).toEqual([kept.id])
+
+    chat.deleteThread(kept.id)
+    expect(chat.listThreads()).toHaveLength(0)
+    expect(listChatMessages(db, kept.id)).toHaveLength(0)
+    await expect(chat.postMessage(kept.id, { text: 'hello' })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    })
+  })
+
   it('需要澄清时停在 waiting，选项答案继续对话且不建任务', async () => {
     const db = database()
     addAgent(db, { name: 'mock', command: 'mock-acp' })
@@ -248,6 +354,34 @@ describe('chat storage', () => {
   })
 })
 
+describe('chat streaming', () => {
+  it('progress 行原地更新，并按 updated_at 水位增量续传', () => {
+    const db = database()
+    const thread = createChatThread(db, { title: 'Streaming' })
+    const step = appendChatMessage(db, {
+      threadId: thread.id,
+      role: 'assistant',
+      kind: 'progress',
+      content: '工具：读取文件',
+      stage: 'tool',
+      agentName: 'dsh',
+    })
+    expect(step.stage).toBe('tool')
+
+    const watermark = maxChatUpdatedAt(db, thread.id)
+    expect(watermark).toBeDefined()
+
+    // 同毫秒内更新也要能读到（>= 水位线之外的更新靠时间戳比较）
+    const later = new Date(Date.now() + 5).toISOString()
+    updateChatMessage(db, step.id, { content: '工具：读取文件 · completed' })
+    db.prepare('UPDATE chat_messages SET updated_at = ? WHERE id = ?').run(later, step.id)
+
+    const updates = listChatMessagesUpdatedAfter(db, thread.id, watermark ?? '')
+    expect(updates.map((message) => message.content)).toEqual(['工具：读取文件 · completed'])
+    expect(updates[0]?.updatedAt).toBe(later)
+  })
+})
+
 describe('chat HTTP API', () => {
   it('streams messages after a cursor and reports terminal status', async () => {
     const db = database()
@@ -281,6 +415,43 @@ describe('chat HTTP API', () => {
     expect(body).not.toContain(first.id)
     expect(body).toContain('event: status')
     expect(body).toContain('"status":"completed"')
+  })
+
+  it('renames, archives and deletes a thread over HTTP', async () => {
+    const db = database()
+    const chat = new ChatService({ db, provider, clientVersion: 'test' })
+    const app = createHttpApp({ db, token: 'token', chat })
+    const created = await app.request('/api/v1/chat/threads', {
+      method: 'POST',
+      headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Before' }),
+    })
+    const body = (await created.json()) as { thread: { id: string } }
+
+    const renamed = await app.request(`/api/v1/chat/threads/${body.thread.id}`, {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'After' }),
+    })
+    expect(renamed.status).toBe(200)
+    expect(((await renamed.json()) as { thread: { title: string } }).thread.title).toBe('After')
+
+    const archived = await app.request(`/api/v1/chat/threads/${body.thread.id}`, {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ archived: true }),
+    })
+    expect(archived.status).toBe(200)
+    const list = await app.request('/api/v1/chat/threads', {
+      headers: { authorization: 'Bearer token' },
+    })
+    expect(((await list.json()) as { threads: unknown[] }).threads).toHaveLength(0)
+
+    const removed = await app.request(`/api/v1/chat/threads/${body.thread.id}`, {
+      method: 'DELETE',
+      headers: { authorization: 'Bearer token' },
+    })
+    expect(removed.status).toBe(200)
   })
 
   it('creates a thread, posts a message, and returns messages', async () => {

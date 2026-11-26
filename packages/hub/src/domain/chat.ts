@@ -22,6 +22,8 @@ export interface ChatThread {
   goalId?: GoalId
   taskId?: TaskId
   status: ChatThreadStatus
+  /** 归档时间；归档后不出现在侧栏，但历史消息仍保留。 */
+  archivedAt?: Timestamp
   createdAt: Timestamp
   updatedAt: Timestamp
 }
@@ -38,5 +40,22 @@ export interface ChatMessage {
   clarificationId?: string
   /** 'auth' 卡片与 'progress' 步骤关联的 Agent。 */
   agentName?: string
+  /** progress 步骤的类型：thinking / tool / thought / output / plan ... */
+  stage?: ChatProgressStage
+  /** 工具调用的结构化明细（JSON：command/output/kind），供前端展开。 */
+  detail?: string
+  updatedAt?: Timestamp
   createdAt: Timestamp
 }
+
+export type ChatProgressStage =
+  | 'thinking'
+  | 'planned'
+  | 'dispatching'
+  | 'retrying'
+  | 'waiting'
+  | 'completed'
+  | 'failed'
+  | 'tool'
+  | 'thought'
+  | 'output'

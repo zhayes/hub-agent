@@ -2,8 +2,9 @@ import type { JSX } from '@solidjs/web'
 import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
 import { RichText } from '../../components/ui/CodeBlock'
+import { Dialog } from '../../components/ui/Dialog'
 import { fieldControl } from '../../components/ui/Field'
-import { Icon } from '../../components/ui/Icon'
+import { Icon, type IconName } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
 import { LoadingState } from '../../components/ui/LoadingState'
 import { StatusBadge } from '../../components/ui/StatusBadge'
@@ -11,6 +12,7 @@ import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
 import { toast } from '../../components/ui/Toaster'
 import { type ToolChip, ToolChips } from '../../components/ui/ToolChips'
 import {
+  type AgentRow,
   type AuthMethodView,
   api,
   type ChatMessage,
@@ -21,10 +23,12 @@ import {
   getToken,
   type ProbeResultView,
   type TaskRow,
+  type TaskView,
 } from '../../shared/api'
 import { relativeTime, shortenId } from '../../shared/format'
 import { type Locale, type MessageKey, statusKey, type Translator } from '../../shared/i18n'
 import {
+  forgetThread,
   readCachedSummaries,
   readCachedThread,
   readUnsavedDraft,
@@ -42,6 +46,8 @@ export interface ChatViewProps {
   tasks: TaskRow[]
   onOpenThread: (id: string) => void
   onOpenTask: (id: string) => void
+  /** 当前 thread 被删除/归档后回到空态。 */
+  onClearThread: () => void
 }
 
 /* Pane widths live in state so they can be dragged; mobile stays a single
@@ -116,6 +122,15 @@ export function ChatView(props: ChatViewProps) {
     typeof window === 'undefined' ? false : window.matchMedia('(min-width: 1100px)').matches,
   )
   const [mobileThreads, setMobileThreads] = createSignal(false)
+  const [menuFor, setMenuFor] = createSignal<string>()
+  const [menuPos, setMenuPos] = createSignal({ left: 0, top: 0 })
+  const [renamingId, setRenamingId] = createSignal<string>()
+  const [renameDraft, setRenameDraft] = createSignal('')
+  const [deleting, setDeleting] = createSignal<ChatThreadSummary>()
+  const [taskDetail, setTaskDetail] = createSignal<TaskView>()
+  const [taskDetailError, setTaskDetailError] = createSignal('')
+  let taskRequestSeq = 0
+  let lastResourceTask: string | undefined
   let poll: ReturnType<typeof setInterval> | undefined
   let stream: EventSource | undefined
   let streamSeq: number | undefined
@@ -167,6 +182,17 @@ export function ChatView(props: ChatViewProps) {
       if (Number.isFinite(id)) streamSeq = id
       setMessages((previous) =>
         previous.some((item) => item.id === message.id) ? previous : [...previous, message],
+      )
+      if (stick || isNearBottom()) queueMicrotask(scrollToBottom)
+    })
+
+    /* 同一行的原地更新（流式思考、工具状态）：按 id 替换，不新增气泡。 */
+    source.addEventListener('message.update', (event) => {
+      const message = JSON.parse((event as MessageEvent<string>).data) as ChatMessage
+      setMessages((previous) =>
+        previous.some((item) => item.id === message.id)
+          ? previous.map((item) => (item.id === message.id ? message : item))
+          : [...previous, message],
       )
       if (stick || isNearBottom()) queueMicrotask(scrollToBottom)
     })
@@ -271,6 +297,66 @@ export function ChatView(props: ChatViewProps) {
       await loadThreads()
       setMobileThreads(false)
       props.onOpenThread(created.thread.id)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const clearCurrentThread = (): void => {
+    setThread(undefined)
+    setMessages([])
+    setHasMore(false)
+    streamSeq = undefined
+    stopWatching()
+    props.onClearThread()
+  }
+
+  const beginRename = (item: ChatThreadSummary): void => {
+    setMenuFor(undefined)
+    setRenamingId(item.id)
+    setRenameDraft(item.title)
+  }
+
+  const commitRename = async (id: string): Promise<void> => {
+    if (renamingId() !== id) return
+    const title = renameDraft().trim()
+    setRenamingId(undefined)
+    if (title === '') return
+    try {
+      const result = await chatApi.rename(id, title)
+      setThreads((list) =>
+        list.map((item) => (item.id === id ? { ...item, title: result.thread.title } : item)),
+      )
+      setThread((current) =>
+        current?.id === id ? { ...current, title: result.thread.title } : current,
+      )
+      toast(props.t('threadRenamed'))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const archiveThreadNow = async (item: ChatThreadSummary): Promise<void> => {
+    setMenuFor(undefined)
+    try {
+      await chatApi.archive(item.id)
+      forgetThread(item.id)
+      if (thread()?.id === item.id) clearCurrentThread()
+      await loadThreads()
+      toast(props.t('threadArchived'))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const removeThreadNow = async (item: ChatThreadSummary): Promise<void> => {
+    setDeleting(undefined)
+    try {
+      await chatApi.remove(item.id)
+      forgetThread(item.id)
+      if (thread()?.id === item.id) clearCurrentThread()
+      await loadThreads()
+      toast(props.t('threadDeleted'))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -433,6 +519,9 @@ export function ChatView(props: ChatViewProps) {
 
   /* 新建 thread 的占位标题由后端写成 'New thread'（它靠这个字面量决定何时改名），
      展示层换成本地化文案。 */
+  const menuThread = (): ChatThreadSummary | undefined =>
+    threads().find((item) => item.id === menuFor())
+
   const displayTitle = (title: string): string =>
     title === 'New thread' ? props.t('newThread') : title
 
@@ -446,6 +535,98 @@ export function ChatView(props: ChatViewProps) {
   const contextTask = (): TaskRow | undefined => {
     const id = thread()?.taskId
     return id === undefined ? undefined : props.tasks.find((task) => task.id === id)
+  }
+
+  const loadTaskDetail = (taskId: string): void => {
+    taskRequestSeq += 1
+    const seq = taskRequestSeq
+    setTaskDetailError('')
+    void api
+      .task(taskId)
+      .then((view) => {
+        if (seq === taskRequestSeq) setTaskDetail(view)
+      })
+      .catch((cause) => {
+        if (seq === taskRequestSeq) {
+          setTaskDetailError(cause instanceof Error ? cause.message : String(cause))
+        }
+      })
+  }
+
+  /* 右侧栏 = 本次会话的资源：关联任务、改动文件、验收与待审批。 */
+  createEffect(
+    () => ({ taskId: thread()?.taskId, status: thread()?.status }),
+    (value) => {
+      if (value.taskId !== lastResourceTask) {
+        lastResourceTask = value.taskId
+        setTaskDetail(undefined)
+      }
+      if (value.taskId === undefined) return
+      /* 任务状态变化（执行完成/等待）时重取：文件与验收都在结束后才出现。 */
+      loadTaskDetail(value.taskId)
+    },
+  )
+
+  const changedFiles = (): string[] => {
+    const detail = taskDetail()
+    if (detail === undefined) return []
+    const files = new Set<string>()
+    for (const execution of detail.executions) {
+      for (const file of execution.evidence?.changedFiles ?? []) files.add(file)
+    }
+    return [...files]
+  }
+
+  const checks = (): { passed: number; total: number } => {
+    const detail = taskDetail()
+    if (detail === undefined) return { passed: 0, total: 0 }
+    const all = detail.verifications.flatMap((run) => run.checks)
+    return { passed: all.filter((check) => check.passed).length, total: all.length }
+  }
+
+  const pendingApprovals = (): number =>
+    (taskDetail()?.approvals ?? []).filter((approval) => approval.status === 'pending').length
+
+  /* 右侧栏是阅读器：任务进度 / 文件内容，而不是一堆摘要。 */
+  const [viewer, setViewer] = createSignal<
+    { kind: 'overview' } | { kind: 'task' } | { kind: 'file'; path: string }
+  >({ kind: 'overview' })
+  const [fileView, setFileView] = createSignal<{
+    path: string
+    content: string
+    truncated: boolean
+    source: 'worktree' | 'project'
+  }>()
+  const [fileLoading, setFileLoading] = createSignal(false)
+  const [fileError, setFileError] = createSignal('')
+
+  const openTaskViewer = (): void => {
+    setViewer({ kind: 'task' })
+    setRightCollapsed(false)
+    const taskId = thread()?.taskId
+    if (taskId !== undefined && taskDetail() === undefined && taskDetailError() === '') {
+      loadTaskDetail(taskId)
+    }
+  }
+
+  const viewerFilePath = (): string => {
+    const value = viewer()
+    return value.kind === 'file' ? value.path : ''
+  }
+
+  const openFileViewer = (path: string): void => {
+    const taskId = thread()?.taskId
+    if (taskId === undefined) return
+    setViewer({ kind: 'file', path })
+    setRightCollapsed(false)
+    setFileView(undefined)
+    setFileError('')
+    setFileLoading(true)
+    void api
+      .taskFile(taskId, path)
+      .then((result) => setFileView(result.file))
+      .catch((cause) => setFileError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setFileLoading(false))
   }
 
   /* `/` at the start of the box lists commands; a trailing `@word` mentions a task.
@@ -625,45 +806,50 @@ export function ChatView(props: ChatViewProps) {
     }
   }
 
-  type TranscriptEntry =
-    | { kind: 'message'; message: ChatMessage }
-    | { kind: 'progress'; id: string; steps: ChatMessage[] }
-
-  /* 连续的执行步骤合成一张过程卡；其余消息保持原样。 */
-  const transcript = createMemo<TranscriptEntry[]>(() => {
-    const entries: TranscriptEntry[] = []
-    for (const message of messages()) {
-      if (message.kind === 'progress') {
-        const tail = entries.at(-1)
-        if (tail !== undefined && tail.kind === 'progress') tail.steps.push(message)
-        else entries.push({ kind: 'progress', id: message.id, steps: [message] })
-        continue
-      }
-      entries.push({ kind: 'message', message })
-    }
-    return entries
-  })
-
-  /* 过程步骤对“谁在说话”是透明的：它不该把同一次回复切成好几段带头像的消息。 */
-  const showMeta = (message: ChatMessage): boolean => {
-    const list = messages()
-    const index = list.findIndex((entry) => entry.id === message.id)
-    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-      const previous = list[cursor]
-      if (previous === undefined || previous.kind === 'progress') continue
-      if (previous.role !== message.role) return true
-      const gap = Date.parse(message.createdAt) - Date.parse(previous.createdAt)
-      return !Number.isFinite(gap) || gap > 5 * 60_000
-    }
-    return true
+  type TurnView = {
+    key: string
+    user?: ChatMessage
+    steps: ChatMessage[]
+    final?: ChatMessage
   }
 
-  /* 失败、等待处理、或紧跟着授权卡时，过程自动展开：用户需要看到卡在哪一步。 */
-  const progressOpen = (index: number): boolean => {
-    const rest = transcript().slice(index + 1)
-    const lastProgress = rest.every((entry) => entry.kind !== 'progress')
-    if (thread()?.status === 'failed' || thread()?.status === 'waiting') return lastProgress
-    return rest.some((entry) => entry.kind === 'message' && entry.message.kind === 'auth')
+  /* 一次用户消息 = 一个回合：执行步骤收进同一条折叠头，回答放在它下面。
+     这样不会再出现“过程卡 / 任务卡 / 授权卡 / 回答”各带一个身份的三角色观感。 */
+  const turns = createMemo<TurnView[]>(() => {
+    const list: TurnView[] = []
+    for (const message of messages()) {
+      if (message.role === 'system') continue
+      if (message.role === 'user') {
+        list.push({ key: message.id, user: message, steps: [] })
+        continue
+      }
+      let turn = list.at(-1)
+      if (turn === undefined) {
+        turn = { key: message.id, steps: [] }
+        list.push(turn)
+      }
+      turn.steps.push(message)
+    }
+    for (const turn of list) {
+      const last = turn.steps.at(-1)
+      if (last !== undefined && (last.kind === 'text' || last.kind === 'result')) {
+        turn.final = last
+        turn.steps.pop()
+      }
+    }
+    return list
+  })
+
+  const lastTurnKey = (): string | undefined => turns().at(-1)?.key
+
+  const turnElapsed = (turn: TurnView): number => {
+    /* 运行中的回合跟着计时器走，别让标题停在“0秒”。 */
+    if (turn.final === undefined && active()) return Math.max(1_000, thinkingMs())
+    const start = Date.parse(turn.user?.createdAt ?? turn.steps[0]?.createdAt ?? '')
+    const lastStep = turn.steps.at(-1)?.createdAt
+    const end = Date.parse(turn.final?.createdAt ?? lastStep ?? '')
+    if (!Number.isFinite(start)) return 1_000
+    return Math.max(1_000, (Number.isFinite(end) ? end : Date.now()) - start)
   }
 
   const handleAuthRetried = (result: { thread: ChatThread; messages: ChatMessage[] }): void => {
@@ -705,58 +891,127 @@ export function ChatView(props: ChatViewProps) {
         aria-label={props.t('threads')}
         style={columnStyle(1)}
       >
-        <div class="flex flex-none items-center justify-between gap-2 px-4 pt-3.5 pb-2.5">
-          <span class="text-meta font-semibold text-ink">{props.t('threads')}</span>
-          <div class="flex items-center gap-0.5">
-            <IconButton
-              icon="chevronLeft"
-              label={props.t('chat')}
-              class={MOBILE_ONLY}
-              onClick={() => setMobileThreads(false)}
-            />
-            <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
-          </div>
+        <div class="flex flex-none items-center gap-1.5 px-3 pt-3 pb-2">
+          <IconButton
+            icon="chevronLeft"
+            label={props.t('chat')}
+            class={MOBILE_ONLY}
+            onClick={() => setMobileThreads(false)}
+          />
+          <input
+            class="h-8 min-w-0 flex-1 rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+            type="search"
+            aria-label={props.t('searchThreads')}
+            placeholder={props.t('searchThreads')}
+            value={query()}
+            onInput={(event) => setQuery(event.currentTarget.value)}
+          />
+          <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
         </div>
-        <input
-          class="mx-3 mb-2 h-8 flex-none rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
-          type="search"
-          aria-label={props.t('searchThreads')}
-          placeholder={props.t('searchThreads')}
-          value={query()}
-          onInput={(event) => setQuery(event.currentTarget.value)}
-        />
-        <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        <div
+          class="min-h-0 flex-1 overflow-y-auto px-2 pb-4"
+          onScroll={() => {
+            if (menuFor() !== undefined) setMenuFor(undefined)
+          }}
+        >
           <For each={filteredThreads()}>
-            {(item) => (
-              <button
-                type="button"
-                class={`${threadRow} ${thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'}`}
-                onClick={() => {
-                  setMobileThreads(false)
-                  props.onOpenThread(item.id)
-                }}
-                title={item.title}
+            {(item, index) => (
+              <div
+                class={`group relative rounded-panel ${
+                  thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'
+                }`}
               >
-                <span
-                  class={`truncate text-meta ${
-                    thread()?.id === item.id ? 'font-semibold text-ink' : 'font-medium text-ink'
-                  }`}
+                <Show
+                  when={renamingId() === item.id}
+                  fallback={
+                    <button
+                      type="button"
+                      class={`${threadRow} pr-9`}
+                      onClick={() => {
+                        setMobileThreads(false)
+                        props.onOpenThread(item.id)
+                      }}
+                      title={item.title}
+                    >
+                      <span
+                        class={`truncate text-meta ${
+                          thread()?.id === item.id
+                            ? 'font-semibold text-ink'
+                            : 'font-medium text-ink'
+                        }`}
+                      >
+                        {displayTitle(item.title)}
+                      </span>
+                      <span class="line-clamp-2 text-badge leading-snug text-ink-2">
+                        {item.lastMessage ??
+                          (item.messageCount === 0
+                            ? props.t('chatEmptyPreview')
+                            : displayTitle(item.title))}
+                      </span>
+                      <span class="mt-0.5 flex flex-wrap gap-2 text-badge text-ink-3">
+                        <span>
+                          {item.messageCount} {props.t('messages')}
+                        </span>
+                        <span>{relativeTime(props.locale, item.updatedAt)}</span>
+                      </span>
+                    </button>
+                  }
                 >
-                  {displayTitle(item.title)}
-                </span>
-                <span class="line-clamp-2 text-badge leading-snug text-ink-2">
-                  {item.lastMessage ??
-                    (item.messageCount === 0
-                      ? props.t('chatEmptyPreview')
-                      : displayTitle(item.title))}
-                </span>
-                <span class="mt-0.5 flex flex-wrap gap-2 text-badge text-ink-3">
-                  <span>
-                    {item.messageCount} {props.t('messages')}
-                  </span>
-                  <span>{relativeTime(props.locale, item.updatedAt)}</span>
-                </span>
-              </button>
+                  <div class="px-2.5 py-2.5">
+                    <input
+                      class="h-7 w-full rounded-control border border-line bg-surface px-2 text-meta text-ink focus-visible:border-transparent focus-visible:outline-2 focus-visible:outline-ring"
+                      value={renameDraft()}
+                      aria-label={props.t('rename')}
+                      ref={(element) =>
+                        queueMicrotask(() => {
+                          element.focus()
+                          element.select()
+                        })
+                      }
+                      onInput={(event) => setRenameDraft(event.currentTarget.value)}
+                      onBlur={() => void commitRename(item.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          void commitRename(item.id)
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault()
+                          setRenamingId(undefined)
+                        }
+                      }}
+                    />
+                  </div>
+                </Show>
+
+                <Show when={renamingId() !== item.id}>
+                  <button
+                    type="button"
+                    class={`absolute top-1.5 right-1.5 grid size-7 place-items-center rounded-control text-ink-3 transition-opacity hover:bg-subtle hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring ${
+                      menuFor() === item.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    }`}
+                    aria-label={props.t('threadActions')}
+                    title={props.t('threadActions')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (menuFor() === item.id) {
+                        setMenuFor(undefined)
+                        return
+                      }
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      const width = 128
+                      const height = 108
+                      const top =
+                        rect.bottom + 4 + height > window.innerHeight
+                          ? Math.max(8, rect.top - height - 4)
+                          : rect.bottom + 4
+                      setMenuPos({ left: Math.max(8, rect.right - width), top })
+                      setMenuFor(item.id)
+                    }}
+                  >
+                    <Icon name="more" size={15} />
+                  </button>
+                </Show>
+              </div>
             )}
           </For>
           <Show when={filteredThreads().length === 0}>
@@ -894,33 +1149,78 @@ export function ChatView(props: ChatViewProps) {
                   </Button>
                 </div>
               </Show>
-              <For each={transcript()}>
-                {(entry, index) =>
-                  entry.kind === 'progress' ? (
-                    <ProgressTrace
-                      steps={entry.steps}
-                      t={props.t}
-                      locale={props.locale}
-                      open={progressOpen(index())}
-                    />
-                  ) : (
-                    <MessageRow
-                      message={entry.message}
-                      t={props.t}
-                      locale={props.locale}
-                      streaming={active() && messages().at(-1)?.id === entry.message.id}
-                      showMeta={showMeta(entry.message)}
-                      threadId={thread()?.id}
-                      onOpenTask={props.onOpenTask}
-                      onApprove={(id) => void decideApproval(id, 'approve')}
-                      onReject={(id) => void decideApproval(id, 'reject')}
-                      onAnswer={(id, answer) => void answerClarification(id, answer)}
-                      onAuthRetried={handleAuthRetried}
-                    />
-                  )
-                }
+              <For each={turns()}>
+                {(turn) => (
+                  <>
+                    <Show when={turn.user}>
+                      {(user) => (
+                        <MessageRow
+                          message={user()}
+                          t={props.t}
+                          locale={props.locale}
+                          streaming={false}
+                          showMeta
+                          threadId={thread()?.id}
+                          onOpenTask={props.onOpenTask}
+                          onApprove={(id) => void decideApproval(id, 'approve')}
+                          onReject={(id) => void decideApproval(id, 'reject')}
+                          onAnswer={(id, answer) => void answerClarification(id, answer)}
+                          onAuthRetried={handleAuthRetried}
+                        />
+                      )}
+                    </Show>
+                    <Show
+                      when={turn.steps.length > 0}
+                      fallback={
+                        <Show when={turn.final}>
+                          {(final) => (
+                            <MessageRow
+                              message={final()}
+                              t={props.t}
+                              locale={props.locale}
+                              streaming={active() && lastTurnKey() === turn.key}
+                              showMeta
+                              threadId={thread()?.id}
+                              onOpenTask={props.onOpenTask}
+                              onApprove={(id) => void decideApproval(id, 'approve')}
+                              onReject={(id) => void decideApproval(id, 'reject')}
+                              onAnswer={(id, answer) => void answerClarification(id, answer)}
+                              onAuthRetried={handleAuthRetried}
+                            />
+                          )}
+                        </Show>
+                      }
+                    >
+                      <TurnBlock
+                        turn={turn}
+                        t={props.t}
+                        locale={props.locale}
+                        phase={
+                          active() && lastTurnKey() === turn.key
+                            ? 'running'
+                            : threadStatus() === 'failed'
+                              ? 'failed'
+                              : threadStatus() === 'waiting'
+                                ? 'waiting'
+                                : 'done'
+                        }
+                        elapsedMs={turnElapsed(turn)}
+                        streaming={active() && lastTurnKey() === turn.key}
+                        threadId={thread()?.id}
+                        task={contextTask()}
+                        files={changedFiles()}
+                        onOpenTask={openTaskViewer}
+                        onOpenFile={openFileViewer}
+                        onApprove={(id) => void decideApproval(id, 'approve')}
+                        onReject={(id) => void decideApproval(id, 'reject')}
+                        onAnswer={(id, answer) => void answerClarification(id, answer)}
+                        onAuthRetried={handleAuthRetried}
+                      />
+                    </Show>
+                  </>
+                )}
               </For>
-              <Show when={active()}>
+              <Show when={active() && (turns().at(-1)?.steps.length ?? 0) === 0}>
                 <LoadingState label={props.t('loading')} elapsedMs={thinkingMs()} />
               </Show>
             </Show>
@@ -1069,10 +1369,101 @@ export function ChatView(props: ChatViewProps) {
                     </a>
                   )}
                 </Show>
+
+                <Show when={taskDetail()}>
+                  <div class="mt-5 flex flex-col gap-3 border-t border-line pt-3.5">
+                    <div>
+                      <div class="flex items-center justify-between text-badge">
+                        <span class="font-medium text-ink-3">{props.t('chatFiles')}</span>
+                        <span class="tabular-nums text-ink-3">{changedFiles().length}</span>
+                      </div>
+                      <Show
+                        when={changedFiles().length > 0}
+                        fallback={
+                          <p class="mt-1 text-badge leading-relaxed text-ink-3">
+                            {props.t('chatNoFiles')}
+                          </p>
+                        }
+                      >
+                        <ul class="mt-1.5 flex flex-col gap-1">
+                          <For each={changedFiles().slice(0, 12)}>
+                            {(file) => (
+                              <li
+                                class="flex items-center gap-1.5 text-badge text-ink-2"
+                                title={file}
+                              >
+                                <Icon name="file" size={12} class="shrink-0 text-ink-3" />
+                                <span class="truncate font-mono">{file}</span>
+                              </li>
+                            )}
+                          </For>
+                        </ul>
+                      </Show>
+                    </div>
+                    <div class="flex items-center justify-between text-badge">
+                      <span class="text-ink-3">{props.t('chatVerification')}</span>
+                      <span class="tabular-nums text-ink">
+                        {checks().passed}/{checks().total}
+                      </span>
+                    </div>
+                    <Show when={pendingApprovals() > 0}>
+                      <a
+                        class="flex items-center justify-between rounded-panel border border-line bg-surface px-3 py-2 text-badge text-ink transition-colors hover:border-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        href="/approvals"
+                      >
+                        <span>
+                          {props.t('chatPendingApprovals', { count: pendingApprovals() })}
+                        </span>
+                        <Icon name="external" size={12} />
+                      </a>
+                    </Show>
+                  </div>
+                </Show>
               </>
             )}
           </Show>
         </div>
+        <Show when={viewer().kind !== 'overview'}>
+          <div class="absolute inset-0 z-20 flex flex-col bg-canvas">
+            <div class="flex items-center gap-2 border-b border-line px-3 py-2.5">
+              <button
+                type="button"
+                class="flex items-center gap-1 rounded-control px-1.5 py-1 text-badge text-ink-2 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onClick={() => setViewer({ kind: 'overview' })}
+              >
+                <Icon name="arrowLeft" size={13} />
+                {props.t('chatBack')}
+              </button>
+              <span class="min-w-0 flex-1 truncate text-meta font-medium text-ink">
+                {viewer().kind === 'task' ? props.t('chatTaskView') : props.t('chatFileView')}
+              </span>
+            </div>
+            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
+              <Show when={viewer().kind === 'task'}>
+                <TaskViewerPanel
+                  t={props.t}
+                  task={contextTask()}
+                  detail={taskDetail()}
+                  error={taskDetailError()}
+                  locale={props.locale}
+                  onRetry={() => {
+                    const taskId = thread()?.taskId
+                    if (taskId !== undefined) loadTaskDetail(taskId)
+                  }}
+                />
+              </Show>
+              <Show when={viewer().kind === 'file'}>
+                <FileViewerPanel
+                  t={props.t}
+                  path={viewerFilePath()}
+                  loading={fileLoading()}
+                  error={fileError()}
+                  view={fileView()}
+                />
+              </Show>
+            </div>
+          </div>
+        </Show>
         <Show when={wide() && !rightCollapsed()}>
           {/* biome-ignore lint/a11y/useSemanticElements: no native element resizes a pane; role=separator is the ARIA pattern for it */}
           <div
@@ -1089,6 +1480,531 @@ export function ChatView(props: ChatViewProps) {
           />
         </Show>
       </aside>
+
+      {/* 菜单用 fixed 定位渲染在滚动容器外：列表的 overflow 不会裁掉它。 */}
+      <Show when={menuFor() !== undefined}>
+        <div class="fixed inset-0 z-30" aria-hidden="true" onClick={() => setMenuFor(undefined)} />
+        <div
+          class="fixed z-40 w-32 rounded-panel border border-line bg-surface p-1 shadow-popover"
+          style={{ left: `${menuPos().left}px`, top: `${menuPos().top}px` }}
+          role="menu"
+          aria-label={props.t('threadActions')}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            class="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-meta text-ink hover:bg-hover"
+            onClick={() => {
+              const item = menuThread()
+              if (item !== undefined) beginRename(item)
+            }}
+          >
+            <Icon name="edit" size={13} />
+            {props.t('rename')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-meta text-ink hover:bg-hover"
+            onClick={() => {
+              const item = menuThread()
+              if (item !== undefined) void archiveThreadNow(item)
+            }}
+          >
+            <Icon name="archive" size={13} />
+            {props.t('archive')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-meta text-danger hover:bg-danger-soft"
+            onClick={() => {
+              const item = menuThread()
+              setMenuFor(undefined)
+              if (item !== undefined) setDeleting(item)
+            }}
+          >
+            <Icon name="trash" size={13} />
+            {props.t('delete')}
+          </button>
+        </div>
+      </Show>
+
+      <Dialog
+        open={deleting() !== undefined}
+        onClose={() => setDeleting(undefined)}
+        title={props.t('deleteThreadTitle')}
+        closeLabel={props.t('close')}
+      >
+        <p class="text-meta leading-relaxed text-ink-2">{props.t('deleteThreadBody')}</p>
+        <div class="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setDeleting(undefined)}>
+            {props.t('cancel')}
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              const item = deleting()
+              if (item !== undefined) void removeThreadNow(item)
+            }}
+          >
+            {props.t('delete')}
+          </Button>
+        </div>
+      </Dialog>
+    </div>
+  )
+}
+
+function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  if (total < 60) return `${total}秒`
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (minutes < 60) return `${minutes}分${seconds}秒`
+  return `${Math.floor(minutes / 60)}小时${minutes % 60}分`
+}
+
+function TurnBlock(props: {
+  turn: { key: string; user?: ChatMessage; steps: ChatMessage[]; final?: ChatMessage }
+  t: Translator
+  locale: Locale
+  phase: 'running' | 'failed' | 'waiting' | 'done'
+  elapsedMs: number
+  streaming: boolean
+  threadId?: string
+  task?: TaskRow
+  files: string[]
+  onOpenTask: () => void
+  onOpenFile: (path: string) => void
+  onApprove: (id: string) => void
+  onReject: (id: string) => void
+  onAnswer: (id: string, answer: string) => void
+  onAuthRetried: (result: { thread: ChatThread; messages: ChatMessage[] }) => void
+}) {
+  const title = (): string =>
+    props.phase === 'running'
+      ? props.t('chatTurnRunning')
+      : props.phase === 'failed'
+        ? props.t('chatTurnFailed')
+        : props.phase === 'waiting'
+          ? props.t('chatTurnWaiting')
+          : props.t('chatTurnDone')
+
+  const summary = (): string => {
+    const progress = props.turn.steps.filter((step) => step.kind === 'progress').at(-1)
+    return progress?.content ?? props.turn.final?.content ?? ''
+  }
+  const open = (): boolean =>
+    props.phase === 'running' ||
+    props.phase === 'failed' ||
+    props.phase === 'waiting' ||
+    props.turn.final === undefined ||
+    props.turn.steps.some(
+      (step) => step.kind === 'auth' || step.kind === 'approval' || step.kind === 'clarification',
+    )
+
+  const startedAt = (): string =>
+    props.turn.user?.createdAt ?? props.turn.steps[0]?.createdAt ?? new Date().toISOString()
+
+  return (
+    <article class="flex gap-2.5">
+      <div
+        class="mt-[3px] grid size-6 shrink-0 place-items-center rounded-full bg-ink text-[10px] font-semibold tracking-tight text-canvas"
+        aria-hidden="true"
+      >
+        H
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="mb-1 flex items-baseline gap-1.5 text-badge text-ink-3">
+          <span class="font-medium text-ink-2">{props.t('appName')}</span>
+          <time>{relativeTime(props.locale, startedAt())}</time>
+        </div>
+
+        <ThinkingTrace
+          title={`${title()} · ${props.t('chatTurnElapsed', {
+            duration: formatDuration(props.elapsedMs),
+          })}`}
+          meta={`${props.turn.steps.length} ${props.t('chatSteps')}`}
+          summary={summary()}
+          open={open()}
+        >
+          <ol class="flex list-none flex-col gap-2.5 p-0">
+            <For each={props.turn.steps}>
+              {(step) => (
+                <TurnStep
+                  step={step}
+                  t={props.t}
+                  locale={props.locale}
+                  threadId={props.threadId}
+                  onOpenTask={props.onOpenTask}
+                  onApprove={props.onApprove}
+                  onReject={props.onReject}
+                  onAnswer={props.onAnswer}
+                  onAuthRetried={props.onAuthRetried}
+                />
+              )}
+            </For>
+          </ol>
+        </ThinkingTrace>
+
+        <Show when={props.turn.final}>
+          {(final) => (
+            <div class="mt-2">
+              <RichText
+                text={final().content}
+                copyLabel={props.t('copy')}
+                streaming={props.streaming}
+                quiet={final().kind === 'result'}
+              />
+            </div>
+          )}
+        </Show>
+
+        <Show when={props.task !== undefined || props.files.length > 0}>
+          <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <Show when={props.task}>
+              {(task) => (
+                <button
+                  type="button"
+                  class="flex max-w-[18rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-badge text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  title={task().id}
+                  onClick={() => props.onOpenTask()}
+                >
+                  <Icon name="tasks" size={12} class="shrink-0 text-ink-3" />
+                  <span class="truncate">{task().title}</span>
+                  <span class="shrink-0 text-ink-3">{props.t(statusKey(task().status))}</span>
+                </button>
+              )}
+            </Show>
+            <For each={props.files.slice(0, 6)}>
+              {(file) => (
+                <button
+                  type="button"
+                  class="flex max-w-[15rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-badge text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  title={file}
+                  onClick={() => props.onOpenFile(file)}
+                >
+                  <Icon name="file" size={12} class="shrink-0 text-ink-3" />
+                  <span class="truncate">{file.split('/').at(-1)}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
+      </div>
+    </article>
+  )
+}
+
+function StepText(props: { text: string; t: Translator }) {
+  const [open, setOpen] = createSignal(false)
+  const long = (): boolean => props.text.length > 180 || props.text.split('\n').length > 2
+  return (
+    <>
+      <p class={`whitespace-pre-wrap ${!open() && long() ? 'line-clamp-2' : ''}`}>{props.text}</p>
+      <Show when={long()}>
+        <button
+          type="button"
+          class="mt-1 text-badge text-ink-3 underline-offset-2 hover:text-ink hover:underline"
+          onClick={() => setOpen(!open())}
+        >
+          {open() ? props.t('chatCollapse') : props.t('chatExpand')}
+        </button>
+      </Show>
+    </>
+  )
+}
+
+function TurnStep(props: {
+  step: ChatMessage
+  t: Translator
+  locale: Locale
+  threadId?: string
+  onOpenTask: () => void
+  onApprove: (id: string) => void
+  onReject: (id: string) => void
+  onAnswer: (id: string, answer: string) => void
+  onAuthRetried: (result: { thread: ChatThread; messages: ChatMessage[] }) => void
+}) {
+  const step = props.step
+
+  if (step.kind === 'progress' && step.stage === 'tool') {
+    const detail = (): { command?: string; path?: string; output?: string } | undefined => {
+      if (step.detail === undefined) return undefined
+      try {
+        return JSON.parse(step.detail) as { command?: string; path?: string; output?: string }
+      } catch {
+        return undefined
+      }
+    }
+    return (
+      <li>
+        <Show
+          when={step.detail !== undefined}
+          fallback={
+            <div class="flex items-start gap-2">
+              <Icon name="tool" size={12} class="mt-[3px] shrink-0 text-ink-3" />
+              <span class="min-w-0 break-words text-ink">{step.content}</span>
+            </div>
+          }
+        >
+          <details class="group/tool">
+            <summary class="flex cursor-pointer list-none items-center gap-2 text-ink [&::-webkit-details-marker]:hidden">
+              <Icon name="tool" size={12} class="shrink-0 text-ink-3" />
+              <span class="min-w-0 flex-1 truncate font-mono text-badge">{step.content}</span>
+              <Icon
+                name="chevronRight"
+                size={11}
+                class="shrink-0 text-ink-3 transition-transform group-open/tool:rotate-90"
+              />
+            </summary>
+            <div class="mt-1.5 flex flex-col gap-1.5 rounded-panel border border-line bg-surface p-2">
+              <Show when={detail()?.command}>
+                {(command) => (
+                  <pre class="overflow-x-auto font-mono text-badge text-ink-2">$ {command()}</pre>
+                )}
+              </Show>
+              <Show when={detail()?.path}>
+                {(path) => <p class="font-mono text-badge text-ink-3">{path()}</p>}
+              </Show>
+              <Show when={detail()?.output}>
+                {(output) => (
+                  <pre class="max-h-64 overflow-auto rounded-control bg-canvas p-2 font-mono text-badge text-ink-2">
+                    {output()}
+                  </pre>
+                )}
+              </Show>
+            </div>
+          </details>
+        </Show>
+      </li>
+    )
+  }
+
+  if (step.kind === 'progress') {
+    return (
+      <li class="flex items-start gap-2">
+        <Icon
+          name={stepIcon(step.stage)}
+          size={12}
+          class={`mt-[3px] shrink-0 ${
+            step.stage === 'failed'
+              ? 'text-danger'
+              : step.stage === 'completed'
+                ? 'text-success'
+                : 'text-ink-3'
+          }`}
+        />
+        <div class="min-w-0 break-words text-ink">
+          <Show
+            when={step.stage === 'thought' || step.stage === 'output'}
+            fallback={<span class="whitespace-pre-wrap">{step.content}</span>}
+          >
+            <StepText text={step.content} t={props.t} />
+          </Show>
+        </div>
+      </li>
+    )
+  }
+
+  if (step.kind === 'task') {
+    return (
+      <li class="flex items-center gap-2 text-meta text-ink-2">
+        <Icon name="tasks" size={13} class="shrink-0 text-ink-3" />
+        <span class="min-w-0 truncate">{props.t('chatTaskCreated')}</span>
+        <button
+          type="button"
+          class="shrink-0 rounded-control border border-line px-2 py-0.5 text-badge text-ink hover:bg-hover"
+          onClick={() => props.onOpenTask()}
+        >
+          {props.t('openTask')}
+        </button>
+      </li>
+    )
+  }
+
+  if (step.kind === 'approval' && step.approvalId !== undefined) {
+    return (
+      <li class="rounded-panel border border-line bg-canvas p-3">
+        <div class="flex items-center gap-2 text-meta font-medium text-warning">
+          <Icon name="alert" size={14} />
+          <span>{step.content}</span>
+        </div>
+        <div class="mt-2.5 flex items-center gap-2">
+          <Button onClick={() => props.onApprove(step.approvalId ?? '')}>
+            {props.t('approve')}
+          </Button>
+          <Button variant="ghost" onClick={() => props.onReject(step.approvalId ?? '')}>
+            {props.t('reject')}
+          </Button>
+        </div>
+      </li>
+    )
+  }
+
+  if (step.kind === 'clarification' && step.clarificationId !== undefined) {
+    return (
+      <li>
+        <ClarificationCard message={step} t={props.t} onAnswer={props.onAnswer} />
+      </li>
+    )
+  }
+
+  if (step.kind === 'auth') {
+    return (
+      <li>
+        <AuthCard
+          message={step}
+          t={props.t}
+          {...(props.threadId === undefined ? {} : { threadId: props.threadId })}
+          onRetried={props.onAuthRetried}
+        />
+      </li>
+    )
+  }
+
+  if (step.kind === 'error') {
+    return (
+      <li class="rounded-panel border border-line bg-danger-soft px-3.5 py-2.5">
+        <div class="flex items-center gap-2 text-meta font-medium text-danger">
+          <Icon name="alert" size={14} />
+          <span>{props.t('statusFailed')}</span>
+        </div>
+        <p class="mt-1 break-words whitespace-pre-wrap text-meta text-danger">{step.content}</p>
+      </li>
+    )
+  }
+
+  return (
+    <li class="text-ink-2">
+      <RichText text={step.content} copyLabel={props.t('copy')} quiet />
+    </li>
+  )
+}
+
+function TaskViewerPanel(props: {
+  t: Translator
+  task?: TaskRow
+  detail?: TaskView
+  error: string
+  locale: Locale
+  onRetry: () => void
+}) {
+  return (
+    <Show
+      when={props.detail}
+      fallback={
+        <div class="flex flex-col gap-2">
+          <p class={`text-badge ${props.error === '' ? 'text-ink-3' : 'text-danger'}`}>
+            {props.error === '' ? props.t('chatFileLoading') : props.error}
+          </p>
+          <Show when={props.error !== ''}>
+            <Button variant="secondary" size="sm" onClick={() => props.onRetry()}>
+              {props.t('chatRetry')}
+            </Button>
+          </Show>
+        </div>
+      }
+    >
+      {(detail) => (
+        <div class="flex flex-col gap-4">
+          <div class="flex items-center justify-between gap-2">
+            <span class="min-w-0 truncate text-meta font-medium text-ink">
+              {props.task?.title ?? detail().task.title}
+            </span>
+            <StatusBadge
+              status={detail().task.status}
+              label={props.t(statusKey(detail().task.status))}
+            />
+          </div>
+
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-badge font-medium text-ink-3">{props.t('chatSubtasks')}</h3>
+            <ul class="flex flex-col gap-1">
+              <For each={detail().subtasks}>
+                {(subtask) => (
+                  <li class="flex items-center justify-between gap-2 text-badge">
+                    <span class="min-w-0 truncate text-ink-2">{subtask.title}</span>
+                    <span class="shrink-0 text-ink-3">{props.t(statusKey(subtask.status))}</span>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </section>
+
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-badge font-medium text-ink-3">{props.t('chatExecutions')}</h3>
+            <For each={detail().executions}>
+              {(execution) => (
+                <div class="rounded-panel border border-line bg-surface p-2.5 text-badge">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-mono text-ink-2">attempt {execution.attempt}</span>
+                    <span class="text-ink-3">{props.t(statusKey(execution.status))}</span>
+                  </div>
+                  <Show when={(execution.evidence?.changedFiles?.length ?? 0) > 0}>
+                    <ul class="mt-1.5 flex flex-col gap-0.5">
+                      <For each={execution.evidence?.changedFiles ?? []}>
+                        {(file) => (
+                          <li class="truncate font-mono text-ink-3" title={file}>
+                            {file}
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </section>
+
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-badge font-medium text-ink-3">{props.t('chatChecks')}</h3>
+            <For each={detail().verifications.flatMap((run) => run.checks)}>
+              {(check) => (
+                <div class="flex items-center gap-2 text-badge">
+                  <Icon
+                    name={check.passed ? 'check' : 'alert'}
+                    size={12}
+                    class={check.passed ? 'text-success' : 'text-danger'}
+                  />
+                  <span class="min-w-0 flex-1 truncate text-ink-2">
+                    {check.command ?? check.kind}
+                  </span>
+                  <span class="shrink-0 text-ink-3">{check.exitCode ?? ''}</span>
+                </div>
+              )}
+            </For>
+          </section>
+        </div>
+      )}
+    </Show>
+  )
+}
+
+function FileViewerPanel(props: {
+  t: Translator
+  path: string
+  loading: boolean
+  error: string
+  view?: { path: string; content: string; truncated: boolean; source: 'worktree' | 'project' }
+}) {
+  return (
+    <div class="flex flex-col gap-2">
+      <span class="break-all font-mono text-badge text-ink-3">{props.path}</span>
+      <Show when={props.loading}>
+        <p class="text-badge text-ink-3">{props.t('chatFileLoading')}</p>
+      </Show>
+      <Show when={props.error !== ''}>
+        <p class="text-badge text-danger">{props.error}</p>
+      </Show>
+      <Show when={props.view}>
+        {(view) => (
+          <pre class="max-h-full overflow-auto rounded-panel border border-line bg-surface p-3 font-mono text-badge leading-relaxed text-ink">
+            {view().content}
+          </pre>
+        )}
+      </Show>
     </div>
   )
 }
@@ -1269,6 +2185,31 @@ function MessageRow(props: {
   )
 }
 
+const stepIcon = (stage: ChatMessage['stage']): IconName => {
+  switch (stage) {
+    case 'thinking':
+      return 'activity'
+    case 'tool':
+      return 'tool'
+    case 'thought':
+      return 'message'
+    case 'output':
+      return 'terminal'
+    case 'planned':
+      return 'tasks'
+    case 'dispatching':
+      return 'plug'
+    case 'waiting':
+      return 'clock'
+    case 'completed':
+      return 'check'
+    case 'failed':
+      return 'alert'
+    default:
+      return 'activity'
+  }
+}
+
 function ProgressTrace(props: {
   steps: ChatMessage[]
   t: Translator
@@ -1291,11 +2232,30 @@ function ProgressTrace(props: {
           <ol class="flex flex-col gap-1.5">
             <For each={props.steps}>
               {(step) => (
-                <li class="flex gap-2">
+                <li class="flex items-start gap-2">
+                  <Icon
+                    name={stepIcon(step.stage)}
+                    size={12}
+                    class={`mt-[3px] shrink-0 ${
+                      step.stage === 'failed'
+                        ? 'text-danger'
+                        : step.stage === 'completed'
+                          ? 'text-success'
+                          : 'text-ink-3'
+                    }`}
+                  />
                   <span class="shrink-0 font-mono text-badge text-ink-3">
                     {relativeTime(props.locale, step.createdAt)}
                   </span>
-                  <span class="min-w-0 break-words">{step.content}</span>
+                  <span
+                    class={`min-w-0 break-words whitespace-pre-wrap ${
+                      step.stage === 'thought' || step.stage === 'output'
+                        ? 'text-ink-2'
+                        : 'text-ink'
+                    }`}
+                  >
+                    {step.content}
+                  </span>
                 </li>
               )}
             </For>
@@ -1306,6 +2266,20 @@ function ProgressTrace(props: {
   )
 }
 
+const probeFlights = new Map<string, Promise<ProbeResultView>>()
+
+/** 同一 Agent 的探测在前端也单飞：多张授权卡不互相撞锁。 */
+function verifyOnce(name: string): Promise<ProbeResultView> {
+  const existing = probeFlights.get(name)
+  if (existing !== undefined) return existing
+  const promise = api
+    .verifyAgent(name)
+    .then((result) => result.probe)
+    .finally(() => probeFlights.delete(name))
+  probeFlights.set(name, promise)
+  return promise
+}
+
 function AuthCard(props: {
   message: ChatMessage
   t: Translator
@@ -1313,26 +2287,41 @@ function AuthCard(props: {
   onRetried: (result: { thread: ChatThread; messages: ChatMessage[] }) => void
 }) {
   const [probe, setProbe] = createSignal<ProbeResultView>()
+  const [agents, setAgents] = createSignal<AgentRow[]>([])
   const [checking, setChecking] = createSignal(false)
   const [busy, setBusy] = createSignal('')
   const [error, setError] = createSignal('')
+  const [notice, setNotice] = createSignal('')
   let retriedCheck = false
   const name = (): string => props.message.agentName ?? ''
   const methods = (): AuthMethodView[] => probe()?.authMethods ?? []
+  const alternatives = (): AgentRow[] =>
+    agents()
+      .filter(
+        (agent) =>
+          agent.name !== name() &&
+          agent.status !== 'offline' &&
+          agent.status !== 'disabled' &&
+          agent.status !== 'error',
+      )
+      .slice(0, 3)
 
   const check = async (): Promise<void> => {
     if (name() === '') return
     setChecking(true)
     setError('')
+    setNotice('')
     try {
-      const result = await api.verifyAgent(name())
-      setProbe(result.probe)
+      setProbe(await verifyOnce(name()))
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      /* 探测有单飞锁：挂载时撞上别的探测很常见，稍等再试，不要直接报红。 */
-      if (!retriedCheck && /正在验证|稍后重试/.test(message)) {
-        retriedCheck = true
-        setTimeout(() => void check(), 1_500)
+      /* 探测单飞被占用不是失败：中性提示 + 稍后自动再试一次。 */
+      if (/正在验证|稍后重试/.test(message)) {
+        setNotice(props.t('chatAuthChecking'))
+        if (!retriedCheck) {
+          retriedCheck = true
+          setTimeout(() => void check(), 1_500)
+        }
       } else {
         setError(message)
       }
@@ -1341,12 +2330,12 @@ function AuthCard(props: {
     }
   }
 
-  const resumeRun = async (): Promise<void> => {
+  const resumeRun = async (agentName?: string): Promise<void> => {
     if (props.threadId === undefined || busy() !== '') return
-    setBusy('resume')
+    setBusy(agentName ?? 'resume')
     setError('')
     try {
-      props.onRetried(await chatApi.resume(props.threadId))
+      props.onRetried(await chatApi.resume(props.threadId, agentName))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -1364,12 +2353,7 @@ function AuthCard(props: {
         setError(result.result.error?.message ?? props.t('chatAuthFailed'))
         return
       }
-      setProbe(undefined)
-      await check()
-      const current = props.threadId
-      if (current !== undefined) {
-        props.onRetried(await chatApi.resume(current))
-      }
+      await resumeRun()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -1377,8 +2361,12 @@ function AuthCard(props: {
     }
   }
 
+  /* 只读 Agent 列表，不触发探测；检测交给用户点「重新检测」。 */
   onSettled(() => {
-    void check()
+    void api
+      .agents()
+      .then((result) => setAgents(result.agents))
+      .catch(() => undefined)
   })
 
   return (
@@ -1426,6 +2414,26 @@ function AuthCard(props: {
             {busy() === 'resume' ? props.t('chatAuthWorking') : props.t('chatAuthContinue')}
           </Button>
         </div>
+      </Show>
+      <Show when={alternatives().length > 0}>
+        <p class="mt-2.5 text-badge text-ink-3">{props.t('chatAuthSwitch')}</p>
+        <div class="mt-1.5 flex flex-wrap gap-2">
+          <For each={alternatives()}>
+            {(agent) => (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy() !== ''}
+                onClick={() => void resumeRun(agent.name)}
+              >
+                {busy() === agent.name ? props.t('chatAuthWorking') : agent.name}
+              </Button>
+            )}
+          </For>
+        </div>
+      </Show>
+      <Show when={notice() !== ''}>
+        <p class="mt-2 text-badge text-ink-3">{notice()}</p>
       </Show>
       <Show when={error() !== ''}>
         <p class="mt-2 text-badge text-danger">{error()}</p>

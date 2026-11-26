@@ -22,6 +22,7 @@ import {
   finalizeWorktreeSession,
   type WorktreeSession,
 } from '../../runtime/workspace/session'
+import { sandboxExecUsable } from '../../sandbox/probe'
 import { createSrtProvider } from '../../sandbox/srt-driver'
 import type { SandboxNetworkMode } from '../../sandbox/types'
 import { HubError } from '../../shared/errors'
@@ -108,6 +109,12 @@ export function createCli(version: string): Command {
             )
           }
           process.stdout.write(`  运行目录 ${handle.home}\n`)
+          const sandbox = sandboxExecUsable()
+          if (!sandbox.ok) {
+            process.stdout.write(
+              `  ⚠ 沙箱不可用：${sandbox.detail ?? 'sandbox-exec 被拒绝'}；Agent 无法启动。请从系统终端（不要在 DSH/沙箱终端里）运行 pnpm ha web。\n`,
+            )
+          }
           process.stdout.write('  Ctrl-C 停止\n')
         }
 

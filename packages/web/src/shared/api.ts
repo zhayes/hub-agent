@@ -164,6 +164,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   tasks: () => request<{ tasks: TaskRow[] }>('/api/v1/tasks'),
   task: (id: string) => request<TaskView & { ok: boolean }>(`/api/v1/tasks/${id}`),
+  taskFile: (taskId: string, path: string) =>
+    request<{
+      ok: true
+      file: { path: string; content: string; truncated: boolean; source: 'worktree' | 'project' }
+    }>(`/api/v1/tasks/${taskId}/file?path=${encodeURIComponent(path)}`),
   decisions: (id: string) => request<{ decisions: Decision[] }>(`/api/v1/tasks/${id}/decisions`),
   agents: () => request<{ agents: AgentRow[] }>('/api/v1/agents'),
   presence: () => request<AgentPresenceResponse>('/api/v1/agents/presence'),
@@ -268,6 +273,7 @@ export interface ChatThread {
   goalId?: string
   taskId?: string
   status: string
+  archivedAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -297,6 +303,19 @@ export interface ChatMessage {
   approvalId?: string
   clarificationId?: string
   agentName?: string
+  stage?:
+    | 'thinking'
+    | 'planned'
+    | 'dispatching'
+    | 'retrying'
+    | 'waiting'
+    | 'completed'
+    | 'failed'
+    | 'tool'
+    | 'thought'
+    | 'output'
+  detail?: string
+  updatedAt?: string
   createdAt: string
 }
 
@@ -336,10 +355,23 @@ export const chatApi = {
       `/api/v1/chat/threads/${id}/clarifications/${clarificationId}/answer`,
       { method: 'POST', body: JSON.stringify({ answer }) },
     ),
-  resume: (id: string) =>
+  resume: (id: string, agentName?: string) =>
     request<{ thread: ChatThread; messages: ChatMessage[] }>(`/api/v1/chat/threads/${id}/resume`, {
       method: 'POST',
+      body: JSON.stringify(agentName === undefined ? {} : { agentName }),
     }),
+  rename: (id: string, title: string) =>
+    request<{ thread: ChatThread }>(`/api/v1/chat/threads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+  archive: (id: string) =>
+    request<{ thread: ChatThread }>(`/api/v1/chat/threads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived: true }),
+    }),
+  remove: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/chat/threads/${id}`, { method: 'DELETE' }),
   post: (id: string, text: string) =>
     request<{ thread: ChatThread; messages: ChatMessage[] }>(
       `/api/v1/chat/threads/${id}/messages`,

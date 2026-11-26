@@ -2,6 +2,7 @@ import { createBrainFromEnv } from '../brain/create-brain'
 import type {
   BrainAction,
   BrainBudget,
+  BrainDeltaSink,
   ChatTurn,
   Clarification,
   DecisionRecord,
@@ -32,6 +33,7 @@ import { completeGoal, completeTaskAfterDelivery } from './workspace/finalize'
  */
 
 export type RunProgressStage =
+  | 'thinking'
   | 'planned'
   | 'dispatching'
   | 'retrying'
@@ -52,6 +54,8 @@ export interface RunGoalWithBrainOptions
   budget?: BrainBudget
   /** Chat 入口的最近若干轮对话；任务/CLI 路径不传 */
   conversation?: readonly ChatTurn[]
+  /** Chat 的逐字回复：只在首个 Brain 回合转发增量。 */
+  onBrainDelta?: BrainDeltaSink
   /** 可参与自动换 Agent 的候选；默认只有 options.agent */
   availableAgents?: readonly AgentRecord[]
   /** 共享工作区完成即落 Task completed；worktree 由交付/merge 后 finalize */
@@ -127,6 +131,23 @@ export async function runGoalWithBrain(
   const agentLabel = options.agent.name
 
   const availableAgents = options.availableAgents ?? [options.agent]
+  const agentPool = availableAgents.length > 0 ? availableAgents : [options.agent]
+  const agentById = new Map<string, AgentRecord>(
+    agentPool.map((agent) => [String(agent.id), agent]),
+  )
+  const pickSubtaskAgent = (
+    _subtask: { requiredCapabilities: readonly string[] },
+    requestedId: string | undefined,
+  ): AgentRecord => {
+    if (requestedId !== undefined) {
+      const found = agentById.get(requestedId)
+      if (found !== undefined && found.status !== 'offline' && found.status !== 'error')
+        return found
+    }
+    /* 没点名时保持既有默认 Agent，把换 Agent 留给重试时的 Selection Engine。 */
+    return options.agent
+  }
+
   const agents = availableAgents.map((agent) => ({
     id: agent.id,
     name: agent.name,
@@ -144,6 +165,7 @@ export async function runGoalWithBrain(
     agents,
     ...(budget === undefined ? {} : { budget }),
     ...(conversation === undefined ? {} : { conversation }),
+    ...(options.onBrainDelta === undefined ? {} : { onDelta: options.onBrainDelta }),
   })
   if (decompose === undefined) {
     throw new HubError('ACTION_REJECTED', '初始计划决策点已被处理', { goalId })
@@ -198,6 +220,9 @@ export async function runGoalWithBrain(
     )
   }
 
+  if (decompose.record.rationale !== '') {
+    report({ stage: 'thinking', text: decompose.record.rationale.slice(0, 240) })
+  }
   report({
     stage: 'planned',
     text: `计划 ${drafts.length} 个步骤：${drafts
@@ -237,6 +262,9 @@ export async function runGoalWithBrain(
     roundIndex += 1
     if (round === undefined) break
     decisions.push(round.record)
+    if (round.record.rationale !== '' && round.record.rationale !== 'no rationale') {
+      report({ stage: 'thinking', text: round.record.rationale.slice(0, 240) })
+    }
     const turnReply = replyTextOf(round.actions)
     if (turnReply !== undefined) replyText = turnReply
 
@@ -285,6 +313,12 @@ export async function runGoalWithBrain(
     }
 
     const executed = new Set(executions.map((item) => item.subtaskId))
+    const delegatedAgent = new Map<string, string>()
+    for (const action of round.actions) {
+      if (action.type === 'delegate' && action.request.agentId !== undefined) {
+        delegatedAgent.set(action.request.subtaskId, action.request.agentId)
+      }
+    }
     const requested = new Set(
       round.actions
         .filter((action) => action.type === 'delegate')
@@ -298,15 +332,18 @@ export async function runGoalWithBrain(
     if (targets.length === 0) break
 
     for (const subtask of targets) {
+      /* Brain 点名了 Agent 就听它的；没点名再过 Selection Engine，而不是永远吃默认值。 */
+      const chosen = pickSubtaskAgent(subtask, delegatedAgent.get(subtask.id))
       report({
         stage: 'dispatching',
-        text: `派给 ${agentLabel}：${subtask.title}`,
-        agent: agentLabel,
+        text: `派给 ${chosen.name}：${subtask.title}`,
+        agent: chosen.name,
       })
       let result: RunAcpTaskResult
       try {
         result = await runAcpWithRetry({
           ...taskOptions,
+          agent: chosen,
           goalId,
           taskId,
           subtaskId: subtask.id,
@@ -315,8 +352,8 @@ export async function runGoalWithBrain(
       } catch (error) {
         report({
           stage: 'failed',
-          text: `${agentLabel} 启动失败：${error instanceof Error ? error.message : String(error)}`,
-          agent: agentLabel,
+          text: `${chosen.name} 启动失败：${error instanceof Error ? error.message : String(error)}`,
+          agent: chosen.name,
         })
         throw error
       }
@@ -324,13 +361,13 @@ export async function runGoalWithBrain(
         result.ok
           ? {
               stage: 'completed',
-              text: `${agentLabel} 执行完成（验收 ${result.verdict}）`,
-              agent: agentLabel,
+              text: `${chosen.name} 执行完成（验收 ${result.verdict}）`,
+              agent: chosen.name,
             }
           : {
               stage: 'failed',
-              text: `${agentLabel} 执行未通过（${result.stopReason}）`,
-              agent: agentLabel,
+              text: `${chosen.name} 执行未通过（${result.stopReason}）`,
+              agent: chosen.name,
             },
       )
       executions.push(result)

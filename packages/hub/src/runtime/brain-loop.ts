@@ -2,6 +2,7 @@ import { buildBrainInput } from '../brain/snapshot'
 import type {
   BrainAction,
   BrainBudget,
+  BrainDeltaSink,
   BrainInput,
   ChatTurn,
   DecisionRecord,
@@ -33,6 +34,8 @@ export interface RunBrainRoundOptions {
   budget?: BrainBudget
   planRevision?: number
   conversation?: readonly ChatTurn[]
+  /** 传入后 Brain 会流式产生 text/thinking 增量（仅对话回合需要）。 */
+  onDelta?: BrainDeltaSink
   claimedBy?: string
   payload?: unknown
 }
@@ -151,7 +154,11 @@ export async function runBrainRound(
 
   let rawActions: BrainAction[]
   try {
-    rawActions = await withTimeout(options.brain.step(input), budget.timeoutMs, 'brain.step')
+    rawActions = await withTimeout(
+      options.brain.step(input, options.onDelta),
+      budget.timeoutMs,
+      'brain.step',
+    )
   } catch (error) {
     completeDecisionPoint(
       options.db,

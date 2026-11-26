@@ -1,5 +1,7 @@
 import type { LucideIcon } from '@lucide/solid'
 import Activity from '@lucide/solid/icons/activity'
+import Archive from '@lucide/solid/icons/archive'
+import ArrowLeft from '@lucide/solid/icons/arrow-left'
 import ArrowUp from '@lucide/solid/icons/arrow-up'
 import Bot from '@lucide/solid/icons/bot'
 import Check from '@lucide/solid/icons/check'
@@ -9,9 +11,11 @@ import ChevronRight from '@lucide/solid/icons/chevron-right'
 import ClipboardCheck from '@lucide/solid/icons/clipboard-check'
 import Clock from '@lucide/solid/icons/clock'
 import Copy from '@lucide/solid/icons/copy'
+import Ellipsis from '@lucide/solid/icons/ellipsis'
 import ExternalLink from '@lucide/solid/icons/external-link'
 import Eye from '@lucide/solid/icons/eye'
 import EyeOff from '@lucide/solid/icons/eye-off'
+import FileCode from '@lucide/solid/icons/file-code'
 import Globe from '@lucide/solid/icons/globe'
 import KeyRound from '@lucide/solid/icons/key-round'
 import ListTodo from '@lucide/solid/icons/list-todo'
@@ -28,9 +32,11 @@ import RefreshCw from '@lucide/solid/icons/refresh-cw'
 import Search from '@lucide/solid/icons/search'
 import Settings from '@lucide/solid/icons/settings'
 import ShieldCheck from '@lucide/solid/icons/shield-check'
+import SquareTerminal from '@lucide/solid/icons/square-terminal'
 import Sun from '@lucide/solid/icons/sun'
 import Trash2 from '@lucide/solid/icons/trash'
 import TriangleAlert from '@lucide/solid/icons/triangle-exclamation-point'
+import Wrench from '@lucide/solid/icons/wrench'
 import X from '@lucide/solid/icons/x'
 import type { JSX } from '@solidjs/web'
 import { Dynamic } from '@solidjs/web'
@@ -49,6 +55,8 @@ export type IconName =
   | 'agents'
   | 'alert'
   | 'approvals'
+  | 'archive'
+  | 'arrowLeft'
   | 'arrowUp'
   | 'check'
   | 'chevronDown'
@@ -60,11 +68,13 @@ export type IconName =
   | 'external'
   | 'eye'
   | 'eyeOff'
+  | 'file'
   | 'globe'
   | 'key'
   | 'message'
   | 'monitor'
   | 'moon'
+  | 'more'
   | 'panelLeft'
   | 'panelRight'
   | 'play'
@@ -76,6 +86,8 @@ export type IconName =
   | 'shield'
   | 'sun'
   | 'tasks'
+  | 'terminal'
+  | 'tool'
   | 'trash'
   | 'x'
 
@@ -84,6 +96,8 @@ const icons: Record<IconName, LucideIcon> = {
   agents: Bot,
   alert: TriangleAlert,
   approvals: ClipboardCheck,
+  archive: Archive,
+  arrowLeft: ArrowLeft,
   arrowUp: ArrowUp,
   check: Check,
   chevronDown: ChevronDown,
@@ -95,11 +109,13 @@ const icons: Record<IconName, LucideIcon> = {
   external: ExternalLink,
   eye: Eye,
   eyeOff: EyeOff,
+  file: FileCode,
   globe: Globe,
   key: KeyRound,
   message: MessageSquare,
   monitor: Monitor,
   moon: Moon,
+  more: Ellipsis,
   panelLeft: PanelLeft,
   panelRight: PanelRight,
   play: Play,
@@ -111,6 +127,8 @@ const icons: Record<IconName, LucideIcon> = {
   shield: ShieldCheck,
   sun: Sun,
   tasks: ListTodo,
+  terminal: SquareTerminal,
+  tool: Wrench,
   trash: Trash2,
   x: X,
 }

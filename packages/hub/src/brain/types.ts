@@ -68,6 +68,14 @@ export interface PendingDecisionView {
   createdAt: string
 }
 
+/** Brain 在生成过程中流出的增量：Chat 用来做逐字回复。 */
+export interface BrainDelta {
+  kind: 'text' | 'thinking'
+  text: string
+}
+
+export type BrainDeltaSink = (delta: BrainDelta) => void
+
 /** 控制台对话的最近若干轮；只带用户可见文本，不带工具流水。 */
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -170,6 +178,6 @@ export interface Clarification {
 }
 
 export interface OrchestratorBrain {
-  step(input: BrainInput): Promise<BrainAction[]>
+  step(input: BrainInput, sink?: BrainDeltaSink): Promise<BrainAction[]>
   explain(input: BrainInput): Promise<DecisionRationale[]>
 }

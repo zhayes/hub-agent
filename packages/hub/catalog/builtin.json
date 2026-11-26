@@ -6,7 +6,7 @@
       "id": "dsh",
       "label": "DSH",
       "name": "dsh",
-      "notes": "DeepSeek Harness。桌面版与命令行版是同一个引擎，共用 ~/.dsh。",
+      "notes": "DeepSeek Harness。桌面版与命令行版是同一个引擎，共用 ~/.dsh。它自带沙箱，嵌套在 HubAgent 沙箱里会 sandbox_apply 失败，因此以 DSH_PERMISSION_MODE=danger-full-access 运行，由 HubAgent 的外层沙箱负责隔离。",
       "variants": [
         {
           "id": "desktop",
@@ -23,7 +23,7 @@
             "cli": "Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
             "virtualCli": true
           },
-          "command": "ELECTRON_RUN_AS_NODE=1 \"<entry>\" \"<cli>\" --profile acp",
+          "command": "DSH_PERMISSION_MODE=danger-full-access ELECTRON_RUN_AS_NODE=1 \"<entry>\" \"<cli>\" --profile acp",
           "allowedWrite": [
             "~/.dsh"
           ]
@@ -35,7 +35,7 @@
             "kind": "which",
             "name": "dsh"
           },
-          "command": "dsh --profile acp",
+          "command": "DSH_PERMISSION_MODE=danger-full-access dsh --profile acp",
           "allowedWrite": [
             "~/.dsh"
           ]
