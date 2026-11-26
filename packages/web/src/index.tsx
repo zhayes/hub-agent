@@ -1,8 +1,8 @@
 import { render } from '@solidjs/web'
 import App from './App'
 import './styles/layers.css'
+import './styles/base.css'
 import './styles/fonts.css'
-import './styles.css'
 import './styles/tailwind.css'
 import './styles/motion.css'
 

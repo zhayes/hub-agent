@@ -6,10 +6,20 @@ export interface IconButtonProps {
   onClick?: (event: MouseEvent) => void
   class?: string
   variant?: 'ghost' | 'secondary' | 'primary'
-  active?: boolean
   /** Toggle state for screen readers; does not change the look. */
   pressed?: boolean
   disabled?: boolean
+}
+
+/* 32px hit area on tokens. No component CSS: the whole control is utilities so
+   hover/active colours follow the same palette as the rest of the console. */
+const base =
+  'grid size-8 shrink-0 place-items-center rounded-control transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-45'
+
+const variants: Record<NonNullable<IconButtonProps['variant']>, string> = {
+  ghost: 'text-ink-2 hover:bg-hover hover:text-ink',
+  secondary: 'border border-control bg-surface text-ink hover:bg-hover',
+  primary: 'bg-ink text-canvas hover:opacity-90',
 }
 
 export function IconButton(props: IconButtonProps) {
@@ -19,7 +29,7 @@ export function IconButton(props: IconButtonProps) {
   return (
     <button
       type="button"
-      class={`icon-button ${props.variant ?? 'ghost'}${props.active === true ? ' active' : ''}${props.class === undefined ? '' : ` ${props.class}`}`}
+      class={`${base} ${variants[props.variant ?? 'ghost']}${props.class === undefined ? '' : ` ${props.class}`}`}
       aria-label={props.label}
       aria-pressed={pressed()}
       title={props.label}

@@ -26,11 +26,13 @@ const NAV: ReadonlyArray<{
   { href: '/approvals', key: 'navApprovals', icon: 'approvals' },
 ]
 
-/* Shell chrome on tokens. The scroll container (.screen-body + chat/scroll
-   variants) stays legacy until P3 moves Tasks, because styles.css keys an
-   override off `.screen-body:has(.tasks-layout)`. */
+/* Shell chrome on tokens. The body wrapper is plain utilities now: chat and
+   tasks pin a full-height flex column, everything else scrolls. */
 const railButton =
   'relative grid size-10 place-items-center rounded-panel transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:border forced-colors:border-CanvasText'
+
+const bodyPane = 'flex min-h-0 flex-1 flex-col overflow-hidden'
+const bodyScroll = 'min-h-0 flex-1 overflow-y-auto px-6 pb-7 max-[1100px]:px-4'
 const railButtonIdle = 'text-ink-2 hover:bg-hover hover:text-ink'
 const railButtonActive = 'bg-active text-ink'
 
@@ -323,17 +325,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
             </div>
           </Show>
 
-          <div
-            class={`screen-body ${
-              isChat()
-                ? 'chat-body'
-                : isTasks()
-                  ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
-                  : 'scroll-body'
-            }`}
-          >
-            {props.children}
-          </div>
+          <div class={isChat() || isTasks() ? bodyPane : bodyScroll}>{props.children}</div>
         </div>
       </main>
     </div>

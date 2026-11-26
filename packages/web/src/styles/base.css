@@ -1,0 +1,138 @@
+/* Base layer: the small, explicit reset the console actually needs.
+ *
+ * Tailwind preflight is deliberately not imported (ADR 0019): it resets every
+ * form control globally and each control then has to put its border, padding
+ * and font back. This file owns only what is genuinely document-wide — box
+ * sizing, document typography, element margins, the button/input
+ * normalisation, reduced motion, and CJK tracking — so component styles stay
+ * in utilities and primitives.
+ *
+ * Colours come from the token layer (`--hx-*`, styles/tokens.css). There is no
+ * second palette here. */
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    /* Inter / JetBrains Mono / the Noto SC subset are self-hosted (fonts.css). */
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    scrollbar-color: light-dark(#b3aea4, #4a525e) transparent;
+  }
+
+  :root:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+
+  :root:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--hx-bg-canvas);
+    color: var(--hx-fg-default);
+    overflow: hidden;
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  dl,
+  dd,
+  figure {
+    margin: 0;
+  }
+
+  h1 {
+    font-size: 24px;
+    line-height: 1.15;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* Without preflight, form controls keep their UA font/colour and the
+     button's UA border, so both are normalised here once. */
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  /* Native <dialog> is the modal primitive (components/ui/Dialog.tsx). */
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  ::selection {
+    background: var(--hx-accent-soft);
+    color: var(--hx-fg-default);
+  }
+
+  /* Visually hidden but still announced: used for labels the eye gets from
+     layout (icon-only controls, the composer's label). */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.001ms;
+      scroll-behavior: auto;
+    }
+  }
+
+  /* Chinese type sits better with neutral tracking. */
+  :lang(zh-CN) h1,
+  :lang(zh-CN) h2 {
+    letter-spacing: 0;
+  }
+}
