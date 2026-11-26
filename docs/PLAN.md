@@ -2,7 +2,7 @@
 
 **目标：** 在最短路径上证明"核心功能是真的"，而不是先把界面做漂亮。
 **前置：** `docs/PRD.md`（范围与验收）、`docs/ARCHITECTURE.md`（落地方式）、`docs/adr/`（0002 沙箱、0003/0004 UI）
-**专项计划：** Agent 接入与 `ha web` 见 [PLAN-AGENT-ONBOARDING.md](PLAN-AGENT-ONBOARDING.md)；3D 舞台见 [PLAN-AGENT-OFFICE.md](PLAN-AGENT-OFFICE.md)；控制台见 [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md)。
+**专项计划：** Agent 接入与 `ha web` 见 [PLAN-AGENT-ONBOARDING.md](PLAN-AGENT-ONBOARDING.md)；跨机器 A2A 编排见 [PLAN-A2A.md](PLAN-A2A.md)，游戏集成测试见 [PLAN-A2A-GAME-TEST.md](PLAN-A2A-GAME-TEST.md)；3D 舞台见 [PLAN-AGENT-OFFICE.md](PLAN-AGENT-OFFICE.md)；控制台见 [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md)。
 **假设：** 1 名全职工程师；已有 PRD、架构、沙箱 PoC（`poc/tc-014`，macOS 11/11 通过）。工作量为粗估，用于排序而非承诺。
 
 ---
@@ -56,7 +56,7 @@ pnpm typecheck && pnpm lint && pnpm test:unit
 | M10 | 回归基线与指标 | 20–30 个真实任务、指标采集 | 4–6 | §2.3 六个指标能出数 |
 | **合计** | | | **39–56（约 8–11 周）** | |
 
-M11（Web Console）、M12（Agent Office 3D 舞台，见 `docs/PLAN-AGENT-OFFICE.md`）、V1.1（A2A）、V1.2（Relay）不计入上表。
+M11（Web Console）、M12（Agent Office 3D 舞台，见 `docs/PLAN-AGENT-OFFICE.md`）、A2A 与 Relay 的详细实施顺序见 [`docs/PLAN-A2A.md`](PLAN-A2A.md)。跨机器 A2A 是项目必做能力；开工前必须先完成 Runtime 唤醒/租约/outbox（见该文档 §5.1 / §5.1.1），路径为“先直接 HTTPS，再 Relay 穿透”。
 
 ---
 

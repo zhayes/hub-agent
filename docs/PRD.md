@@ -1717,6 +1717,89 @@ A2A 负责双方的任务通信，内部 Task Graph 不要求暴露给远程 Age
 
 默认禁止远程 Agent 未经允许继续委托其他 Agent。
 
+## 7.6 A2A 状态映射与对账（A0 契约）
+
+本地状态机枚举以 `domain/status.ts` 为准。A2A 的 `TaskState` 与本地状态**不是一一对应**，
+必须按下面两张表显式转换；未列出的远端状态一律按“未知”处理，不做猜测。
+
+### 7.6.1 出站：本机把任务委托给远端
+
+| 远端 `TaskState` | 本地落点 | 说明 |
+|---|---|---|
+| `SUBMITTED` | `Execution` 保持 `running`；`remoteTaskRef.state = submitted` | 只是被接受，不代表在跑 |
+| `WORKING` | 同上，`remoteTaskRef.state = working` | 进度只更新 ref 与事件游标 |
+| `INPUT_REQUIRED` | `Execution → waiting_input`，并生成一条可路由到该 Execution 的 `clarification` | 答复必须作为**同一 `taskId`/`contextId` 的后续 Message** 发回，不得新建任务 |
+| `AUTH_REQUIRED` | `Execution → waiting_permission`，并生成 `Approval` | 只展示净化后的授权请求，不转发任何秘密 |
+| `COMPLETED` | **不置成功**：进入本地验收，通过才 `Execution → succeeded` | 远端 completed 只代表“它认为做完了”；验收依据必须是本地证据（ADR 0007） |
+| `FAILED` | `Execution → failed`，`failureCategory = remote_failed` | 按既有升级链决定重试/换 Agent/重规划 |
+| `CANCELED` | `Execution → canceled` | 只有远端确认终态才收敛 |
+| `REJECTED` | `Execution → failed`，`failureCategory = remote_rejected` | 远端拒收且未执行，与执行失败分开统计 |
+| `UNSPECIFIED` / 未知 | `Execution → unknown` | ADR 0010：unknown 不自动重试，交人工/策略 |
+
+### 7.6.2 入站：本机接收远端委托
+
+| 本地推进 | 对外 `TaskState` |
+|---|---|
+| 收到并接受，尚未开始执行 | `SUBMITTED`（先回响应，再异步起跑） |
+| 已创建本地 Goal/Task 并在跑 | `WORKING` |
+| 本地 `Task → waiting_input` | `INPUT_REQUIRED` |
+| 本地 `Task → waiting_approval`（或 `Execution → waiting_permission`） | `AUTH_REQUIRED` |
+| 本地验收通过且 `Task → completed` | `COMPLETED` |
+| 本地 `Task → failed` | `FAILED` |
+| 本地 `Task → canceled` | `CANCELED` |
+| 权限/预算/能力拒绝，未创建任务 | `REJECTED` |
+
+入站约束：
+
+- **未认证 / 未授权 / 超预算的请求在创建任务之前就返回拒绝**，结果只能是 `REJECTED`，且零副作用。
+- 对外只暴露 `Task` 级状态与 Artifact，不暴露本地 Subtask 图。
+
+### 7.6.3 错误映射
+
+| A2A 错误 | 本地处理 |
+|---|---|
+| `TaskNotFoundError` | 远端已无该任务：`remoteTaskRef` 标记失效，`Execution → unknown`，交人工 |
+| `TaskNotCancelableError` | 取消未生效：保持原状态并记审计，不得臆断为已取消 |
+| `UnsupportedOperationError` | 能力未声明：失败关闭，不降级到“尽力而为” |
+| `ContentTypeNotSupportedError` | 契約/输入不兼容：失败且不自动重试 |
+| `InvalidAgentResponseError` | 按 `FAILED` 处理，保留协议错误摘要 |
+| `VersionNotSupportedError` | 版本不匹配：拒绝并提示，不做版本嗅探或隐式降级 |
+| `PushNotificationNotSupportedError` | 首版不使用 push callback，视为配置错误 |
+
+### 7.6.4 对账不变量
+
+1. **一 Execution 一 remoteTask**：`remoteTaskRef` 上 `localExecutionId` 唯一。
+2. **幂等**：`idempotencyKey` 唯一；重放命中同一 `remoteTaskId`，不得新建远端任务。
+3. **成功需本地证据**：没有本地验收记录，任何远端 `COMPLETED` 都不得让 Task 完成。
+4. **取消需远端确认**：超时、断线、进程重启都不等于“已取消”。
+5. **允许不一致，但必须可对账**：两端 Task 状态不要求相同；要求能以 `remoteTaskId + cursor` 还原差异。
+6. **未知不重试**：状态不可知时进 `unknown`，由人/策略决定，不做“猜它没执行”的重发。
+
+### 7.6.5 版本与能力校验
+
+- 只接受 `A2A-Version: 1.0`。**空版本头按规范视为 0.3**，所以客户端必须显式发送。
+- 协议绑定锁定 `JSONRPC`；其他 binding 未声明即拒绝。
+- 调用方声明的 `capabilities` 之外的操作返回 `UnsupportedOperationError`，不得静默降级。
+
+## 7.7 远程交付物与本地验收
+
+远程执行状态（`remoteTaskRef`）与远程交付物是两个模型，不得合并成“一个结果”。交付物至少记录：
+
+| 字段 | 说明 |
+|---|---|
+| `form` | `patch` / `commit` / `bundle` / `analysis`（只读结论） |
+| `repo` + `baseRef` | 目标仓库标识与基线 ref |
+| `baseCommit` | 基线 commit；patch 只能应用在这个基线上 |
+| `lockDigest` | 依赖锁文件摘要，用于判断环境是否可比 |
+| `sha256` / `size` / `mediaType` | 完整性 |
+| `signerPeerId` | 产出方身份（来自 Peer 身份，不采信 Agent 自述） |
+
+验收规则：
+
+- 代码任务默认验“**应用后的产物**”：`git apply --check` 通过 → 应用 → 跑本地检查。
+- patch 无法在指定基线干净应用时，不得把远端 `COMPLETED` 转成本地成功；按失败处理或升级人工。
+- 只读分析类结论可以只校验完整性与来源，但仍需本地记录“接受了什么、依据什么”。
+
 ---
 
 # 8. Relay 网络需求
@@ -2010,7 +2093,7 @@ Chat 是控制台的第一入口，也是默认打开页。它不是“任务表
 9. `delegate_task` **立即返回**，不阻塞 Brain。
 10. ACP Adapter 创建或复用 Session，下发 Brief。
 11. 接收执行事件，折叠为进度与证据。
-12. Brain 通过 `await_any` 等待到决策点，而不是轮询。
+12. 执行结果落库后，Runtime 在同一事务写入下一决策点；下一回合的 `await_any` 读快照拿到结果——工具本身不阻塞（ADR 0027）。
 13. 执行结束后采集 diff 与提交，产生基线快照。
 14. Verification Runner 执行可执行验收（构建 / 测试 / diff 范围），产出证据。
 15. Brain 根据证据做出判断：通过 / 回滚重做 / 换 Agent / 重新规划。
@@ -2721,7 +2804,7 @@ Brain 不直接调用 ACP / A2A。Brain 只能调用一组稳定的元工具，�
 | `discover_agents` | 按能力查询可用 Agent | 是 |
 | `get_agent_detail` | 能力、健康、历史表现 | 是 |
 | `delegate_task` | 下发任务契约 | 是（校验）+ 异步 |
-| `await_any` | 等待任一任务到达决策点 | 是 |
+| `await_any` | 读快照：返回已终态与待执行的子任务（不阻塞，见 §13.5.3） | 是 |
 | `get_task_result` | 结果摘要 + 证据引用 | 是 |
 | `cancel_task` | 取消执行 | 是 |
 | `revise_plan` | 提交计划修订 | 是（校验） |
@@ -2783,19 +2866,19 @@ delegate_task({
 
 ### 13.5.3 await_any
 
+`await_any` **不阻塞**（ADR 0027）。它只读当前快照，回答“现在有哪些子任务已经到终态、哪些还在跑”，避免 Brain 用一个回合去轮询。
+
 ```typescript
-await_any({
-  executionIds: string[],
-  timeoutMs: number,
-  wakeOn: ("terminal" | "approval" | "no_progress" | "budget")[]
-}): Promise<{
-  reached: { executionId: string; reason: string }[];
-  pending: string[];
-  timedOut: boolean;
+await_any({}): Promise<{
+  reached: { subtaskId: string; status: string }[];  // succeeded / failed / canceled / skipped
+  pending: string[];                                  // 其余 subtaskId
+  timedOut: boolean;                                  // 恒为 false：本工具不等待，保留字段仅为兼容旧调用
 }>;
 ```
 
-用途：一次调用阻塞到“有值得判断的事情发生”，避免 Brain 反复轮询烧 token。
+真正的等待由 Runtime 承担：执行结束 → 同一事务写「结果 + 下一决策点」→ 决策点被 claim 后驱动下一回合。所以“等结果”不是工具语义，而是回合结构。
+
+> 反模式：让 Brain 在一个回合里反复调 `await_any` 或 `get_task_result` 等执行完成——那是把轮询搬进模型循环。
 
 ### 13.5.4 工具返回约定
 

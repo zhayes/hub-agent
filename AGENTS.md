@@ -68,9 +68,9 @@ packages/web/src/
 
 - **事务内禁止 I/O**：不在事务里起进程、跑命令、调模型。
 - **Brain 不写文件、不改任务状态**：只能产出结构化动作（intent），由 Runtime 校验后执行。
-- **不按 Agent 生成工具**：只用稳定元工具（`discover_agents` / `delegate_task` / `await_any` / `get_task_result` / `cancel_task` / `revise_plan` / `request_human`）。
+- **不按 Agent 生成工具**：只用稳定元工具（`discover_agents` / `get_agent_detail` / `delegate_task` / `await_any` / `get_task_result` / `cancel_task` / `revise_plan` / `request_human`）。
 - **验收不得自证**：判定来自 Runtime 执行的检查与证据，不采信 Agent 自述。
-- **本地服务只监听回环地址**，新增端点必须走统一鉴权中间件。
+- **本地服务只监听回环地址**，新增端点必须走统一鉴权中间件。唯一例外是 A2A Server：独立端口、默认关闭、需显式启用，且必须有自己的 Peer 鉴权，不复用本地 token（见 ADR 0026）。
 - **所有子进程必须经 `SandboxProvider` 启动**：Coding Agent 与验证命令同一等级隔离；沙箱不可用时**拒绝执行**（fail-closed），不得降级为无隔离。
 - **不引入 React 及其生态包**；Solid 组件不得解构 props。
 - **UI 层依赖白名单**：只允许 `tailwindcss` / `@ui-sdk/core` / `@ui-sdk/solid` / `@lucide/solid`（Solid 2 专用；`lucide-solid` 是 Solid 1 包，勿用），以及 `three`（仅限 `features/agents/office/scene/**`，精确锁版本、懒加载，见 ADR 0020）。新增 UI 依赖先写 ADR；不得引入整套组件库或第二套设计系统（见 ADR 0004、ADR 0019、`docs/UI-SPEC.md`）。

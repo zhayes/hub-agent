@@ -18,6 +18,8 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 分层、进程模型、数据与接口的落地方式 | 跨层接口/进程模型变化时 |
 | [PLAN.md](PLAN.md) | 里程碑顺序、门禁、每个 M 的实现进度 | 每个里程碑完成或范围调整时 |
 | [PLAN-AGENT-ONBOARDING.md](PLAN-AGENT-ONBOARDING.md) | **Agent 接入**：内置目录、扫描、接入、`authenticate`、`ha web` | 接入规则/目录条目/状态机变化时 |
+| [PLAN-A2A.md](PLAN-A2A.md) | **跨机器 A2A 编排**：远程委托、Peer 信任、Runtime 唤醒/恢复、Relay 与验收门禁 | A2A/Relay 设计、接口或实施顺序变化时 |
+| [PLAN-A2A-GAME-TEST.md](PLAN-A2A-GAME-TEST.md) | **A2A 游戏集成测试**：确定性裁判、双机对抗、跨机混合组队、故障注入与通过指标 | 游戏测试规则、拓扑或验收指标变化时 |
 | [PLAN-AGENT-OFFICE.md](PLAN-AGENT-OFFICE.md) | 3D Agent 舞台（presence、场景、动效） | 舞台数据或交互变化时 |
 | [PLAN-CHAT-UX.md](PLAN-CHAT-UX.md) | **对话页体验**：状态保持、消息层级、执行过程、授权卡片 | 对话页交互/数据源变化时 |
 | [PLAN-CHAT-TURNS.md](PLAN-CHAT-TURNS.md) | 对话回合视图、右侧资源阅读器、流式与精确续跑 | 回合布局/资源预览/续跑语义变化时 |

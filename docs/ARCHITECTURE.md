@@ -85,6 +85,143 @@ flowchart TB
   RELAY["Relay 客户端"] -.->|"V1.2 出站长连接"| RT
 ```
 
+### 1.2.1 当前实现的组件与依赖
+
+下图按当前代码实现绘制。实线表示 V1 当前调用或数据关系；虚线表示尚未进入 V1 本地闭环的扩展方向。
+
+```mermaid
+flowchart LR
+  User[开发者]
+  subgraph Clients[客户端]
+    CLI[ha CLI]
+    WEB[Web Console<br/>Solid SPA]
+  end
+  subgraph Daemon[hubagentd 单进程 · 127.0.0.1]
+    HTTP[Hono HTTP<br/>Bearer 鉴权 · REST · SSE · 静态资源]
+    CHAT[ChatService<br/>对话/运行入口]
+    RT[Runtime<br/>Brain Loop · 状态迁移 · 调度/恢复]
+    BRAIN[OrchestratorBrain<br/>Pi 默认 / Scripted 测试替身]
+    ACP[ACP Adapter<br/>JSON-RPC stdio]
+    HOST[AgentHost]
+    SANDBOX[SandboxProvider<br/>srt · fail-closed]
+    VERIFY[Verification Runner<br/>命令/文件/diff 检查]
+    WS[Workspace<br/>lease · worktree · delivery]
+    REG[Agent Registry<br/>发现/注册/按需探测]
+  end
+  subgraph Durable[本地持久化]
+    DB[(SQLite WAL<br/>events + projections)]
+    FS[(工作区 / worktrees<br/>transcripts / artifacts)]
+  end
+  subgraph Child[隔离子进程]
+    AGENT[ACP Coding Agent]
+    COMMAND[验证与 Git 命令]
+  end
+
+  User --> CLI
+  User --> WEB
+  CLI -->|本地 CLI/API| HTTP
+  WEB -->|同源 REST + SSE| HTTP
+  HTTP --> CHAT
+  HTTP -->|只读查询/审批动作| RT
+  CHAT --> RT
+  RT -->|快照 → step/explain| BRAIN
+  BRAIN -->|结构化 intent| RT
+  RT -->|事件追加与查询| DB
+  RT --> REG
+  RT --> ACP
+  ACP -->|spawn/session/prompt| HOST
+  HOST --> SANDBOX
+  SANDBOX -->|经策略包装后启动| AGENT
+  RT --> VERIFY
+  VERIFY --> HOST
+  HOST --> SANDBOX
+  SANDBOX -->|cwd 固定 worktree| COMMAND
+  RT --> WS
+  WS -->|Git 操作由 AgentHost 执行| HOST
+  ACP -->|协议事件/结果| RT
+  AGENT -->|stdout JSON-RPC| ACP
+  RT -->|transcript 与证据引用| FS
+  AGENT -->|改动文件| FS
+  DB -->|查询投影| HTTP
+  DB -.->|恢复扫描| RT
+  RELAY[Relay / A2A<br/>后续版本] -.-> RT
+```
+
+### 1.2.2 用户目标到交付的主流程
+
+```mermaid
+flowchart TD
+  U[用户提交目标<br/>CLI / Chat UI]
+  AUTH[HTTP 统一鉴权<br/>仅回环监听]
+  INPUT[校验输入与项目上下文]
+  GOAL[创建 Goal 事件]
+  POINT[Decision Queue<br/>去重入队并 claim]
+  SNAP[从 SQLite 状态构建快照<br/>带 stateVersion / 预算 / Agent 概况]
+  BRAIN[Brain step<br/>Pi 默认，可替换]
+  CHECK{Runtime 校验动作<br/>schema · 权限 · 引用 · 预算 · 幂等}
+  ACTION{Brain intent 类型}
+  CLARIFY[持久化澄清/决策请求<br/>等待用户回答]
+  REPLY[直接回复<br/>不创建 Task]
+  PLAN[创建 Plan / Task / Subtask]
+  SELECT[Agent 选择与能力/状态筛选]
+  LEASE[申请 WorkspaceLease<br/>创建或复用 worktree]
+  CONTRACT[构造 Delegation Contract<br/>允许路径 · 验收 · 预算 · idempotency key]
+  START[AgentHost 请求 SandboxProvider<br/>沙箱缺失则拒绝启动]
+  ACP[ACP initialize → session/new<br/>→ prompt]
+  EVENTS[消费 ACP 事件<br/>更新进度/转写/运行状态]
+  EVIDENCE[收集 git diff / transcript<br/>记录 Execution evidence]
+  VERIFY[Runtime 验收<br/>检查命令经同一沙箱执行]
+  VERDICT{验收结论}
+  PASS[通过：收敛 Execution/Subtask<br/>执行交付策略与 Goal/Task 完成]
+  FAIL[失败：副作用核验与归因<br/>重试 / 换 Agent / 重规划]
+  HUMAN[审批或人工输入<br/>等待用户裁决/回答]
+  STORE[(事件日志 + 投影<br/>SQLite)]
+  VIEW[CLI / REST 查询结果<br/>Web 通过 SSE 收到失效通知]
+
+  U --> AUTH --> INPUT --> GOAL --> POINT --> SNAP --> BRAIN --> CHECK
+  CHECK -->|拒绝/过期/超预算| STORE
+  CHECK -->|通过| ACTION
+  ACTION -->|request_human| CLARIFY --> STORE
+  ACTION -->|reply / finish 无执行计划| REPLY --> STORE
+  ACTION -->|revise_plan / delegate| PLAN --> SELECT --> LEASE --> CONTRACT --> START
+  START -->|启动成功| ACP --> EVENTS --> EVIDENCE --> VERIFY --> VERDICT
+  START -->|sandbox_denied / 启动失败| HUMAN
+  VERDICT -->|pass| PASS --> STORE
+  VERDICT -->|fail / unknown| FAIL --> POINT
+  VERDICT -->|manual_required / sandbox_denied| HUMAN --> STORE
+  STORE -->|事件/投影读模型| VIEW
+  VIEW -.->|用户回答/审批后重新唤醒 Runtime| POINT
+```
+
+**边界说明：** Brain 只返回结构化 intent；Runtime 对 intent 校验并拥有状态变化、调度、验收和恢复控制权。ACP Agent 与验收命令均通过 `AgentHost → SandboxProvider` 启动；Agent 自述不构成验收证据。Web 的 SSE 用于进度与缓存失效通知，REST/SQLite 投影是读取状态的依据。
+
+### 1.2.3 事件、投影与界面读取
+
+```mermaid
+flowchart LR
+  CALLER[Runtime 写入点<br/>goal/task/execution/approval/verification]
+  APPEND[appendEvent<br/>applyEvent + 不变量检查]
+  TX[单事务写入]
+  EVENTS[(events<br/>追加式事实记录)]
+  PROJ[更新聚合投影<br/>last_applied_seq]
+  READ[storage/queries<br/>tasks / evidence / agents / chat]
+  HTTP[HTTP REST API]
+  SSE[SSE 增量事件流]
+  WEB[Solid Query 缓存与页面]
+  CLI[CLI 输出]
+
+  CALLER --> APPEND --> TX
+  TX --> EVENTS
+  TX --> PROJ
+  EVENTS -->|恢复重放/按 seq 读取| READ
+  PROJ --> READ --> HTTP
+  EVENTS -->|sinceSeq| SSE --> WEB
+  HTTP --> WEB
+  HTTP --> CLI
+```
+
+`events` 是审计与恢复依据；投影服务常规查询。事件追加会先应用领域迁移、检查不变量，再在同一事务写事件并更新投影；拒绝的迁移不落库。
+
 ### 1.3 进程与部署形态
 
 ```text
@@ -304,7 +441,7 @@ interfaces  →  runtime  →  domain
 | 模块 | 负责 | 禁止 |
 |---|---|---|
 | `interfaces/http` | 鉴权、路由、SSE、参数校验、静态资源 | 业务判断、直接写业务表 |
-| `runtime` | 状态迁移、调度、租约、事件写入、验证执行、恢复 | 调用 LLM |
+| `runtime` | 状态迁移、调度（决策队列 + 派发队列，见 PLAN-A2A §5.4）、租约、事件写入、验证执行、恢复 | 调用 LLM |
 | `brain` | 读快照 → 产出结构化动作 | 直接改库、直接起 Session、直接写文件 |
 | `adapters/acp` | 协议分帧、会话、事件翻译、进程监管 | 业务决策、重试策略 |
 | `storage` | SQL、迁移、投影维护 | 业务规则 |
@@ -316,12 +453,16 @@ interfaces  →  runtime  →  domain
 2. 获取单实例锁（~/.hubagent/hubagent.lock），失败则提示已在运行
 3. 打开 SQLite，设置 WAL / busy_timeout / foreign_keys=ON
 4. 执行迁移，失败即退出（不做半迁移运行）
-5. 加载并校验未完成任务（恢复扫描，见 6.7）
-6. 启动 Agent Registry 健康巡检（无 LLM）
-7. 启动调度循环与事件分发
-8. 启动 HTTP/SSE，写入 port 文件与 token 文件，打印访问方式
-9. 进入就绪；按需触发 Brain 决策点（可能来自恢复）
+5. 扫描未完成 Execution，把中断的执行标记为 unknown 并生成恢复决策点（见 6.7；不自动重跑；扫描异常记录为启动恢复错误，不阻止服务启动）
+6. 创建 SandboxProvider 与 ChatService
+7. 创建 Hono API（Bearer token；默认只监听 `127.0.0.1`）并托管可用的 Web 构建产物
+8. 绑定端口（默认 7788，遇占用尝试后续端口），进入就绪
+9. 启动常驻调度 tick（默认 5s）：先回收过期 claim，再消费派发意图；单次失败只记不抛
 ```
+
+> **实现对齐说明：** `startHub` 中**没有**常驻的 Agent Registry 健康巡检；恢复扫描在监听前同步执行。
+> 调度循环已于 2026-11-26 引入（`runtime/scheduler/tick.ts`），但只消费**派发**一侧；
+> 决策点仍需 Brain 回合，tick 只把它们作为 `pendingDecisionGoals` 上报，不代为决策（ADR 0027）。
 
 ### 4.3 关闭序列
 
@@ -402,7 +543,7 @@ Runtime 校验（schema → 权限 → 预算 → 幂等）后才落库执行。
 ### 5.4 Pi 集成方式
 
 - Pi 负责 agent loop、provider 适配、工具调用协议。
-- 我们只为它注册**一组稳定元工具**（`discover_agents`/`delegate_task`/`await_any`/`get_task_result`/`cancel_task`/`revise_plan`/`request_human`），**不按 Agent 生成工具**。
+- 我们只为它注册**一组稳定元工具**（`discover_agents`/`get_agent_detail`/`delegate_task`/`await_any`/`get_task_result`/`cancel_task`/`revise_plan`/`request_human`），**不按 Agent 生成工具**。
 - 每个元工具都是 Runtime 的瘦封装：参数校验 + 调用 Runtime + 精简返回。
 - `agentId` 只作为偏好透传，实际执行者由 Selection Engine 决定。
 - **`pi` 依赖只允许出现在 `src/brain/pi/`**，由 R3 规则强制（其余模块只看到 `orchestrator-brain.ts` 接口）。
@@ -414,13 +555,15 @@ Runtime 校验（schema → 权限 → 预算 → 幂等）后才落库执行。
 `DecisionQueue` 是一张表（见 §11.6），不是内存队列：
 
 - Runtime 在产生决策点时 `INSERT` 一行（含 `dedupe_key`）；
-- 单写者循环 `claim` 一行（`UPDATE ... WHERE status='pending'`）后执行一个 Brain 回合；
+- 单写者循环 `claim` 一行（`UPDATE ... WHERE status='pending'`，且 `attempts` 未到上限）后执行一个 Brain 回合；
+- 每次 claim 生成 `claim_token`；续租、完成、失败都必须带着它——租约过期被回收后，旧执行者无法再把别人的行标成完成（fencing）；
 - 回合结束写入 `stateVersion`，冲突则重新 claim（乐观并发）；
-- 进程重启后，未 claim 的行自动成为待处理项。
+- `explain` 没有独立超时，调用前先续租；续租失败即丢弃本轮动作；
+- 进程重启后，未 claim 的行自动成为待处理项；已 claim 但持有者已死的行由恢复扫描按租约回收（可限定 Goal），**不在业务路径上隐式回收**；回收后仍需新的调度者重新 claim 才会继续（仅回收不等于恢复执行）。
 
 > 这样"消息注入能否叫醒 Agent"就不再是正确性前提，只是延迟优化。
 
-**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、测试替身与动作校验；`brain/pi/{session,pi-brain,meta-tools}.ts` 用 Pi 官方 SDK 创建 in-memory session，并注册 8 个稳定元工具（工具只读/记录 intent）；`brain/create-brain.ts` 按 env 选择。`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → dispatch（delegate/cancel/request_human）→ accept/finish 的 Brain 驱动入口。默认 `HUBAGENT_BRAIN_MODE=pi`，Pi 模型/认证缺失时 fail-closed；`ScriptedBrain` 只在显式 `scripted` 时用于测试/离线。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
+**M6 落地。** `brain/{types,snapshot,scripted-brain,validate}.ts` 定义接口、派生快照、测试替身与动作校验；`brain/pi/{session,pi-brain,meta-tools}.ts` 用 Pi 官方 SDK 创建 in-memory session，并注册一组稳定元工具（工具只读/记录 intent）；`brain/create-brain.ts` 按 env 选择。`runtime/{decision-queue,decision-record,brain-loop,clarify,brain-run}.ts` 实现表驱动队列、DecisionRecord、预算约束、clarify/decide 路由，以及 Goal → 拆计划 → dispatch（delegate/cancel/request_human）→ accept/finish 的 Brain 驱动入口。默认 `HUBAGENT_BRAIN_MODE=pi`，Pi 模型/认证缺失时 fail-closed；`ScriptedBrain` 只在显式 `scripted` 时用于测试/离线。`hubagent run` 默认走 Brain，`--no-brain` 保留 M4 固定脚本用于排障。
 
 ---
 
@@ -566,10 +709,12 @@ COMMIT
        - 进程不存在 + 有 diff        → unknown → 进入核验
        - 进程不存在 + 无 diff        → 可安全重试
        - 进程仍存活                  → 重新 attach 或强杀（可配置）
-  5. 写入恢复决策点，交由 Brain 决定继续/回滚/放弃
+  5. 在同一事务内迁移状态并写入恢复决策点：崩在两者之间会整体回滚，
+     Execution 保持原状态，下次启动重来——不留“已 unknown 却无决策点”的半状态
+       - 缺少 Task 投影、定位不到 Goal 时反而不能置 unknown：保持原状并报进 skippedIncomplete
 ```
 
-**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause,fail}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复与最终失败收敛。`runtime/acp-retry.ts` 已接自动重试：协议/启动最多 2 次、无 diff 同 Agent 重试 1 次、无候选时交给 Brain 自动重规划（最多 2 次，新 Task 计划）；有 diff/审批/人工输入不静默重试。`hubagentd` 启动时执行 `scanRecovery`；`runAcpTask` 创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。换 Agent/重规划仍需 Selection Engine，`task retry` 只支持 paused 任务 resume。
+**M8 落地。** `runtime/recovery/{failure,side-effect,no-progress,idempotency,scan,pause,fail}.ts` 实现失败分类与升级链、副作用核验、无进展检测、幂等契约、恢复扫描、暂停/恢复与最终失败收敛。`runtime/acp-retry.ts` 已接自动重试：协议/启动最多 2 次、无 diff 同 Agent 重试 1 次、无候选时交给 Brain 自动重规划（最多 2 次，新 Task 计划）；有 diff/审批/人工输入不静默重试。`hubagentd` 启动时执行 `scanRecovery`；`runAcpTask` 创建 Execution 前用 `delegation_contracts.idempotency_key` 去重。`scanRecovery` 的“置 unknown + 建决策点”在同一事务内提交（`test/unit/recovery.test.ts` 用 SQLite 触发器注入崩溃点，验证整体回滚）。租约检查等可能做 I/O 的步骤一律在事务外完成（事务内禁止 I/O）。换 Agent/重规划仍需 Selection Engine，`task retry` 只支持 paused 任务 resume。
 
 ---
 
@@ -866,6 +1011,7 @@ PRAGMA foreign_keys = ON;
 | `usage_records` | 成本 | `(goal_id)`, `(created_at)` |
 | `decision_records` | 决策理由 | `goal_id` |
 | `decision_queue` | 待处理决策点 | `(status, dedupe_key UNIQUE)` |
+| `dispatch_queue` | 待执行的派发意图（Dispatcher，见 PLAN-A2A §5.4） | `(status, created_at)`, `(status, claimed_at)`, `idempotency_key UNIQUE` |
 
 ### 11.4 投影表
 
