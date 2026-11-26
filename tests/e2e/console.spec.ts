@@ -183,12 +183,18 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
   await expect(page).toHaveURL(/\/tasks$/)
   await expect(page.getByRole('heading', { name: 'Tasks' })).toBeVisible()
 
+  /* Theme and language live in Settings only: the rail is a list of places,
+     not a control panel. */
+  await expect(page.getByRole('button', { name: /^Theme:/ })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Settings' }).click()
+  await expect(page).toHaveURL(/\/settings$/)
+
   const before = await page.locator('meta[name="color-scheme"]').getAttribute('content')
-  await page.getByRole('button', { name: /^Theme:/ }).click()
+  await page.getByRole('button', { name: 'Dark' }).click()
   const after = await page.locator('meta[name="color-scheme"]').getAttribute('content')
   expect(after).not.toBe(before)
 
-  await page.getByRole('button', { name: 'Language' }).click()
+  await page.getByRole('button', { name: '中文' }).click()
   // The locale switch renames the controls; the shell must stay mounted and usable.
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
   await expect(page.getByRole('link', { name: '任务' })).toBeVisible()

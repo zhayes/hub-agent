@@ -97,15 +97,6 @@ export function AppLayout(props: { children?: JSX.Element }) {
     return app.t('offline')
   }
 
-  const themeLabel = (): string => {
-    if (app.theme.theme() === 'light') return app.t('themeLightLabel')
-    if (app.theme.theme() === 'dark') return app.t('themeDarkLabel')
-    return app.t('themeSystemLabel')
-  }
-
-  const themeIcon = (): 'sun' | 'moon' | 'monitor' =>
-    app.theme.theme() === 'light' ? 'sun' : app.theme.theme() === 'dark' ? 'moon' : 'monitor'
-
   /* Cmd/Ctrl+K anywhere in the console; the dialog owns Escape and focus return. */
   onSettled(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -231,28 +222,9 @@ export function AppLayout(props: { children?: JSX.Element }) {
             )}
           </For>
         </nav>
-        <div class="mt-auto flex w-10 flex-col items-center gap-0.5 border-t border-line pt-2 max-[860px]:mt-0 max-[860px]:w-auto max-[860px]:flex-row max-[860px]:border-t-0 max-[860px]:pt-0">
-          <IconButton
-            icon={themeIcon()}
-            label={themeLabel()}
-            class={`${railButton} ${railButtonIdle}`}
-            onClick={() => app.theme.cycleTheme()}
-          />
-          <button
-            type="button"
-            class={`${railButton} ${railButtonIdle}`}
-            aria-label={app.t('language')}
-            title={app.t('language')}
-            onClick={() => app.setLocale(app.locale() === 'zh-CN' ? 'en-US' : 'zh-CN')}
-          >
-            <Icon name="globe" size={17} />
-            <span
-              class="absolute right-0 bottom-0 rounded-control bg-canvas px-0.5 text-badge font-semibold text-ink-2"
-              aria-hidden="true"
-            >
-              {app.locale() === 'zh-CN' ? '中' : 'EN'}
-            </span>
-          </button>
+        {/* One entry point. Theme and language live in Settings, which already
+            owns them; the rail stays a list of places, not a control panel. */}
+        <div class="mt-auto flex w-10 flex-col items-center max-[860px]:mt-0 max-[860px]:w-auto max-[860px]:flex-row">
           <a
             href="/settings"
             class={`${railButton} ${isActive('/settings') ? railButtonActive : railButtonIdle}`}
