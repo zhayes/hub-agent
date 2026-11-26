@@ -26,6 +26,8 @@ export interface A2aServerOptions {
   /** 启动时幂等注册的 Peer（配置驱动，便于首次配对）。 */
   peers?: Array<{ displayName: string; token: string }>
   checks?: readonly VerificationCheck[]
+  /** 覆盖入站执行器（嵌入或测试用）；缺省用 `createInboundTaskRunner`。 */
+  runner?: InboundTaskRunner
 }
 
 export interface A2aServerHandle {
@@ -60,12 +62,14 @@ export async function startA2aServer(options: A2aServerOptions): Promise<A2aServ
     streaming: true,
   })
 
-  const runner: InboundTaskRunner = createInboundTaskRunner({
-    db: options.db,
-    provider: options.provider,
-    worktree: options.worktree,
-    ...(options.checks === undefined ? {} : { checks: options.checks }),
-  })
+  const runner: InboundTaskRunner =
+    options.runner ??
+    createInboundTaskRunner({
+      db: options.db,
+      provider: options.provider,
+      worktree: options.worktree,
+      ...(options.checks === undefined ? {} : { checks: options.checks }),
+    })
 
   const handler = new DefaultRequestHandler(
     card,

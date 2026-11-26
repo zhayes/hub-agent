@@ -407,6 +407,14 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 
 **A2 仍未完成的一项**：真正的“两个 daemon 互委托”——需要出站 Client（A3），目前 A2 侧只证明“别人能委托我”。
 
+### A3 进度（2026-11-26）
+
+已落地：`adapters/a2a/client.ts`（`connectRemoteAgent`）——SDK `ClientFactory` 拉卡片 + `clientConfig.polling` 非阻塞发送 + 注入 fetch 带 Peer token；`A2aServerOptions.runner` 可注入（嵌入/测试用）。
+
+验证：`test/unit/a2a-client.test.ts` 用**真实 HTTP** 跑通 SDK 客户端 → 我们自己的 SDK 服务端：拉卡片、非阻塞发送、轮询到终态、`INPUT_REQUIRED` 可读、错 token 失败、取消终态任务被拒。这是第一次两端都是 A2A 协议的互操作验证。
+
+未落地：`remote_task_refs`（迁移 021）、`target='remote-a2a'` 的执行器、断线对账、双 daemon 进程级互委托。
+
 ### A5 核心验收场景
 
 1. A 本机 Brain 规划并行任务：一个本地 ACP，一个远程 HubAgent；结果汇合后由 A 本地验收。
