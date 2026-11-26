@@ -17,6 +17,12 @@ export interface AgentRecord {
   capabilities?: unknown
   createdAt: string
   lastSeenAt?: string
+  /** 目录绑定：应用升级换了路径时，用它重新解析命令（ADR 0021） */
+  catalogId?: string
+  catalogVersion?: number
+  variantId?: string
+  lastProbeAt?: string
+  lastProbeError?: string
 }
 
 interface AgentRow {
@@ -30,6 +36,11 @@ interface AgentRow {
   capabilities: string | null
   created_at: string
   last_seen_at: string | null
+  catalog_id: string | null
+  catalog_version: number | null
+  variant_id: string | null
+  last_probe_at: string | null
+  last_probe_error: string | null
 }
 
 function parseStrings(value: string | null): string[] {
@@ -64,6 +75,11 @@ function toRecord(row: AgentRow): AgentRecord {
     ...(capabilities === undefined ? {} : { capabilities }),
     createdAt: row.created_at,
     ...(row.last_seen_at === null ? {} : { lastSeenAt: row.last_seen_at }),
+    ...(row.catalog_id === null ? {} : { catalogId: row.catalog_id }),
+    ...(row.catalog_version === null ? {} : { catalogVersion: row.catalog_version }),
+    ...(row.variant_id === null ? {} : { variantId: row.variant_id }),
+    ...(row.last_probe_at === null ? {} : { lastProbeAt: row.last_probe_at }),
+    ...(row.last_probe_error === null ? {} : { lastProbeError: row.last_probe_error }),
   }
 }
 
@@ -197,4 +213,62 @@ export function markAgentSeen(
     status: details.status ?? 'online',
     capabilities: details.capabilities === undefined ? null : JSON.stringify(details.capabilities),
   })
+}
+
+/** 把注册行绑定到目录条目（接入时写一次）。 */
+export function setAgentCatalog(
+  db: Db,
+  id: AgentId,
+  binding: { catalogId: string; catalogVersion: number; variantId: string },
+): void {
+  db.prepare(
+    `UPDATE agents
+     SET catalog_id = @catalogId, catalog_version = @catalogVersion, variant_id = @variantId
+     WHERE id = @id`,
+  ).run({ id, ...binding })
+}
+
+/** 记录一次探测/验证结果；不改 catalog 绑定。 */
+export function recordAgentProbe(
+  db: Db,
+  id: AgentId,
+  result: {
+    status: string
+    at: string
+    capabilities?: unknown
+    error?: string
+  },
+): void {
+  db.prepare(
+    `UPDATE agents
+     SET status = @status,
+         last_probe_at = @at,
+         last_probe_error = @error,
+         last_seen_at = CASE WHEN @status = 'online' THEN @at ELSE last_seen_at END,
+         capabilities = COALESCE(@capabilities, capabilities)
+     WHERE id = @id`,
+  ).run({
+    id,
+    status: result.status,
+    at: result.at,
+    error: result.error ?? null,
+    capabilities: result.capabilities === undefined ? null : JSON.stringify(result.capabilities),
+  })
+}
+
+export function findAgentByName(db: Db, name: string): AgentRecord | undefined {
+  const row = db.prepare('SELECT * FROM agents WHERE name = ?').get(name) as AgentRow | undefined
+  return row === undefined ? undefined : toRecord(row)
+}
+
+/** 移除注册（历史 Execution 保留，agents 与 executions 无外键）。 */
+export function removeAgent(db: Db, name: string): boolean {
+  const result = db.prepare('DELETE FROM agents WHERE name = ?').run(name)
+  return result.changes > 0
+}
+
+/** 停用/启用：只改 status，不删配置。 */
+export function setAgentStatus(db: Db, name: string, status: string): AgentRecord | undefined {
+  db.prepare('UPDATE agents SET status = ? WHERE name = ?').run(status, name)
+  return findAgentByName(db, name)
 }

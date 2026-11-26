@@ -419,3 +419,102 @@ test('renders only the latest page and loads older messages', async ({ page }) =
   await page.getByRole('button', { name: 'Load older messages' }).click()
   await expect(transcript).toHaveCount(200)
 })
+
+test('registry scans the built-in catalog and adopts an agent', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const scan = {
+    ok: true,
+    version: 1,
+    scannedAt: new Date().toISOString(),
+    problems: [],
+    agents: [
+      {
+        catalogId: 'dsh',
+        label: 'DSH',
+        name: 'dsh',
+        variants: [
+          {
+            id: 'desktop',
+            label: 'Desktop',
+            command: 'ELECTRON_RUN_AS_NODE=1 "/Applications/DeepSeek Harness.app" --profile acp',
+            source: '/Applications/DeepSeek Harness.app',
+            allowedWrite: ['/Users/me/.dsh'],
+            missingRequires: [],
+            adoptable: true,
+          },
+        ],
+        chosenVariant: 'desktop',
+        registered: false,
+      },
+      {
+        catalogId: 'codex',
+        label: 'Codex',
+        name: 'codex',
+        variants: [
+          {
+            id: 'adapter',
+            label: 'adapter',
+            command: 'codex-acp',
+            source: '/Applications/ChatGPT.app',
+            allowedWrite: [],
+            missingRequires: ['codex-acp'],
+            adoptable: false,
+          },
+        ],
+        chosenVariant: 'adapter',
+        registered: false,
+      },
+    ],
+  }
+  const adopted = {
+    ok: true,
+    agent: {
+      id: 'a1',
+      name: 'dsh',
+      status: 'online',
+      command: scan.agents[0]!.variants[0]!.command,
+      networkMode: 'agent-managed',
+      allowedWrite: ['/Users/me/.dsh'],
+      catalogId: 'dsh',
+    },
+    probe: { ok: true, status: 'online', durationMs: 900, authMethods: [], stderrTail: [] },
+  }
+
+  await page.route('**/api/v1/**', (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
+    if (path === '/api/v1/chat/threads') return route.fulfill({ json: { ok: true, threads: [] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/agents/scan') return route.fulfill({ json: scan })
+    if (path === '/api/v1/agents/adopt') return route.fulfill({ json: adopted })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.goto('/registry')
+  await expect(page.getByRole('heading', { name: 'Connect' })).toBeVisible()
+  await expect(page.getByText('DSH')).toBeVisible()
+  await expect(page.getByText(/Missing: codex-acp/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Connect', exact: true }).first().click()
+  await expect(page.getByText('dsh is connected.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Agent details' }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('ELECTRON_RUN_AS_NODE=1')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+})
+
+test('registry does not overflow at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 })
+  await page.goto('/registry')
+  await expect(page.getByRole('heading', { name: 'Connect' })).toBeVisible()
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(overflow).toBeLessThanOrEqual(1)
+})

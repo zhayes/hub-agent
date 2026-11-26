@@ -2,6 +2,8 @@ export type StatusTone = 'running' | 'success' | 'failed' | 'waiting' | 'neutral
 
 export function statusTone(status: string): StatusTone {
   if (status === 'running' || status === 'queued' || status === 'active') return 'running'
+  if (status === 'online') return 'success'
+  if (status === 'needs_auth') return 'waiting'
   if (
     status === 'completed' ||
     status === 'succeeded' ||
@@ -15,6 +17,7 @@ export function statusTone(status: string): StatusTone {
   if (
     status === 'failed' ||
     status === 'error' ||
+    status === 'missing' ||
     status === 'rejected' ||
     status === 'fail' ||
     status === 'blocked'

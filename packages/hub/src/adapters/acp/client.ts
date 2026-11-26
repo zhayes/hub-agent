@@ -56,7 +56,13 @@ const DEFAULT_CLOSE_TIMEOUT_MS = 3_000
 function asIncompatible(label: string, error: unknown): HubError {
   if (error instanceof HubError) return error
   const message = error instanceof Error ? error.message : String(error)
-  return new HubError('ADAPTER_INCOMPATIBLE', `${label} 失败：${message}`, { label })
+  // 保留 JSON-RPC 错误码：接入时靠它区分「需要登录」(-32000) 与真正的协议失败。
+  const rawCode = (error as { code?: unknown }).code
+  const rpcCode = typeof rawCode === 'number' ? rawCode : undefined
+  return new HubError('ADAPTER_INCOMPATIBLE', `${label} 失败：${message}`, {
+    label,
+    ...(rpcCode === undefined ? {} : { rpcCode }),
+  })
 }
 
 export class AcpClient {
@@ -179,6 +185,21 @@ export class AcpClient {
         : { agentCapabilities: response.agentCapabilities }),
     })
     return response
+  }
+
+  /**
+   * 触发 Agent 的登录流程（ACP `authenticate`）。
+   *
+   * 只接受 agent 类型的方法；terminal 类型要求客户端起一个交互式 TUI，
+   * 我们不做（也不该在任务执行期弹窗）。
+   */
+  async authenticate(methodId: string): Promise<void> {
+    if (this.initialized === undefined) {
+      throw new HubError('ADAPTER_INCOMPATIBLE', '未 initialize 就调用 authenticate')
+    }
+    await this.withTimeout('authenticate', this.requestTimeoutMs, (options) =>
+      this.connection.agent.request('authenticate', { methodId }, options),
+    )
   }
 
   async newSession(cwd: string): Promise<NewSessionResponse> {

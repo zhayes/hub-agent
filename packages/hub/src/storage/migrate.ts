@@ -7,6 +7,7 @@ import { MIGRATION_005_WORKSPACE } from './migrations/005-workspace'
 import { MIGRATION_006_CHAT } from './migrations/006-chat'
 import { MIGRATION_007_CHAT_APPROVAL } from './migrations/007-chat-approval'
 import { MIGRATION_008_CHAT_CLARIFICATION } from './migrations/008-chat-clarification'
+import { MIGRATION_009_AGENT_CATALOG } from './migrations/009-agent-catalog'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -18,6 +19,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_006_CHAT,
   MIGRATION_007_CHAT_APPROVAL,
   MIGRATION_008_CHAT_CLARIFICATION,
+  MIGRATION_009_AGENT_CATALOG,
 ]
 
 export interface MigrateResult {

@@ -7,10 +7,13 @@
 - `docs/PRD.md` —— 产品边界、版本范围、验收标准（产品约束的唯一口径）
 - `docs/ARCHITECTURE.md` —— 技术落地方式（分层、进程模型、数据与接口）
 - `docs/PLAN.md` —— 实施顺序与里程碑门禁（当前做到哪一步，看这里）
+- `docs/README.md` —— 文档索引：什么东西该改哪份文档（先看这个）
 - `docs/adr/` —— 决策记录：为什么这么定，以及当时否掉了什么
 - `node_modules/@ui-sdk/solid/docs/llms.txt` —— 用 UI SDK 前先读；新建组件时再按标题搜 `core.md`，并读旁边的 `rendering.md`
 
 冲突时：PRD 的版本边界与安全底线优先；实现细节以 ARCHITECTURE 为准。
+
+写文档时遵守 `docs/README.md` 的约定：同一事实只写一处，行为变了同 PR 更新文档。
 
 ---
 
@@ -24,7 +27,7 @@ packages/hub/src/
   brain/           决策层
     orchestrator-brain.ts   唯一对外契约
     pi/                     唯一允许 import Pi 的目录
-  runtime/         状态机、调度、事件、验证、工作区、恢复
+  runtime/         状态机、调度、事件、验证、工作区、恢复、Agent 接入
   adapters/        ACP / A2A / Relay
   agent-host/      子进程监管（预留拆进程）
   storage/         schema、迁移、仓储、投影查询
@@ -32,7 +35,7 @@ packages/hub/src/
     http/          Hono 应用、SSE、鉴权、静态资源
     cli/           commander 命令
   shared/          错误码、时间、ULID、日志（叶子层）
-  bin/             hubagentd.ts、hubagent.ts
+  bin/             ha.ts（主入口）、hubagentd.ts、hubagent.ts（兼容）
 
 packages/web/src/
   routes/          页面骨架与路由参数
@@ -41,7 +44,7 @@ packages/web/src/
   shared/          api 客户端、SSE 原语、格式化
 ```
 
-`fixtures/` 存放回归基线任务与 ACP 录制样本。
+`packages/hub/catalog/` 是内置 Agent 目录；`fixtures/` 存放回归基线任务与 ACP 录制样本。
 
 ---
 
@@ -97,8 +100,8 @@ pnpm typecheck     # tsc --noEmit
 pnpm lint          # biome + eslint(solid)
 pnpm test:unit     # vitest
 pnpm test:e2e      # playwright
-pnpm dev           # 启动 daemon
-pnpm dev:web       # vite dev server（代理 /api）
+pnpm ha web        # 启动 daemon + 托管控制台，打印访问地址
+pnpm dev:web       # 只起 vite（仅调 UI；/api 需要同时跑 pnpm ha web，当前无代理）
 ```
 
 ---

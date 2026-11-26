@@ -4,6 +4,8 @@ import { Command } from 'commander'
 import { createBrainFromEnv } from '../../brain/create-brain'
 import type { VerificationCheck } from '../../domain/entities'
 import { runAcpTask } from '../../runtime/acp-run'
+import { adoptAgent, loginAgent, verifyAgent } from '../../runtime/agent-adopt'
+import { scanAgents } from '../../runtime/agent-discovery/scan'
 import { addAgent, listAgents, resolveAgent } from '../../runtime/agent-registry'
 import { decideApproval, listApprovals } from '../../runtime/approval'
 import { runGoalWithBrain } from '../../runtime/brain-run'
@@ -29,6 +31,7 @@ import { openDatabase } from '../../storage/db'
 import { migrate } from '../../storage/migrate'
 import { getTaskEvidence } from '../../storage/queries/evidence'
 import { listTaskEvents, listTasks } from '../../storage/queries/tasks'
+import { startHub } from '../http/server'
 import { runDoctor } from './doctor'
 import { CLI_EXIT, exitCodeFor, exitCodeForRun } from './exit-codes'
 import { formatReport, runRebuildProjections } from './maintenance'
@@ -40,7 +43,7 @@ import { formatReport, runRebuildProjections } from './maintenance'
 export function createCli(version: string): Command {
   const program = new Command()
 
-  program.name('hubagent').description('HubAgent — 本地优先的多 Agent 编排系统').version(version)
+  program.name('ha').description('HubAgent — 本地优先的多 Agent 编排系统').version(version)
 
   program
     .command('doctor')
@@ -60,6 +63,63 @@ export function createCli(version: string): Command {
       }
 
       process.exitCode = report.ok ? 0 : CLI_EXIT.RUNTIME
+    })
+
+  program
+    .command('web')
+    .description('启动 daemon 并托管 Web 控制台，打印访问地址（Ctrl-C 停止）')
+    .option('--port <port>', '监听端口；被占用时自动向后尝试', (value) =>
+      Number.parseInt(value, 10),
+    )
+    .option('--json', '输出机器可读 JSON（启动一行、停止一行）')
+    .action(async (options: { port?: number; json?: boolean }) => {
+      let handle: Awaited<ReturnType<typeof startHub>> | undefined
+      try {
+        handle = await startHub({
+          version,
+          ...(Number.isFinite(options.port) ? { port: options.port } : {}),
+        })
+        const payload = {
+          ok: true,
+          url: handle.url,
+          port: handle.port,
+          home: handle.home,
+          tokenPath: handle.tokenPath,
+          webBuilt: handle.webBuilt,
+          recovery: handle.recovery,
+        }
+        if (options.json === true) {
+          process.stdout.write(`${JSON.stringify(payload)}\n`)
+        } else {
+          process.stdout.write(`✓ HubAgent 已启动\n`)
+          process.stdout.write(`  控制台   ${handle.url}\n`)
+          if (!handle.webBuilt) {
+            process.stdout.write('  控制台尚未构建：先跑 pnpm build:web（当前访问会 404）\n')
+          }
+          process.stdout.write(`  运行目录 ${handle.home}\n`)
+          process.stdout.write('  Ctrl-C 停止\n')
+        }
+
+        await new Promise<void>((resolve) => {
+          const stop = (): void => {
+            process.off('SIGINT', stop)
+            process.off('SIGTERM', stop)
+            resolve()
+          }
+          process.once('SIGINT', stop)
+          process.once('SIGTERM', stop)
+        })
+
+        await handle.close()
+        if (options.json === true) {
+          process.stdout.write(`${JSON.stringify({ ok: true, stopped: true })}\n`)
+        } else {
+          process.stdout.write('✓ 已停止\n')
+        }
+      } catch (error) {
+        await handle?.close().catch(() => undefined)
+        writeCliError(error, options.json === true)
+      }
     })
 
   program
@@ -258,6 +318,150 @@ export function createCli(version: string): Command {
         }
       },
     )
+
+  agent
+    .command('scan')
+    .description('扫描本机可接入的 Agent（只读文件系统，不启动进程）')
+    .option('--json', '输出机器可读 JSON')
+    .action((options: { json?: boolean }) => {
+      const dir = hubDir()
+      const db = openDatabase(dbPath(dir))
+      try {
+        migrate(db)
+        const scan = scanAgents(db)
+        if (options.json === true) {
+          process.stdout.write(`${JSON.stringify({ ok: true, ...scan }, null, 2)}\n`)
+          return
+        }
+        if (scan.agents.length === 0) {
+          process.stdout.write('没有检测到可接入的 Agent。\n')
+          return
+        }
+        for (const entry of scan.agents) {
+          const variant = entry.variants.find((item) => item.id === entry.chosenVariant)
+          const status = entry.registered
+            ? `已接入·${entry.agentStatus ?? 'unknown'}`
+            : variant?.adoptable === true
+              ? '未接入'
+              : `不可接入（${variant?.missingRequires.join('；') ?? '缺依赖'}）`
+          process.stdout.write(
+            `${entry.label}\t${entry.name}\t${status}\t${variant?.source ?? '-'}\n`,
+          )
+        }
+        for (const problem of scan.problems) {
+          process.stdout.write(`! 目录条目 ${problem.entryId}：${problem.message}\n`)
+        }
+      } catch (error) {
+        writeCliError(error, options.json === true)
+      } finally {
+        db.close()
+      }
+    })
+
+  agent
+    .command('adopt <catalogId>')
+    .description('按内置目录接入一个 Agent（会启动它做一次 ACP 验证）')
+    .option('--variant <id>', '目录条目的变体 id（如 dsh 的 desktop / cli）')
+    .option('--json', '输出机器可读 JSON')
+    .action(async (catalogId: string, options: { variant?: string; json?: boolean }) => {
+      const dir = hubDir()
+      const db = openDatabase(dbPath(dir))
+      const provider = createSrtProvider()
+      try {
+        migrate(db)
+        const result = await adoptAgent({
+          db,
+          provider,
+          home: dir,
+          catalogId,
+          ...(options.variant === undefined ? {} : { variantId: options.variant }),
+        })
+        if (options.json === true) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: result.probe.ok, agent: result.agent, probe: result.probe }, null, 2)}\n`,
+          )
+        } else {
+          process.stdout.write(
+            `${result.probe.ok ? '✓' : '✗'} ${result.agent.name} 已接入：${describeProbe(result.probe)}\n`,
+          )
+          if (result.probe.status === 'needs_auth') {
+            const methods = result.probe.authMethods.map((item) => item.name ?? item.id).join(' / ')
+            process.stdout.write(`  需要登录：${methods}\n`)
+          }
+        }
+        if (!result.probe.ok) process.exitCode = CLI_EXIT.RUNTIME
+      } catch (error) {
+        writeCliError(error, options.json === true)
+      } finally {
+        await provider.dispose().catch(() => undefined)
+        db.close()
+      }
+    })
+
+  agent
+    .command('login <name>')
+    .description('按 Agent 声明的登录方式完成认证（浏览器 / 设备码）')
+    .requiredOption('--method <id>', '登录方式 id（见接入页或 agent adopt 输出）')
+    .option('--json', '输出机器可读 JSON')
+    .action(async (name: string, options: { method: string; json?: boolean }) => {
+      const dir = hubDir()
+      const db = openDatabase(dbPath(dir))
+      const provider = createSrtProvider()
+      try {
+        migrate(db)
+        const result = await loginAgent({
+          db,
+          provider,
+          home: dir,
+          name,
+          methodId: options.method,
+        })
+        if (options.json === true) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+        } else {
+          process.stdout.write(
+            result.ok
+              ? `✓ ${name} 登录完成，请运行 agent verify 确认\n`
+              : `✗ 登录失败：${result.error?.message ?? ''}\n`,
+          )
+        }
+        if (!result.ok) process.exitCode = CLI_EXIT.RUNTIME
+      } catch (error) {
+        writeCliError(error, options.json === true)
+      } finally {
+        await provider.dispose().catch(() => undefined)
+        db.close()
+      }
+    })
+
+  agent
+    .command('verify <name>')
+    .description('重新验证一个已接入的 Agent')
+    .option('--json', '输出机器可读 JSON')
+    .action(async (name: string, options: { json?: boolean }) => {
+      const dir = hubDir()
+      const db = openDatabase(dbPath(dir))
+      const provider = createSrtProvider()
+      try {
+        migrate(db)
+        const result = await verifyAgent({ db, provider, home: dir, name })
+        if (options.json === true) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: result.probe.ok, agent: result.agent, probe: result.probe }, null, 2)}\n`,
+          )
+        } else {
+          process.stdout.write(
+            `${result.probe.ok ? '✓' : '✗'} ${name}：${describeProbe(result.probe)}\n`,
+          )
+        }
+        if (!result.probe.ok) process.exitCode = CLI_EXIT.RUNTIME
+      } catch (error) {
+        writeCliError(error, options.json === true)
+      } finally {
+        await provider.dispose().catch(() => undefined)
+        db.close()
+      }
+    })
 
   agent
     .command('list')
@@ -1150,6 +1354,16 @@ function walkFiles(path: string): string[] {
 
 function listOldFiles(path: string, cutoffMs: number): string[] {
   return walkFiles(path).filter((file) => statSync(file).mtimeMs < cutoffMs)
+}
+
+function describeProbe(probe: {
+  status: string
+  durationMs: number
+  error?: { code: string; message: string }
+}): string {
+  if (probe.status === 'online') return `在线（${probe.durationMs}ms）`
+  if (probe.status === 'needs_auth') return '需要登录'
+  return `失败：${probe.error?.code ?? 'UNEXPECTED'} ${probe.error?.message ?? ''}`.trim()
 }
 
 function writeCliError(error: unknown, json: boolean): void {

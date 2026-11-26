@@ -26,7 +26,9 @@ interface Seeded {
   ids: { goalId: string; taskId: string; subtaskId: string; executionId: string }
 }
 
-function seed(): Seeded {
+type ExecutionStep = 'starting' | 'running' | 'waiting_input'
+
+function seed(executionPath: readonly ExecutionStep[] = ['starting', 'running']): Seeded {
   const db = openDatabase(':memory:')
   migrate(db)
   dbs.push(db)
@@ -107,18 +109,14 @@ function seed(): Seeded {
     to: 'running',
     at: asTimestamp(new Date().toISOString()),
   }).state
-  state = appendEvent(db, state, {
-    type: 'execution.status',
-    executionId: asExecutionId('e1'),
-    to: 'starting',
-    at: asTimestamp(new Date().toISOString()),
-  }).state
-  appendEvent(db, state, {
-    type: 'execution.status',
-    executionId: asExecutionId('e1'),
-    to: 'running',
-    at: asTimestamp(new Date().toISOString()),
-  })
+  for (const to of executionPath) {
+    state = appendEvent(db, state, {
+      type: 'execution.status',
+      executionId: asExecutionId('e1'),
+      to,
+      at: asTimestamp(new Date().toISOString()),
+    }).state
+  }
   return {
     db,
     ids: { goalId: 'g1', taskId: 't1', subtaskId: 's1', executionId: 'e1' },
@@ -148,6 +146,35 @@ describe('recovery：重启扫描', () => {
     const report = scanRecovery(db, { isProcessAlive: () => true })
     expect(report.unknown).toEqual([])
     expect(report.skippedAlive).toHaveLength(1)
+  })
+
+  it('waiting_input 停在原地，不被强转 unknown', () => {
+    const { db, ids } = seed(['starting', 'running', 'waiting_input'])
+    const report = scanRecovery(db)
+
+    expect(report.unknown).toEqual([])
+    expect(report.skippedIncomplete).toEqual([ids.executionId])
+
+    const execution = db
+      .prepare('SELECT status FROM executions WHERE id = ?')
+      .get(ids.executionId) as { status: string }
+    expect(execution.status).toBe('waiting_input')
+
+    const decisions = db.prepare('SELECT COUNT(*) AS n FROM decision_queue').get() as { n: number }
+    expect(decisions.n).toBe(0)
+  })
+
+  it('starting 不收敛为 unknown，保持原状交下次启动', () => {
+    const { db, ids } = seed(['starting'])
+    const report = scanRecovery(db)
+
+    expect(report.unknown).toEqual([])
+    expect(report.skippedIncomplete).toEqual([ids.executionId])
+
+    const execution = db
+      .prepare('SELECT status FROM executions WHERE id = ?')
+      .get(ids.executionId) as { status: string }
+    expect(execution.status).toBe('starting')
   })
 })
 

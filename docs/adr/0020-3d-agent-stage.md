@@ -23,8 +23,9 @@
 ### 2.1 3D-only，无运行时 2D 降级
 
 - `/agents` 只渲染 3D 舞台；移除旧表格，不提供 `/lite`、2D 名单/看板、自动降级。
+- 本约束只覆盖 `/agents`；Agent 接入（`/registry`）是独立 2D 配置页，见 ADR 0021 与 `docs/PLAN-AGENT-ONBOARDING.md`。
 - WebGL2 预检失败 / 初始化失败 / context lost → 显示**阻断式 unsupported 卡**，隐藏 canvas 与 HUD，不显示 2D 名单。
-- 非 3D 的操作路径是 **CLI**（`hubagent agents` / `hubagent agent add`），不是 2D UI。
+- 非 3D 的操作路径是 **CLI**（`hubagent agent` / `hubagent agent add`），不是 2D UI。
 
 ### 2.2 Three.js 进入 UI 依赖白名单（受控）
 

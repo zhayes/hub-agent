@@ -22,6 +22,7 @@
 | 0018 | Chat 使用异步 thread + task，不阻塞 HTTP 请求 | 已接受 | 2026-11-24 |
 | 0019 | Console UI v2：Tailwind v4 令牌层 + `@ui-sdk` 行为层 + Beautiful UI 视觉移植 | 已接受（P0 通过） | 2026-11-25 |
 | 0020 | Agent Office：3D-only 的 Agent 舞台（`three` 受控引入） | 已接受 | 2026-11-25 |
+| 0021 | 内置 Agent 目录：只记录“怎么启动”，不参与“怎么理解协议” | 已接受 | 2026-11-26 |
 
 ## 约定
 

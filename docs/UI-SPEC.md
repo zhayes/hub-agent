@@ -237,6 +237,8 @@
 
 `/agents` 的唯一形式是 3D Dispatch Floor（无 2D 降级）。HUD 沿用本文的令牌与基元；3D 部分有独立约束。
 
+**边界：** 本文的 3D 约束只作用于 `/agents`。Agent 接入（`/registry`）是独立的 2D 配置页，不属于本节范围，见 `docs/PLAN-AGENT-ONBOARDING.md`。
+
 ### 11.1 场景色板
 
 - 3D 颜色只从 `features/agents/office/scene/theme.ts` 的 `PALETTES` 读取；不在渲染代码散落 hex。
@@ -268,7 +270,7 @@
 
 - `prefers-reduced-motion: reduce`：状态直接切换，跳过走位/盖章动画，信息不丢。
 - canvas 设 `aria-hidden`，交互都在键盘可达的 HUD（调度卡 / 名单 / 抽屉 / 横幅）。
-- 3D-only 时的替代路径是 CLI（`hubagent agents`），不是 2D 视图。
+- 3D-only 时的替代路径是 CLI（`hubagent agent`），不是 2D 视图。
 
 ### 11.5 unsupported
 

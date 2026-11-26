@@ -1,6 +1,6 @@
 import { asExecutionId, asTimestamp } from '../../domain/ids'
 import type { ExecutionStatus } from '../../domain/status'
-import { isActiveExecution } from '../../domain/status'
+import { EXECUTION_TRANSITIONS, isActiveExecution } from '../../domain/status'
 import type { Db } from '../../storage/db'
 import { loadState } from '../../storage/queries/state'
 import { appendEvent } from '../../storage/write/events'
@@ -18,6 +18,12 @@ export interface RecoveryReport {
   unknown: string[]
   decisions: string[]
   skippedAlive: string[]
+  /**
+   * 状态机不允许 `→ unknown` 的执行（waiting_input / waiting_permission / starting）。
+   * 它们保持原状：前两者在等人工答复，启动中的执行没有证据可核验。
+   * 强行收敛会抛 EVENT_REJECTED，进而让 daemon 起不来（真实事故）。
+   */
+  skippedIncomplete: string[]
 }
 
 /**
@@ -32,6 +38,7 @@ export function scanRecovery(db: Db, options: RecoveryScanOptions = {}): Recover
   const unknown: string[] = []
   const decisions: string[] = []
   const skippedAlive: string[] = []
+  const skippedIncomplete: string[] = []
   const at = () => asTimestamp((options.now ?? new Date()).toISOString())
 
   for (const execution of Object.values(state.executions).sort((a, b) =>
@@ -43,6 +50,11 @@ export function scanRecovery(db: Db, options: RecoveryScanOptions = {}): Recover
       continue
     }
     if (execution.status === 'paused') continue
+    // 只有状态机允许的执行才能收敛到 unknown；其余留在原状态，交人工/下次启动。
+    if (!EXECUTION_TRANSITIONS[execution.status].includes('unknown')) {
+      skippedIncomplete.push(execution.id)
+      continue
+    }
 
     state = appendEvent(db, state, {
       type: 'execution.status',
@@ -67,5 +79,5 @@ export function scanRecovery(db: Db, options: RecoveryScanOptions = {}): Recover
     if (point.created) decisions.push(point.point.id)
   }
 
-  return { unknown, decisions, skippedAlive }
+  return { unknown, decisions, skippedAlive, skippedIncomplete }
 }

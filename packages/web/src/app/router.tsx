@@ -4,6 +4,7 @@ import { AgentsRoute } from '../routes/AgentsRoute'
 import { ApprovalsRoute } from '../routes/ApprovalsRoute'
 import { ChatRoute } from '../routes/ChatRoute'
 import { NotFoundRoute } from '../routes/NotFoundRoute'
+import { RegistryRoute } from '../routes/RegistryRoute'
 import { SettingsRoute } from '../routes/SettingsRoute'
 import { TasksRoute } from '../routes/TasksRoute'
 import { AppLayout } from './AppLayout'
@@ -19,6 +20,7 @@ const routes: RouteDefinition[] = [
       { path: '/tasks', component: TasksRoute },
       { path: '/tasks/:id', component: TasksRoute },
       { path: '/agents', component: AgentsRoute },
+      { path: '/registry', component: RegistryRoute },
       { path: '/approvals', component: ApprovalsRoute },
       { path: '/settings', component: SettingsRoute },
       { path: '*404', component: NotFoundRoute },

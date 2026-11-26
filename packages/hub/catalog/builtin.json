@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-26",
+  "entries": [
+    {
+      "id": "dsh",
+      "label": "DSH",
+      "name": "dsh",
+      "notes": "DeepSeek Harness。桌面版与命令行版是同一个引擎，共用 ~/.dsh。",
+      "variants": [
+        {
+          "id": "desktop",
+          "label": "桌面版",
+          "os": [
+            "darwin"
+          ],
+          "detect": {
+            "kind": "bundle",
+            "paths": [
+              "/Applications/DeepSeek Harness.app"
+            ],
+            "entry": "Contents/MacOS/DeepSeek Harness",
+            "cli": "Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
+            "virtualCli": true
+          },
+          "command": "ELECTRON_RUN_AS_NODE=1 \"<entry>\" \"<cli>\" --profile acp",
+          "allowedWrite": [
+            "~/.dsh"
+          ]
+        },
+        {
+          "id": "cli",
+          "label": "命令行",
+          "detect": {
+            "kind": "which",
+            "name": "dsh"
+          },
+          "command": "dsh --profile acp",
+          "allowedWrite": [
+            "~/.dsh"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hermes",
+      "label": "Hermes",
+      "name": "hermes",
+      "variants": [
+        {
+          "id": "default",
+          "detect": {
+            "kind": "which",
+            "name": "hermes-acp"
+          },
+          "command": "hermes-acp",
+          "allowedWrite": [
+            "~/.hermes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "workbuddy",
+      "label": "WorkBuddy",
+      "name": "workbuddy",
+      "notes": "腾讯 WorkBuddy。内置 CLI 使用独立配置目录，首次接入需要登录；首次启动会下载插件市场（约 60MB）。",
+      "variants": [
+        {
+          "id": "desktop",
+          "label": "桌面版",
+          "os": [
+            "darwin"
+          ],
+          "detect": {
+            "kind": "bundle",
+            "paths": [
+              "/Applications/WorkBuddy AI.app",
+              "/Applications/WorkBuddy.app",
+              "~/Applications/WorkBuddy AI.app",
+              "~/Applications/WorkBuddy.app"
+            ],
+            "entry": "Contents/MacOS/Electron",
+            "cli": "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"
+          },
+          "command": "ELECTRON_RUN_AS_NODE=1 \"<entry>\" \"<cli>\" --acp",
+          "allowedWrite": [
+            "~/.codebuddy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "qwen-code",
+      "label": "Qwen Code",
+      "name": "qwen",
+      "variants": [
+        {
+          "id": "default",
+          "detect": {
+            "kind": "which",
+            "name": "qwen"
+          },
+          "command": "qwen --acp"
+        }
+      ]
+    },
+    {
+      "id": "claude-code",
+      "label": "Claude Code",
+      "name": "claude-code",
+      "notes": "需要 ACP 适配器 claude-code-acp（由适配器提供 ACP 入口，而不是 claude 本身）。",
+      "variants": [
+        {
+          "id": "adapter",
+          "detect": {
+            "kind": "which",
+            "name": "claude-code-acp"
+          },
+          "command": "claude-code-acp"
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "name": "codex",
+      "notes": "需要 ACP 适配器 codex-acp；只装 codex CLI 不足以接入。",
+      "variants": [
+        {
+          "id": "adapter",
+          "os": [
+            "darwin"
+          ],
+          "detect": {
+            "kind": "bundle",
+            "paths": [
+              "/Applications/ChatGPT.app"
+            ],
+            "entry": "Contents/Resources/codex-cli/bin/codex"
+          },
+          "requires": [
+            {
+              "kind": "which",
+              "name": "codex-acp"
+            }
+          ],
+          "command": "codex-acp"
+        }
+      ]
+    }
+  ]
+}

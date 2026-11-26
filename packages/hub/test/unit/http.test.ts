@@ -192,6 +192,39 @@ describe('模型设置端点', () => {
   })
 })
 
+describe('Agent 扫描端点', () => {
+  it('需要 token；返回目录结构（不启动进程）', async () => {
+    const app = createHttpApp({
+      db: seed(),
+      token: 't',
+      modelDir: mkdtempSync(join(tmpdir(), 'hubagent-http-scan-')),
+    })
+
+    const unauthorized = await app.request('/api/v1/agents/scan', { method: 'POST' })
+    expect(unauthorized.status).toBe(401)
+
+    const response = await app.request('/api/v1/agents/scan', {
+      method: 'POST',
+      headers: { authorization: 'Bearer t' },
+    })
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as {
+      ok: boolean
+      version: number
+      agents: Array<{ catalogId: string; variants: Array<{ command: string }> }>
+      problems: unknown[]
+    }
+    expect(payload.ok).toBe(true)
+    expect(typeof payload.version).toBe('number')
+    expect(Array.isArray(payload.agents)).toBe(true)
+    expect(Array.isArray(payload.problems)).toBe(true)
+    for (const entry of payload.agents) {
+      expect(entry.variants.length).toBeGreaterThan(0)
+      expect(entry.variants[0]?.command.length).toBeGreaterThan(0)
+    }
+  })
+})
+
 describe('Web Console 静态托管', () => {
   it('index 注入 token；SSE 可用 query token', async () => {
     const db = seed()

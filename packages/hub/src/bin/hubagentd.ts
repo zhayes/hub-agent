@@ -1,104 +1,50 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path'
-import { serve } from '@hono/node-server'
-import { createHttpApp } from '../interfaces/http/app'
-import { ensureHttpToken } from '../interfaces/http/token'
-import { createChatService } from '../runtime/chat/chat-service'
-import { scanRecovery } from '../runtime/recovery/scan'
-import { createSrtProvider } from '../sandbox/srt-driver'
-import { acquireLock } from '../shared/lock'
-import { dbPath, hubDir, lockPath, resolvePiAgentDir, tokenPath } from '../shared/paths'
-import { openDatabase } from '../storage/db'
-import { migrate } from '../storage/migrate'
+import { startHub } from '../interfaces/http/server'
 
 /**
- * M0 的 daemon 只验证一件事：单实例语义 + 干净退出。
- * HTTP / SSE / SQLite / 调度在 M2 之后接入（见 docs/PLAN.md）。
+ * 兼容入口：`hubagentd` 等价于 `ha web`。
  *
  *   hubagentd           前台常驻（Ctrl-C / SIGTERM 退出并释放锁）
- *   hubagentd --check   获取锁后立即释放，用于自检
- *
- * 注意：Node 的信号监听**不会**让事件循环保持存活——必须自己拿一个
- * 长期 handle，否则 main() 返回即退出（M2 review 抓到的真实 bug）。
+ *   hubagentd --check   起服务后立即释放，用于自检
  */
 const args = new Set(process.argv.slice(2))
 const checkOnly = args.has('--check')
+const version = process.env['HUBAGENT_VERSION'] ?? '0.0.0-m0'
 
 async function main(): Promise<void> {
-  const dir = hubDir()
-  const lock = await acquireLock(dir, lockPath(dir))
-  const db = openDatabase(dbPath(dir))
-  migrate(db)
-  // 启动恢复扫描：非终态 Execution 先收敛为 unknown，交 Brain/用户决策（M8）。
-  const recovery = scanRecovery(db)
-  const token = ensureHttpToken(dir)
-  const port = Number.parseInt(process.env['HUBAGENT_PORT'] ?? '7788', 10)
-  const webDist = process.env['HUBAGENT_WEB_DIST'] ?? resolve('packages/web/dist')
-  const provider = createSrtProvider()
-  const chat = createChatService({
-    db,
-    provider,
-    clientVersion: '0.0.0-m0',
-    worktree: process.cwd(),
-  })
-  const app = createHttpApp({
-    db,
-    token: token.token,
-    version: '0.0.0-m0',
-    webDist,
-    chat,
-    // 与 createBrainFromEnv 同一解析结果：控制台设置的模型就是 Brain 用的模型。
-    modelDir: resolvePiAgentDir(),
-  })
-  const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port })
+  const handle = await startHub({ version })
 
   process.stdout.write(
     `${JSON.stringify({
       ok: true,
       pid: process.pid,
-      hubDir: dir,
-      lock: lock.path,
-      port,
-      tokenPath: tokenPath(dir),
-      recovery,
+      hubDir: handle.home,
+      lock: handle.lockPath,
+      port: handle.port,
+      url: handle.url,
+      tokenPath: handle.tokenPath,
+      webBuilt: handle.webBuilt,
+      recovery: handle.recovery,
     })}\n`,
   )
 
   if (checkOnly) {
-    server.close()
-    await provider.dispose().catch(() => undefined)
-    db.close()
-    await lock.release()
+    await handle.close()
     return
   }
 
-  let shuttingDown = false
-  // 显式保活：这个 interval 是进程唯一的活动 handle
-  const keepAlive = setInterval(() => undefined, 60_000)
+  await new Promise<void>((resolve) => {
+    const stop = (): void => {
+      process.off('SIGINT', stop)
+      process.off('SIGTERM', stop)
+      resolve()
+    }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+  })
 
-  const stop = (): void => {
-    clearInterval(keepAlive)
-    process.off('SIGINT', onSigint)
-    process.off('SIGTERM', onSigterm)
-  }
-
-  const shutdown = async (signal: string): Promise<void> => {
-    if (shuttingDown) return
-    shuttingDown = true
-    stop()
-    server.close()
-    await provider.dispose().catch(() => undefined)
-    db.close()
-    await lock.release()
-    process.stdout.write(`${JSON.stringify({ ok: true, stopped: signal })}\n`)
-    process.exitCode = 0
-  }
-
-  const onSigint = (): void => void shutdown('SIGINT')
-  const onSigterm = (): void => void shutdown('SIGTERM')
-
-  process.on('SIGINT', onSigint)
-  process.on('SIGTERM', onSigterm)
+  await handle.close()
+  process.stdout.write(`${JSON.stringify({ ok: true, stopped: true })}\n`)
 }
 
 main().catch((error: unknown) => {

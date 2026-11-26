@@ -401,9 +401,12 @@ export function StageEntry() {
           <Show when={presence.data() !== undefined && agents().length === 0}>
             <div class="pointer-events-auto absolute bottom-24 left-1/2 z-10 w-full max-w-md -translate-x-1/2 rounded-panel border border-dashed border-line-strong bg-surface/92 p-4 text-center shadow-card">
               <p class="text-meta text-ink-2">{t()('emptyFloor')}</p>
-              <code class="mt-2 block rounded-control bg-ink px-3 py-2 font-mono text-badge text-canvas">
-                {t()('emptyFloorCommand')}
-              </code>
+              <a
+                class="mt-2 inline-flex h-7 items-center rounded-control bg-ink px-3 text-badge text-canvas hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                href="/registry"
+              >
+                {t()('emptyFloorLink')}
+              </a>
             </div>
           </Show>
         </div>

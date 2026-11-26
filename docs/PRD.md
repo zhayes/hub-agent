@@ -762,6 +762,9 @@ type AgentStatus =
 - error：启动或协议执行失败。
 - disabled：用户主动禁用。
 
+**落地口径：** `agents.status` 只存连接/探测态（`discovered` / `online` / `needs_auth` / `error` / `missing` / `disabled`）；
+`starting` / `busy` 这类运行态由 presence 读模型根据执行记录派生，**不落库**，避免两套状态互相漂移。
+
 ### 6.3.4 Agent 能力模型
 
 ```typescript
@@ -811,7 +814,7 @@ interface AgentCapability {
 - 执行 ACP initialize。
 - 获取 Agent capabilities。
 - 建立 Session。
-- 定期检查进程和连接状态。
+- 执行期状态由 Runtime 按执行记录维护；**空闲 Agent 只在接入或用户手动触发时验证**（探测会启动进程，不做自动轮询）。
 
 不得默认执行来源不明的自动发现命令或安装脚本。
 
@@ -819,7 +822,7 @@ interface AgentCapability {
 
 - 不得伪造占位 Agent，不得给出“可能可用”的模糊状态。
 - 不得自动安装、不引导下载、不推荐具体厂商（见 §18.9）。
-- CLI 退出码固定为“无可用 Agent”，便于脚本判断。
+- CLI 退出码固定为 **6**（`NO_AGENT`），便于脚本判断；不得与运行期异常（5）混用。
 
 ### 6.3.6 Agent 健康检查
 

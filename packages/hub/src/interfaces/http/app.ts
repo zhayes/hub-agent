@@ -3,7 +3,9 @@ import { extname, join, normalize, resolve } from 'node:path'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { asChatThreadId } from '../../domain/ids'
-import { listAgents } from '../../runtime/agent-registry'
+import { adoptAgent, loginAgent, verifyAgent } from '../../runtime/agent-adopt'
+import { scanAgents } from '../../runtime/agent-discovery/scan'
+import { listAgents, removeAgent, setAgentStatus } from '../../runtime/agent-registry'
 import { decideApproval, listApprovals } from '../../runtime/approval'
 import type { ChatService } from '../../runtime/chat/chat-service'
 import { listDecisions } from '../../runtime/decision-record'
@@ -14,8 +16,9 @@ import {
   readModelConfig,
   writeModelConfig,
 } from '../../runtime/model-config/model-config'
+import type { SandboxProvider } from '../../sandbox/types'
 import { type ErrorCode, HubError } from '../../shared/errors'
-import { resolvePiAgentDir } from '../../shared/paths'
+import { hubDir, resolvePiAgentDir } from '../../shared/paths'
 import type { Db } from '../../storage/db'
 import { listAgentPresence } from '../../storage/queries/agent-presence'
 import { getChatThread, listChatMessagesAfter } from '../../storage/queries/chat'
@@ -33,6 +36,10 @@ export interface HttpAppOptions {
   chat?: ChatService
   /** Pi profile 目录（models.json / settings.json）；缺省见 resolvePiAgentDir */
   modelDir?: string
+  /** 接入/验证需要起进程；缺省时相关端点返回 501 */
+  provider?: SandboxProvider
+  /** 探测用的运行目录；缺省取 HUBAGENT_HOME */
+  home?: string
 }
 
 export function createHttpApp(options: HttpAppOptions): Hono {
@@ -297,12 +304,122 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     }
   })
 
+  app.post('/api/v1/agents/adopt', async (context) => {
+    if (options.provider === undefined) {
+      return context.json({ code: 'SANDBOX_UNAVAILABLE', message: '接入需要沙箱 provider' }, 501)
+    }
+    const body = await context.req.json<unknown>().catch((): unknown => undefined)
+    if (typeof body !== 'object' || body === null) {
+      return context.json({ code: 'CONFIG_INVALID', message: '需要 JSON 请求体' }, 400)
+    }
+    const record = body as { catalogId?: unknown; variantId?: unknown }
+    if (typeof record.catalogId !== 'string' || record.catalogId.length === 0) {
+      return context.json({ code: 'CONFIG_INVALID', message: '缺少 catalogId' }, 400)
+    }
+    try {
+      const result = await adoptAgent({
+        db,
+        provider: options.provider,
+        home: options.home ?? hubDir(),
+        catalogId: record.catalogId,
+        ...(typeof record.variantId === 'string' ? { variantId: record.variantId } : {}),
+      })
+      return context.json({ ok: result.probe.ok, agent: result.agent, probe: result.probe })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
+  app.post('/api/v1/agents/:name/authenticate', async (context) => {
+    if (options.provider === undefined) {
+      return context.json({ code: 'SANDBOX_UNAVAILABLE', message: '登录需要沙箱 provider' }, 501)
+    }
+    const body = await context.req.json<unknown>().catch((): unknown => undefined)
+    const methodId =
+      typeof body === 'object' &&
+      body !== null &&
+      typeof (body as { methodId?: unknown }).methodId === 'string'
+        ? (body as { methodId: string }).methodId
+        : undefined
+    if (methodId === undefined || methodId.length === 0) {
+      return context.json({ code: 'CONFIG_INVALID', message: '缺少 methodId' }, 400)
+    }
+    try {
+      const result = await loginAgent({
+        db,
+        provider: options.provider,
+        home: options.home ?? hubDir(),
+        name: context.req.param('name'),
+        methodId,
+      })
+      return context.json({ ok: result.ok, result })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
+  app.post('/api/v1/agents/:name/verify', async (context) => {
+    if (options.provider === undefined) {
+      return context.json({ code: 'SANDBOX_UNAVAILABLE', message: '验证需要沙箱 provider' }, 501)
+    }
+    try {
+      const result = await verifyAgent({
+        db,
+        provider: options.provider,
+        home: options.home ?? hubDir(),
+        name: context.req.param('name'),
+      })
+      return context.json({ ok: result.probe.ok, agent: result.agent, probe: result.probe })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
   app.get('/api/v1/agents', (context) => context.json({ ok: true, agents: listAgents(db) }))
+
+  /* 扫描本机可接入的 Agent（只读文件系统，不启动进程）。 */
+  app.post('/api/v1/agents/scan', (context) => {
+    try {
+      return context.json({ ok: true, ...scanAgents(db) })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
 
   /* Agent Office 舞台的只读 presence（PLAN-AGENT-OFFICE §3.1）；不写库。 */
   app.get('/api/v1/agents/presence', (context) =>
     context.json({ ok: true, ...listAgentPresence(db) }),
   )
+
+  app.delete('/api/v1/agents/:name', (context) => {
+    const name = context.req.param('name')
+    if (!removeAgent(db, name)) {
+      return context.json({ code: 'NOT_FOUND', message: `没有名为 ${name} 的 Agent` }, 404)
+    }
+    return context.json({ ok: true })
+  })
+
+  app.patch('/api/v1/agents/:name', async (context) => {
+    const name = context.req.param('name')
+    const body = await context.req.json<unknown>().catch((): unknown => undefined)
+    const status =
+      typeof body === 'object' &&
+      body !== null &&
+      typeof (body as { status?: unknown }).status === 'string'
+        ? (body as { status: string }).status
+        : undefined
+    if (status === undefined || !['disabled', 'discovered'].includes(status)) {
+      return context.json(
+        { code: 'CONFIG_INVALID', message: 'status 只支持 disabled / discovered' },
+        400,
+      )
+    }
+    const agent = setAgentStatus(db, name, status)
+    if (agent === undefined) {
+      return context.json({ code: 'NOT_FOUND', message: `没有名为 ${name} 的 Agent` }, 404)
+    }
+    return context.json({ ok: true, agent })
+  })
 
   app.get('/api/v1/approvals', (context) =>
     context.json({ ok: true, approvals: listApprovals(db) }),

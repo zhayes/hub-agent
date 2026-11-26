@@ -2,6 +2,7 @@
 
 **目标：** 在最短路径上证明"核心功能是真的"，而不是先把界面做漂亮。
 **前置：** `docs/PRD.md`（范围与验收）、`docs/ARCHITECTURE.md`（落地方式）、`docs/adr/`（0002 沙箱、0003/0004 UI）
+**专项计划：** Agent 接入与 `ha web` 见 [PLAN-AGENT-ONBOARDING.md](PLAN-AGENT-ONBOARDING.md)；3D 舞台见 [PLAN-AGENT-OFFICE.md](PLAN-AGENT-OFFICE.md)；控制台见 [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md)。
 **假设：** 1 名全职工程师；已有 PRD、架构、沙箱 PoC（`poc/tc-014`，macOS 11/11 通过）。工作量为粗估，用于排序而非承诺。
 
 ---
@@ -340,7 +341,7 @@ pnpm hubagent run "写一个 mock-output.txt 并提交" --agent mock --worktree 
 # ok, taskId, executionId, branch=main, commitSha, diffstat, changedFiles, transcriptRef
 ```
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。**真实 Claude Code / OpenCode 本机未安装**；DSH 与 Codex 的探测结果见下。
 
 **P0 网络策略收尾（2026-11-24）**
 
@@ -367,6 +368,15 @@ pnpm hubagent run "只回复 OK，不要修改文件" --agent dsh --worktree <ab
 ```
 
 注意：这是"把本地 harness 作为受信 Agent"的用法，allow-write 只给 DSH 自己的状态目录；DSH 运行所需的模型凭据仍由 harness 自己读取。不要把 `~/.dsh` 整体放开给不可信 Agent。
+
+**WorkBuddy 实测（2026-11-26）**
+
+- 本机 `/Applications/WorkBuddy.app` 5.3.5，内置 CLI `codebuddy` 2.115.0；`--acp` 是稳定旗标（默认 stdio）。
+- 启动串：`ELECTRON_RUN_AS_NODE=1 "<App>/Contents/MacOS/Electron" "<App>/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy" --acp`。
+- `initialize` 成功（protocolVersion 1；capabilities 含 image/embeddedContext、mcp http+sse、loadSession、delegateToolsSupport；4 种 authMethods）。
+- `session/new` 在未登录时返回 `-32000 Authentication required`；内置 CLI 使用独立的 `~/.codebuddy`，不共享桌面应用的登录态。
+- 副作用：首次运行会从 CDN 下载两个插件市场（约 62 MB / 5399 文件）。因此扫描**不执行**任何候选二进制（ADR 0021）。
+- 结论：目录收录 WorkBuddy；接入状态区分 `needs_auth`，登录走 ACP `authenticate`。
 
 **Codex 探测（2026-11-24）**
 
@@ -423,7 +433,7 @@ pnpm hubagent approval list --json        # 沙箱拦截 → 自动生成审批�
 | `task show --evidence` | 打印命令、退出码、日志引用 |
 | `approval approve` | pending → approved |
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。
 
 **不包含**：判断性评审的质量优化（先保证确定性检查可信）。
 
@@ -478,7 +488,7 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 | `hubagent run` 接 Brain | 仍完成 ACP + 验收，产出 2 条 DecisionRecord |
 | TC-018 两个并行问题 | executionId 不匹配时拒绝路由 |
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。**已知边界**：Pi SDK 已接；`runGoalWithBrain` 用 dispatch 回合执行 delegate/计划子任务（同一 worktree；并行仍属 M7）。`PiBrain` 已用 fake session factory + 真实 DeepSeek smoke 验证；元工具循环用 `meta-tools.test.ts` 覆盖。Runtime 会处理 `revise_plan / delegate / cancel / request_human`，并按 dispatch 回合继续推进。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。**已知边界**：Pi SDK 已接；`runGoalWithBrain` 用 dispatch 回合执行 delegate/计划子任务（同一 worktree；并行仍属 M7）。`PiBrain` 已用 fake session factory + 真实 DeepSeek smoke 验证；元工具循环用 `meta-tools.test.ts` 覆盖。Runtime 会处理 `revise_plan / delegate / cancel / request_human`，并按 dispatch 回合继续推进。
 
 **不包含**：多 Agent 并行（M7）、复杂重规划（M8）。
 
@@ -518,7 +528,7 @@ pnpm hubagent run "分析依赖风险，同时检查核心代码质量" --json  
 - 本地实测：两 Agent 改 `src/a.txt` / `src/b.txt`，两个 merge 成功，Task completed；`task clean` 删除两个 worktree。
 - `auto-merge` / `patch-export` 策略库已完成；CLI 默认 branch-only，显式项目级 auto-merge 开关留给 M9 设置页。
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。
 
 **不包含**：跨机协作、Relay。
 
@@ -555,7 +565,7 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 - `runtime/acp-retry.ts`：协议/启动重试最多 2 次；执行失败无 diff 时同 Agent 重试 1 次；有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。
 - 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2、`brain-run.test.ts` 新增 2 个自动重试用例。
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。**已接**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次）；`task retry` 对 paused 任务 resume，对 failed 任务创建新 attempt（新 Goal/Task）并执行。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。**已接**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次）；`task retry` 对 paused 任务 resume，对 failed 任务创建新 attempt（新 Goal/Task）并执行。
 
 ---
 
@@ -586,7 +596,7 @@ bash scripts/acceptance-v1.sh        # 串跑 TC-001~TC-005、TC-008~TC-018
 - [acceptance-v1.sh](<scripts/acceptance-v1.sh>)：`pnpm verify` + `init/doctor/config/task list/approval list/gc` 最小闭环，本机通过。
 - `task retry` 目前只对 `paused` 任务执行 resume；失败任务的自动重试循环仍待把 M8 升级链接进 Runtime（不伪造）。
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。
 
 ---
 
@@ -616,7 +626,7 @@ pnpm bench --suite fixtures/regression-tasks --out reports/baseline.json
 - 实测 [benchmarks/real-dsh-expanded.json](<benchmarks/real-dsh-expanded.json>)：27 tasks（24 正例 + 3 负例），`autonomousCompletionRate=1`、`verificationMisjudgmentRate=0`、`recoverySuccessRate=1`、`overDecompositionRate=0`、`brainDecisionsPerTask≈3.04`、`averageDurationMs≈18342`。
 - 诚实边界：默认 mock 模式度量编排/验收链路，不代表 LLM 规划质量；真实 harness 需用 `--agent-command` 并提供能完成任务的 Agent。
 
-`pnpm verify`：284 用例、arch 101 modules，Playwright 2 条 E2E 全绿 全绿。
+`pnpm verify` 全绿（用例数与模块数以实际输出为准）。
 
 ---
 

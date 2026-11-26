@@ -22,6 +22,7 @@ import PanelLeft from '@lucide/solid/icons/panel-left'
 import PanelRight from '@lucide/solid/icons/panel-right'
 import Pencil from '@lucide/solid/icons/pencil'
 import Play from '@lucide/solid/icons/play'
+import Plug from '@lucide/solid/icons/plug'
 import Plus from '@lucide/solid/icons/plus'
 import RefreshCw from '@lucide/solid/icons/refresh-cw'
 import Search from '@lucide/solid/icons/search'
@@ -67,6 +68,7 @@ export type IconName =
   | 'panelLeft'
   | 'panelRight'
   | 'play'
+  | 'plug'
   | 'plus'
   | 'refresh'
   | 'search'
@@ -101,6 +103,7 @@ const icons: Record<IconName, LucideIcon> = {
   panelLeft: PanelLeft,
   panelRight: PanelRight,
   play: Play,
+  plug: Plug,
   plus: Plus,
   refresh: RefreshCw,
   search: Search,

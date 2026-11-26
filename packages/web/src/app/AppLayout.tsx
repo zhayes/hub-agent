@@ -17,12 +17,13 @@ const LazyCommandPalette = dynamic(() =>
 
 const NAV: ReadonlyArray<{
   href: string
-  key: 'navChat' | 'navTasks' | 'navAgents' | 'navApprovals'
+  key: 'navChat' | 'navTasks' | 'navAgents' | 'navRegistry' | 'navApprovals'
   icon: IconName
 }> = [
   { href: '/chat', key: 'navChat', icon: 'message' },
   { href: '/tasks', key: 'navTasks', icon: 'tasks' },
   { href: '/agents', key: 'navAgents', icon: 'agents' },
+  { href: '/registry', key: 'navRegistry', icon: 'plug' },
   { href: '/approvals', key: 'navApprovals', icon: 'approvals' },
 ]
 
@@ -49,6 +50,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
   const title = (): string => {
     if (path().startsWith('/agents')) return app.t('agents')
+    if (path().startsWith('/registry')) return app.t('registry')
     if (path().startsWith('/approvals')) return app.t('approvals')
     if (path().startsWith('/settings')) return app.t('settings')
     if (isChat()) return app.t('chat')
@@ -67,6 +69,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
   const note = (): string => {
     if (path().startsWith('/settings')) return ''
+    if (path().startsWith('/registry')) return ''
     if (path().startsWith('/agents')) {
       if (app.agents().length === 0) return ''
       const noNetwork = app.agents().filter((agent) => agent.networkMode === 'deny').length

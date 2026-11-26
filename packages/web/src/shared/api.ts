@@ -13,6 +13,57 @@ export interface AgentRow {
   command: string
   networkMode: string
   capabilities?: unknown
+  allowedWrite?: string[]
+  catalogId?: string
+  variantId?: string
+  lastProbeAt?: string
+  lastProbeError?: string
+}
+
+export interface ScanVariant {
+  id: string
+  label: string
+  command: string
+  source: string
+  allowedWrite: string[]
+  missingRequires: string[]
+  adoptable: boolean
+}
+
+export interface ScannedAgent {
+  catalogId: string
+  label: string
+  name: string
+  notes?: string
+  variants: ScanVariant[]
+  chosenVariant?: string
+  registered: boolean
+  agentStatus?: string
+}
+
+export interface CatalogScan {
+  version: number
+  scannedAt: string
+  agents: ScannedAgent[]
+  problems: Array<{ entryId: string; message: string }>
+}
+
+export interface AuthMethodView {
+  id: string
+  name?: string
+  description?: string | null
+  type?: 'agent' | 'terminal'
+}
+
+export interface ProbeResultView {
+  ok: boolean
+  status: 'online' | 'needs_auth' | 'error'
+  durationMs: number
+  authMethods: AuthMethodView[]
+  stderrTail: string[]
+  protocolVersion?: number
+  capabilities?: unknown
+  error?: { code: string; message: string }
 }
 
 export interface ApprovalRow {
@@ -108,6 +159,30 @@ export const api = {
   decisions: (id: string) => request<{ decisions: Decision[] }>(`/api/v1/tasks/${id}/decisions`),
   agents: () => request<{ agents: AgentRow[] }>('/api/v1/agents'),
   presence: () => request<AgentPresenceResponse>('/api/v1/agents/presence'),
+  scanAgents: () =>
+    request<{ ok: boolean } & CatalogScan>('/api/v1/agents/scan', { method: 'POST' }),
+  adoptAgent: (catalogId: string, variantId?: string) =>
+    request<{ ok: boolean; agent: AgentRow; probe: ProbeResultView }>('/api/v1/agents/adopt', {
+      method: 'POST',
+      body: JSON.stringify(variantId === undefined ? { catalogId } : { catalogId, variantId }),
+    }),
+  verifyAgent: (name: string) =>
+    request<{ ok: boolean; agent: AgentRow; probe: ProbeResultView }>(
+      `/api/v1/agents/${encodeURIComponent(name)}/verify`,
+      { method: 'POST' },
+    ),
+  loginAgent: (name: string, methodId: string) =>
+    request<{ ok: boolean; result: { ok: boolean; error?: { message: string } } }>(
+      `/api/v1/agents/${encodeURIComponent(name)}/authenticate`,
+      { method: 'POST', body: JSON.stringify({ methodId }) },
+    ),
+  removeAgent: (name: string) =>
+    request<{ ok: boolean }>(`/api/v1/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  setAgentStatus: (name: string, status: 'disabled' | 'discovered') =>
+    request<{ ok: boolean; agent: AgentRow }>(`/api/v1/agents/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   approvals: () => request<{ approvals: ApprovalRow[] }>('/api/v1/approvals'),
   approve: (id: string) => request(`/api/v1/approvals/${id}/approve`, { method: 'POST' }),
   reject: (id: string) => request(`/api/v1/approvals/${id}/reject`, { method: 'POST' }),
