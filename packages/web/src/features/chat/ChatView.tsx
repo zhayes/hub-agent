@@ -20,7 +20,7 @@ import {
   type TaskRow,
 } from '../../shared/api'
 import { relativeTime, shortenId } from '../../shared/format'
-import { type Locale, statusKey, type Translator } from '../../shared/i18n'
+import { type Locale, type MessageKey, statusKey, type Translator } from '../../shared/i18n'
 
 export interface ChatViewProps {
   threadId?: string
@@ -53,14 +53,22 @@ function storedWidth(key: string, fallback: number, min: number, max: number): n
 
 const threadRow =
   'grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
-const emptyState =
-  'rounded-panel border border-dashed border-line-strong px-4 py-4 text-meta text-ink-2'
 /* Empty states lean on a glyph instead of a paragraph: the shape says "nothing
    here yet" without reading like a manual. */
 const emptyGlyph = 'grid size-11 shrink-0 place-items-center rounded-full bg-subtle text-ink-3'
 const emptyBlock = 'flex flex-col items-center gap-2 px-4 py-8 text-center text-meta text-ink-3'
 const centeredEmpty =
-  'flex min-h-[240px] flex-col items-center justify-center gap-3 px-8 py-10 text-center text-meta text-ink-2'
+  'flex min-h-[240px] flex-1 flex-col items-center justify-center gap-3 px-8 py-10 text-center text-meta text-ink-2'
+
+/* No thread selected: offer openers instead of instructing the reader. Typing in
+   the composer already starts a thread, so a hint only repeated what the input
+   does; these chips give the empty pane something to act on. */
+const starterPrompts: MessageKey[] = [
+  'starterRunning',
+  'starterChanged',
+  'starterDelegate',
+  'starterReview',
+]
 const modeButton =
   'inline-flex h-[26px] items-center gap-1.5 rounded-control px-2 text-badge text-ink-2 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
@@ -102,6 +110,7 @@ export function ChatView(props: ChatViewProps) {
   let stream: EventSource | undefined
   let streamSeq: number | undefined
   let messagesEl: HTMLDivElement | undefined
+  let composerEl: HTMLTextAreaElement | undefined
   let stick = true
 
   const scrollToBottom = (): void => {
@@ -725,16 +734,27 @@ export function ChatView(props: ChatViewProps) {
         >
           {/* Reading measure, matching MessageRow's 74ch so the transcript and
               the composer line up instead of the composer running full-bleed. */}
-          <div class="mx-auto flex w-full max-w-[74ch] flex-col gap-4">
+          <div class="mx-auto flex w-full max-w-[74ch] flex-1 flex-col gap-4">
             <Show
               when={thread() !== undefined}
               fallback={
                 <div class={centeredEmpty}>
-                  <span class={emptyGlyph}>
-                    <Icon name="message" size={20} />
-                  </span>
-                  <p>{props.t('selectThread')}</p>
-                  <Button onClick={() => void newThread()}>{props.t('newThread')}</Button>
+                  <div class="flex w-full max-w-[46ch] flex-col gap-1.5">
+                    <For each={starterPrompts}>
+                      {(key) => (
+                        <button
+                          type="button"
+                          class="w-full rounded-panel bg-subtle px-3.5 py-2.5 text-left text-meta text-ink-2 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          onClick={() => {
+                            setText(props.t(key))
+                            composerEl?.focus()
+                          }}
+                        >
+                          {props.t(key)}
+                        </button>
+                      )}
+                    </For>
+                  </div>
                 </div>
               }
             >
@@ -816,6 +836,9 @@ export function ChatView(props: ChatViewProps) {
             <textarea
               id="chat-composer"
               rows="2"
+              ref={(el) => {
+                composerEl = el
+              }}
               class="block max-h-[200px] min-h-[68px] w-full resize-none rounded-panel border border-line bg-canvas px-3.5 py-3 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
               value={text()}
               placeholder={
@@ -871,7 +894,7 @@ export function ChatView(props: ChatViewProps) {
           <div class="mb-3">
             <span class="text-meta font-semibold text-ink">{props.t('threadContext')}</span>
           </div>
-          <Show when={thread()} fallback={<p class={emptyState}>{props.t('selectThread')}</p>}>
+          <Show when={thread()}>
             {(current) => (
               <>
                 <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-badge">
