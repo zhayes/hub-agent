@@ -2,7 +2,7 @@ import Check from '@lucide/solid/icons/check'
 import TriangleExclamation from '@lucide/solid/icons/triangle-exclamation-point'
 import X from '@lucide/solid/icons/x'
 import { Show } from 'solid-js'
-import { buttonGhost, buttonPrimary } from './button-classes'
+import { Button } from './Button'
 
 export type ApprovalRisk = 'low' | 'medium' | 'high'
 export type ApprovalState = 'pending' | 'approved' | 'rejected'
@@ -59,12 +59,10 @@ export function ApprovalCard(props: ApprovalCardProps) {
           </div>
         </div>
         <div class="flex items-center gap-2 border-t border-line bg-canvas/70 px-4 py-2.5">
-          <button type="button" class={buttonPrimary} onClick={() => props.onApprove?.()}>
-            Approve
-          </button>
-          <button type="button" class={buttonGhost} onClick={() => props.onReject?.()}>
+          <Button onClick={() => props.onApprove?.()}>Approve</Button>
+          <Button variant="ghost" onClick={() => props.onReject?.()}>
             Reject
-          </button>
+          </Button>
         </div>
       </article>
     </Show>

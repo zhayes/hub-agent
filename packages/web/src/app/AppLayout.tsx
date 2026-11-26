@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from '@solidjs/router'
 import { dynamic, type JSX } from '@solidjs/web'
 import { createSignal, For, onFlush, onSettled, Show } from 'solid-js'
-import { buttonPrimary } from '../components/ui/button-classes'
+import { buttonClass } from '../components/ui/Button'
 import type { CommandPaletteProps, PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
@@ -321,7 +321,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
               <strong class="min-w-0 flex-1 truncate text-meta font-semibold text-ink">
                 {app.t('tokenRequired')}
               </strong>
-              <a class={buttonPrimary} href="/settings">
+              <a class={buttonClass({ variant: 'primary' })} href="/settings">
                 {app.t('openSettings')}
               </a>
             </div>

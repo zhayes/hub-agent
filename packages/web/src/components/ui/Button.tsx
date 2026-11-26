@@ -32,11 +32,29 @@ export interface ButtonProps {
   onClick?: (event: MouseEvent) => void
 }
 
+/**
+ * The button recipe, for the two cases where a real `<button>` is not allowed:
+ * links that look like buttons (`<a href>`), and SDK parts that own the element
+ * but accept a class (`DialogTrigger`, `DialogClose`). Everything else uses
+ * `<Button>`, so there is exactly one definition of what a button looks like.
+ */
+export interface ButtonClassOptions {
+  variant?: ButtonVariant
+  size?: ButtonSize
+  class?: string
+}
+
+export function buttonClass(options: ButtonClassOptions = {}): string {
+  const variant = options.variant ?? 'primary'
+  const size = options.size ?? 'md'
+  return `${base} ${sizes[size]} ${variants[variant]}${options.class === undefined ? '' : ` ${options.class}`}`
+}
+
 export function Button(props: ButtonProps) {
   return (
     <button
       type={props.type ?? 'button'}
-      class={`${base} ${sizes[props.size ?? 'md']} ${variants[props.variant ?? 'primary']}${props.class === undefined ? '' : ` ${props.class}`}`}
+      class={buttonClass({ variant: props.variant, size: props.size, class: props.class })}
       disabled={props.disabled}
       title={props.title}
       aria-label={props['aria-label']}

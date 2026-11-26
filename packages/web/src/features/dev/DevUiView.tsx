@@ -37,8 +37,7 @@ import {
 } from '@ui-sdk/solid/toast'
 import { createSignal, For, onCleanup, Show } from 'solid-js'
 import { ApprovalCard, type ApprovalState } from '../../components/ui/ApprovalCard'
-import { Button } from '../../components/ui/Button'
-import { buttonGhost, buttonPrimary, buttonSecondary } from '../../components/ui/button-classes'
+import { Button, buttonClass } from '../../components/ui/Button'
 import { RichText } from '../../components/ui/CodeBlock'
 import { DiffPatch } from '../../components/ui/DiffPatch'
 import { DiffView } from '../../components/ui/DiffView'
@@ -152,7 +151,7 @@ export function DevUiView() {
               loop.
             </p>
           </div>
-          <a class={buttonSecondary} href="/chat">
+          <a class={buttonClass({ variant: 'secondary' })} href="/chat">
             Back to console
           </a>
         </header>
@@ -307,7 +306,9 @@ export function DevUiView() {
               <p class={label}>Dialog</p>
               <div class="mt-2">
                 <Dialog>
-                  <DialogTrigger class={buttonSecondary}>Open dialog</DialogTrigger>
+                  <DialogTrigger class={buttonClass({ variant: 'secondary' })}>
+                    Open dialog
+                  </DialogTrigger>
                   <DialogBackdrop class="fixed inset-0 z-40 bg-black/40" />
                   <DialogContent class="fixed left-1/2 top-1/2 z-50 w-[min(420px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-panel border border-line bg-surface p-5 shadow-dialog">
                     <DialogTitle class="text-section text-ink">Share task</DialogTitle>
@@ -315,8 +316,8 @@ export function DevUiView() {
                       Anyone with this link can view the run and its evidence.
                     </DialogDescription>
                     <div class="mt-5 flex justify-end gap-2">
-                      <DialogClose class={buttonGhost}>Cancel</DialogClose>
-                      <DialogClose class={buttonPrimary}>Done</DialogClose>
+                      <DialogClose class={buttonClass({ variant: 'ghost' })}>Cancel</DialogClose>
+                      <DialogClose class={buttonClass({ variant: 'primary' })}>Done</DialogClose>
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -401,7 +402,7 @@ export function DevUiView() {
               <div class="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  class={buttonSecondary}
+                  class={buttonClass({ variant: 'secondary' })}
                   onClick={() =>
                     toaster('Task archived', {
                       description: 'The regression run is kept for 30 days.',
@@ -410,9 +411,9 @@ export function DevUiView() {
                 >
                   Show toast
                 </button>
-                <button type="button" class={buttonGhost} onClick={() => toaster.dismiss()}>
+                <Button variant="ghost" onClick={() => toaster.dismiss()}>
                   Dismiss all
-                </button>
+                </Button>
               </div>
               <ToastRegion
                 toaster={toaster}
@@ -439,9 +440,9 @@ export function DevUiView() {
               <div class="mt-3">
                 <LoadingState label="Planning" elapsedMs={elapsedMs()} />
               </div>
-              <button type="button" class={`${buttonGhost} mt-3`} onClick={appendChunk}>
+              <Button variant="ghost" class="mt-3" onClick={appendChunk}>
                 Advance 0.5s
-              </button>
+              </Button>
             </div>
 
             <div class={card}>
@@ -450,12 +451,12 @@ export function DevUiView() {
                 <StreamingText text={streamText()} streaming={streaming()} />
               </div>
               <div class="mt-3 flex gap-2">
-                <button type="button" class={buttonGhost} onClick={appendChunk}>
+                <Button variant="ghost" onClick={appendChunk}>
                   Append chunk
-                </button>
-                <button type="button" class={buttonGhost} onClick={() => setStreaming(false)}>
+                </Button>
+                <Button variant="ghost" onClick={() => setStreaming(false)}>
                   Close stream
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -520,13 +521,9 @@ export function DevUiView() {
                   onReject={() => setApproval('rejected')}
                 />
               </div>
-              <button
-                type="button"
-                class={`${buttonGhost} mt-3`}
-                onClick={() => setApproval('pending')}
-              >
+              <Button variant="ghost" class="mt-3" onClick={() => setApproval('pending')}>
                 Reset decision
-              </button>
+              </Button>
             </div>
           </div>
         </Section>
@@ -536,12 +533,12 @@ export function DevUiView() {
           note="The SDK ships virtualized Select/Combobox, not a standalone virtualizer. This measures the content-visibility fallback for chat history."
         >
           <div class="flex flex-wrap items-center gap-3">
-            <button type="button" class={buttonSecondary} onClick={renderManyRows}>
+            <Button variant="secondary" onClick={renderManyRows}>
               Render 10,000 rows
-            </button>
-            <button type="button" class={buttonGhost} onClick={() => setRows(0)}>
+            </Button>
+            <Button variant="ghost" onClick={() => setRows(0)}>
               Clear
-            </button>
+            </Button>
             <span class="text-meta text-ink-2">
               {rows() === 0
                 ? 'Nothing rendered.'

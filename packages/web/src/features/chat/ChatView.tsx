@@ -1,7 +1,6 @@
 import type { JSX } from '@solidjs/web'
 import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
-import { Button } from '../../components/ui/Button'
-import { buttonPrimary } from '../../components/ui/button-classes'
+import { Button, buttonClass } from '../../components/ui/Button'
 import { RichText } from '../../components/ui/CodeBlock'
 import { fieldControl } from '../../components/ui/Field'
 import { Icon } from '../../components/ui/Icon'
@@ -554,7 +553,7 @@ export function ChatView(props: ChatViewProps) {
           </span>
           <h2 class="text-section text-ink">{props.t('chatBlockedTitle')}</h2>
           <p class="text-meta text-ink-2">{props.t('chatBlockedBody')}</p>
-          <a href="/settings" class={`${buttonPrimary} mt-1`}>
+          <a href="/settings" class={`${buttonClass({ variant: 'primary' })} mt-1`}>
             {props.t('openSettings')}
           </a>
         </div>
