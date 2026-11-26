@@ -92,6 +92,10 @@ export async function runDoctor(
   })
   if (!sandboxPlatform.ok) blocking.push('sandboxPlatform')
 
+  // 5c. 队列健康：不阻塞启动，但要让“有活没跑完”看得见（P0 可见性）
+  const queues = probeQueues(dbPath(dir))
+  checks.push({ name: 'queues', ok: queues.ok, detail: queues.detail })
+
   // 6. 单实例锁（可获取 / 已有实例在跑都算正常）
   const lock = await probeLock(dir)
   checks.push({ name: 'lock', ok: lock.ok, detail: lock.detail })
@@ -118,6 +122,54 @@ export async function runDoctor(
 export interface DbProbe {
   ok: boolean
   detail: string
+}
+
+/**
+ * 队列健康：把“失败/卡住/积压”变成可读的一行。
+ * 不参与 blocking：队列有积压说明有活没跑完，不代表这台机器不能启动。
+ */
+export function probeQueues(path: string): DbProbe {
+  if (!existsSync(path)) {
+    return { ok: true, detail: '无运行库（尚未启动过）' }
+  }
+  let db: ReturnType<typeof openDatabase> | undefined
+  try {
+    db = openDatabase(path)
+    const scalar = (sql: string): number =>
+      (db?.prepare(sql).get() as { n: number } | undefined)?.n ?? 0
+
+    const failedDispatch = scalar(
+      "SELECT COUNT(*) AS n FROM dispatch_queue WHERE status = 'failed'",
+    )
+    const claimedDispatch = scalar(
+      "SELECT COUNT(*) AS n FROM dispatch_queue WHERE status = 'claimed'",
+    )
+    const pendingDispatch = scalar(
+      "SELECT COUNT(*) AS n FROM dispatch_queue WHERE status = 'pending'",
+    )
+    const pendingDecision = scalar(
+      "SELECT COUNT(*) AS n FROM decision_queue WHERE status = 'pending'",
+    )
+    const failedDecision = scalar(
+      "SELECT COUNT(*) AS n FROM decision_queue WHERE status = 'failed'",
+    )
+
+    const parts = [
+      `派发 pending ${pendingDispatch} / claimed ${claimedDispatch} / failed ${failedDispatch}`,
+      `决策点 pending ${pendingDecision} / failed ${failedDecision}`,
+    ]
+    const ok = failedDispatch === 0 && failedDecision === 0
+    return {
+      ok,
+      detail: ok ? parts.join('；') : `${parts.join('；')}（有失败项，用 ha task/logs 查原因）`,
+    }
+  } catch (error) {
+    /* 迁移未应用时表可能不存在：这是信息，不是阻塞项。 */
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: true, detail: `队列不可读：${message}` }
+  } finally {
+    db?.close()
+  }
 }
 
 /**

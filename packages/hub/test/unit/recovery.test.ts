@@ -8,6 +8,7 @@ import {
   asTimestamp,
 } from '../../src/domain/ids'
 import { emptyState } from '../../src/domain/machine'
+import { claimDispatch, enqueueDispatch, listDispatches } from '../../src/runtime/dispatch/queue'
 import { detectNoProgress } from '../../src/runtime/recovery/no-progress'
 import { pauseTask, resumeTask } from '../../src/runtime/recovery/pause'
 import { scanRecovery } from '../../src/runtime/recovery/scan'
@@ -146,6 +147,53 @@ describe('recovery：重启扫描', () => {
     const report = scanRecovery(db, { isProcessAlive: () => true })
     expect(report.unknown).toEqual([])
     expect(report.skippedAlive).toHaveLength(1)
+  })
+
+  it('置 unknown 与建决策点同一事务：中断则整体回滚，重扫能补上', () => {
+    const { db, ids } = seed()
+    /* 在写入决策点的那一刻注入失败，模拟崩在“置 unknown”与“建决策点”之间。 */
+    db.exec(`
+      CREATE TRIGGER fail_decision_insert BEFORE INSERT ON decision_queue
+      BEGIN SELECT RAISE(ABORT, 'injected crash'); END;
+    `)
+
+    expect(() => scanRecovery(db)).toThrow()
+
+    /* 关键：不能只把 Execution 置成 unknown 却留下无人处理的决策点缺口。 */
+    const execution = db
+      .prepare('SELECT status FROM executions WHERE id = ?')
+      .get(ids.executionId) as { status: string }
+    expect(execution.status).toBe('running')
+    const queued = db.prepare('SELECT COUNT(*) AS n FROM decision_queue').get() as { n: number }
+    expect(queued.n).toBe(0)
+
+    /* 故障消失后重扫，恢复流程仍能完整走完。 */
+    db.exec('DROP TRIGGER fail_decision_insert')
+    const report = scanRecovery(db)
+    expect(report.unknown).toEqual([ids.executionId])
+    expect(report.decisions).toHaveLength(1)
+    const after = db.prepare('SELECT status FROM executions WHERE id = ?').get(ids.executionId) as {
+      status: string
+    }
+    expect(after.status).toBe('unknown')
+  })
+
+  it('启动扫描同时回收过期的派发意图', () => {
+    const { db } = seed()
+    enqueueDispatch(db, {
+      goalId: 'g1',
+      taskId: 't1',
+      subtaskId: 's1',
+      target: 'local-acp',
+      objective: '改一个文件',
+      idempotencyKey: 'g1:s1:1',
+    })
+    /* 领了但没收尾（模拟进程在派发途中崩掉），且早已超过租约。 */
+    claimDispatch(db, { goalId: 'g1', claimedBy: 'runner', now: new Date('2020-01-01T00:00:00Z') })
+
+    const report = scanRecovery(db)
+    expect(report.reclaimedDispatches).toHaveLength(1)
+    expect(listDispatches(db, 'g1')[0]?.status).toBe('pending')
   })
 
   it('waiting_input 停在原地，不被强转 unknown', () => {

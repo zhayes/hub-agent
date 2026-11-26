@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ScriptedBrain } from '../../src/brain/scripted-brain'
 import { buildBrainInput } from '../../src/brain/snapshot'
-import { type BrainInput, DEFAULT_BRAIN_BUDGET } from '../../src/brain/types'
+import {
+  type BrainInput,
+  DEFAULT_BRAIN_BUDGET,
+  type OrchestratorBrain,
+} from '../../src/brain/types'
 import { validateBrainActions } from '../../src/brain/validate'
 import { asGoalId, asTimestamp } from '../../src/domain/ids'
 import { applyEvent, type DomainState, emptyState } from '../../src/domain/machine'
@@ -131,7 +135,9 @@ describe('决策队列', () => {
     expect(claimed?.status).toBe('claimed')
     expect(claimDecisionPoint(database, 'g1', 'brain')).toBeUndefined()
 
-    completeDecisionPoint(database, claimed?.id ?? '', 'done')
+    completeDecisionPoint(database, claimed?.id ?? '', 'done', {
+      claimToken: claimed?.claimToken ?? '',
+    })
     expect(listDecisionPoints(database, 'g1')[0]?.status).toBe('done')
   })
 })
@@ -227,5 +233,49 @@ describe('clarify：questionId + executionId 路由（TC-018）', () => {
       answer: '答案二',
     })
     expect(a2.answer).toBe('答案二')
+  })
+})
+
+describe('Brain 回合：explain 超时（P0）', () => {
+  it('explain 永不返回时，回合仍能在预算内收尾，不会把 claim 占死', async () => {
+    const database = db()
+    const at = asTimestamp(new Date().toISOString())
+    appendEvent(database, emptyState, {
+      type: 'goal.created',
+      goal: {
+        id: asGoalId('g1'),
+        userId: 'local',
+        title: '超时目标',
+        intent: '超时目标',
+        status: 'active',
+        createdAt: at,
+        updatedAt: at,
+      },
+    })
+
+    const base = new ScriptedBrain()
+    const brain: OrchestratorBrain = {
+      step: (input) => base.step(input),
+      explain: () => new Promise<never>(() => {}),
+    }
+
+    const started = Date.now()
+    const round = await runBrainRound({
+      db: database,
+      brain,
+      goalId: 'g1',
+      reason: 'plan_invalid',
+      dedupeKey: 'g1:explain-timeout',
+      agents: [],
+      budget: { ...DEFAULT_BRAIN_BUDGET, timeoutMs: 50 },
+    })
+
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(round?.actions[0]?.type).toBe('revise_plan')
+    expect(round?.record.rationale.length).toBeGreaterThan(0)
+
+    /* 关键：claim 已收尾，不会因为 explain 挂住而永久停留在 claimed。 */
+    const [point] = listDecisionPoints(database, 'g1')
+    expect(point?.status).toBe('done')
   })
 })

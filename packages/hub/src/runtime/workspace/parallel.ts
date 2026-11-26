@@ -2,6 +2,7 @@ import type { BrainBudget, OrchestratorBrain } from '../../brain/types'
 import type { Goal, Subtask, Task, VerificationCheck } from '../../domain/entities'
 import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../../domain/ids'
 import type { SandboxNetworkMode, SandboxProvider } from '../../sandbox/types'
+import { HubError } from '../../shared/errors'
 import { newId } from '../../shared/id'
 import type { Db } from '../../storage/db'
 import { loadState } from '../../storage/queries/state'
@@ -10,6 +11,10 @@ import { runAcpWithRetry } from '../acp-retry'
 import type { RunAcpTaskResult } from '../acp-run'
 import type { AgentRecord } from '../agent-registry'
 import { runBrainRound } from '../brain-loop'
+import { createAcpDispatchExecutor } from '../dispatch/acp-executor'
+import { enqueueDispatch } from '../dispatch/queue'
+import { drainDispatches } from '../dispatch/runner'
+import { deriveIdempotencyKey } from '../recovery/idempotency'
 import { completeTaskAfterDelivery } from './finalize'
 import { mergeNoFf } from './git'
 import { abortWorktreeSession, createWorktreeSession, type WorktreeSession } from './session'
@@ -180,26 +185,84 @@ export async function runParallelAgents(
 
     const results = await Promise.all(
       sessions.map(async ({ session, agent, subtask }) => {
-        const result = await runAcpWithRetry({
-          db: options.db,
-          provider: options.provider,
-          agent,
-          availableAgents: options.agents,
-          objective: subtask.description,
-          worktree: session.worktreePath,
+        const idempotencyKey = deriveIdempotencyKey({
+          goalId,
+          subtaskId: subtask.id,
+          attempt: 1,
+        })
+        /* 与单条路径一致：意图先落库，再交给 Dispatcher 执行（ADR 0027 D4）。
+           worktree 租约已经固定了 executionId，所以显式传给意图。 */
+        const { intent } = enqueueDispatch(options.db, {
           goalId,
           taskId,
           subtaskId: subtask.id,
+          target: 'local-acp',
+          agentId: String(agent.id),
+          objective: subtask.description,
+          idempotencyKey,
           executionId: session.executionId,
-          clientVersion: options.clientVersion,
-          checks: options.checks,
-          ...(options.transcriptDir === undefined ? {} : { transcriptDir: options.transcriptDir }),
-          ...(options.networkMode === undefined ? {} : { networkMode: options.networkMode }),
-          ...(options.allowedDomains === undefined
-            ? {}
-            : { allowedDomains: options.allowedDomains }),
-          allowedWrite: [...(options.allowedWrite ?? []), ...session.gitWritePaths],
+          payload: {
+            worktree: session.worktreePath,
+            ...(options.checks === undefined ? {} : { checks: options.checks }),
+            ...(options.transcriptDir === undefined
+              ? {}
+              : { transcriptDir: options.transcriptDir }),
+            ...(options.networkMode === undefined ? {} : { networkMode: options.networkMode }),
+            ...(options.allowedDomains === undefined
+              ? {}
+              : { allowedDomains: options.allowedDomains }),
+            ...(options.clientVersion === undefined
+              ? {}
+              : { clientVersion: options.clientVersion }),
+            allowedWrite: [...(options.allowedWrite ?? []), ...session.gitWritePaths],
+          },
         })
+
+        let result: RunAcpTaskResult | undefined
+        await drainDispatches(options.db, {
+          goalId,
+          intentId: intent.id,
+          max: 1,
+          executor: createAcpDispatchExecutor({
+            db: options.db,
+            runTask: async (_item, executionId) => {
+              result = await runAcpWithRetry({
+                db: options.db,
+                provider: options.provider,
+                agent,
+                availableAgents: options.agents,
+                objective: subtask.description,
+                worktree: session.worktreePath,
+                goalId,
+                taskId,
+                subtaskId: subtask.id,
+                executionId,
+                clientVersion: options.clientVersion,
+                checks: options.checks,
+                ...(options.transcriptDir === undefined
+                  ? {}
+                  : { transcriptDir: options.transcriptDir }),
+                ...(options.networkMode === undefined ? {} : { networkMode: options.networkMode }),
+                ...(options.allowedDomains === undefined
+                  ? {}
+                  : { allowedDomains: options.allowedDomains }),
+                allowedWrite: [...(options.allowedWrite ?? []), ...session.gitWritePaths],
+              })
+              return result
+            },
+            decisionFor: () => ({
+              reason: 'subtask_terminal',
+              dedupeKey: `subtask:${subtask.id}:terminal`,
+            }),
+          }),
+        })
+        if (result === undefined) {
+          throw new HubError('ACTION_REJECTED', '该子任务已有执行，本轮不重复派发', {
+            goalId,
+            subtaskId: subtask.id,
+            idempotencyKey,
+          })
+        }
         return { result, session, agent, subtask }
       }),
     )

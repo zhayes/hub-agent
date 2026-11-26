@@ -4,7 +4,8 @@ import { EXECUTION_TRANSITIONS, isActiveExecution } from '../../domain/status'
 import type { Db } from '../../storage/db'
 import { loadState } from '../../storage/queries/state'
 import { appendEvent } from '../../storage/write/events'
-import { enqueueDecisionPoint } from '../decision-queue'
+import { enqueueDecisionPoint, reclaimExpiredDecisionPoints } from '../decision-queue'
+import { reclaimExpiredDispatches } from '../dispatch/queue'
 
 export interface RecoveryScanOptions {
   now?: Date
@@ -17,11 +18,16 @@ export interface RecoveryScanOptions {
 export interface RecoveryReport {
   unknown: string[]
   decisions: string[]
+  /** 本次启动回收的过期 claim（租约超时的决策点已退回 pending，等调度者重领）。 */
+  reclaimedDecisionPoints: string[]
+  /** 同理：过期未收尾的派发意图退回 pending（见 PLAN-A2A §5.4）。 */
+  reclaimedDispatches: string[]
   skippedAlive: string[]
   /**
-   * 状态机不允许 `→ unknown` 的执行（waiting_input / waiting_permission / starting）。
-   * 它们保持原状：前两者在等人工答复，启动中的执行没有证据可核验。
-   * 强行收敛会抛 EVENT_REJECTED，进而让 daemon 起不来（真实事故）。
+   * 保持原状、本次不处理的执行：
+   * 状态机不允许 `→ unknown`（waiting_input / waiting_permission / starting，
+   * 强行收敛会抛 EVENT_REJECTED，进而让 daemon 起不来——真实事故），
+   * 或缺少 Task 投影、定位不到 Goal 而建不出恢复决策点。
    */
   skippedIncomplete: string[]
 }
@@ -30,10 +36,21 @@ export interface RecoveryReport {
  * 重启恢复扫描（PRD §6.7 / §15.2）：
  *   非终态 Execution 若进程不存在 → unknown（不是 failed）；
  *   写恢复决策点，交 Brain/用户决定继续/回滚/放弃。
+ *
+ * 状态迁移与待派发决策点**同一事务**落库：若崩在两者之间，整个事务回滚，
+ * Execution 仍是原状态，下次启动会重新处理。否则会留下
+ * “已经是 unknown、却没有恢复任务” 的半状态，而扫描只处理活跃执行，
+ * 该任务再也没有机会被补上。
  */
 export function scanRecovery(db: Db, options: RecoveryScanOptions = {}): RecoveryReport {
   const isAlive = options.isProcessAlive ?? (() => false)
   const leaseValid = options.isLeaseValid ?? (() => true)
+  const reclaimedDecisionPoints = reclaimExpiredDecisionPoints(db, {
+    ...(options.now === undefined ? {} : { now: options.now }),
+  })
+  const reclaimedDispatches = reclaimExpiredDispatches(db, {
+    ...(options.now === undefined ? {} : { now: options.now }),
+  })
   let state = loadState(db)
   const unknown: string[] = []
   const decisions: string[] = []
@@ -56,28 +73,49 @@ export function scanRecovery(db: Db, options: RecoveryScanOptions = {}): Recover
       continue
     }
 
-    state = appendEvent(db, state, {
-      type: 'execution.status',
-      executionId: asExecutionId(execution.id),
-      to: 'unknown' satisfies ExecutionStatus,
-      at: at(),
-    }).state
-    unknown.push(execution.id)
-
     const task = state.tasks[execution.taskId]
-    if (task === undefined) continue
-    const point = enqueueDecisionPoint(db, {
-      goalId: task.goalId,
-      reason: 'recovery',
-      dedupeKey: `recovery:${execution.id}`,
-      payload: {
-        executionId: execution.id,
-        previousStatus: execution.status,
-        leaseValid: leaseValid(execution.id),
-      },
-    })
-    if (point.created) decisions.push(point.point.id)
+    if (task === undefined) {
+      /* 没有 Task 投影就定位不到 Goal，建不出恢复决策点。
+         宁可保持原状，也不要把 Execution 单独置成 unknown 而无人处理。 */
+      skippedIncomplete.push(execution.id)
+      continue
+    }
+
+    /* 租约检查可能读目录/分支，放在事务外（事务内禁止 I/O）。 */
+    const payload = {
+      executionId: execution.id,
+      previousStatus: execution.status,
+      leaseValid: leaseValid(execution.id),
+    }
+    const now = at()
+
+    const committed = db.transaction(() => {
+      const next = appendEvent(db, state, {
+        type: 'execution.status',
+        executionId: asExecutionId(execution.id),
+        to: 'unknown' satisfies ExecutionStatus,
+        at: now,
+      })
+      const point = enqueueDecisionPoint(db, {
+        goalId: task.goalId,
+        reason: 'recovery',
+        dedupeKey: `recovery:${execution.id}`,
+        payload,
+      })
+      return { state: next.state, point }
+    })()
+
+    state = committed.state
+    unknown.push(execution.id)
+    if (committed.point.created) decisions.push(committed.point.point.id)
   }
 
-  return { unknown, decisions, skippedAlive, skippedIncomplete }
+  return {
+    unknown,
+    decisions,
+    reclaimedDecisionPoints,
+    reclaimedDispatches,
+    skippedAlive,
+    skippedIncomplete,
+  }
 }

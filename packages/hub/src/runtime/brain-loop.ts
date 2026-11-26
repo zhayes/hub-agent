@@ -21,6 +21,7 @@ import {
   completeDecisionPoint,
   enqueueDecisionPoint,
   pendingDecisionPoints,
+  renewDecisionClaim,
 } from './decision-queue'
 import { recordDecision } from './decision-record'
 
@@ -107,6 +108,18 @@ export async function runBrainRound(
     // 已处理或已被其他 writer claim：本回合不再派发。
     return undefined
   }
+  const claimToken = point.claimToken
+  if (claimToken === undefined) {
+    throw new HubError('DB_UNAVAILABLE', '决策点 claim 缺少 claimToken', {
+      decisionPointId: point.id,
+    })
+  }
+  /** 收尾并校验持有权；false 表示这次 claim 已失效（被回收或被接管）。 */
+  const finish = (status: 'done' | 'failed', error?: string): boolean =>
+    completeDecisionPoint(options.db, point.id, status, {
+      claimToken,
+      ...(error === undefined ? {} : { error }),
+    })
 
   const state = loadState(options.db)
   const input = buildBrainInput({
@@ -148,7 +161,7 @@ export async function runBrainRound(
         errors: validation.errors,
       },
     })
-    completeDecisionPoint(options.db, point.id, 'failed', 'BUDGET_EXHAUSTED')
+    if (!finish('failed', 'BUDGET_EXHAUSTED')) return undefined
     return { point, input, actions: [], validation, record }
   }
 
@@ -160,12 +173,8 @@ export async function runBrainRound(
       'brain.step',
     )
   } catch (error) {
-    completeDecisionPoint(
-      options.db,
-      point.id,
-      'failed',
-      error instanceof Error ? error.message : String(error),
-    )
+    // claim 失效也要继续抛：本回合的 Brain 错误必须让调用方看到。
+    finish('failed', error instanceof Error ? error.message : String(error))
     throw error
   }
 
@@ -193,7 +202,7 @@ export async function runBrainRound(
         errors: validation.errors,
       },
     })
-    completeDecisionPoint(options.db, point.id, 'failed', 'stale_state_version')
+    if (!finish('failed', 'stale_state_version')) return undefined
     return { point, input, actions: [], validation, record }
   }
 
@@ -207,7 +216,17 @@ export async function runBrainRound(
       message: `输出动作估算 ${outputTokens} tokens 超过上限 ${budget.maxOutputTokens}`,
     })
   }
-  const rationales = await options.brain.explain(input).catch(() => [])
+  /* 第二次模型调用前先确认仍持有 claim：被接管就不必再烧 token。 */
+  if (!renewDecisionClaim(options.db, point.id, claimToken)) return undefined
+  /* explain 也会挂：给它同样的回合预算上限。 */
+  const rationales = await withTimeout(
+    options.brain.explain(input),
+    budget.timeoutMs,
+    'brain.explain',
+  ).catch(() => [])
+  /* step + explain 可能吃掉整段租约：收尾前再续一次，缩小被判过期的窗口。
+     续租失败说明 claim 已被回收/接管，本轮动作丢弃。 */
+  if (!renewDecisionClaim(options.db, point.id, claimToken)) return undefined
   const rationale =
     rationales
       .map((item) => item.rationale)
@@ -231,12 +250,21 @@ export async function runBrainRound(
     ...(alternatives.length === 0 ? {} : { alternatives }),
   })
 
-  completeDecisionPoint(
-    options.db,
-    point.id,
+  const applied = finish(
     validation.ok ? 'done' : 'failed',
-    validation.ok ? undefined : validation.errors.map((error) => error.message).join('; '),
+    validation.ok ? undefined : validation.errors.map((item) => item.message).join('; '),
   )
+  if (!applied) {
+    /* claim 被回收并接管：本轮动作一律不生效，留一条 DecisionRecord 说明丢弃原因。 */
+    recordDecision(options.db, {
+      goalId: options.goalId,
+      ...(options.planRevision === undefined ? {} : { planRevision: options.planRevision }),
+      type: 'abort',
+      rationale: '决策点 claim 已被回收/接管，本轮动作丢弃',
+      inputs: { decisionPointId: point.id, stateVersion: input.stateVersion, actions: [] },
+    })
+    return undefined
+  }
 
   return { point, input, actions: validation.actions, validation, record }
 }

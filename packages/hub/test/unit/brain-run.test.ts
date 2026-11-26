@@ -115,6 +115,15 @@ describe('runGoalWithBrain', () => {
     }
     expect(task.status).toBe('completed')
     expect(task.goal_id).toBe(result.goalId)
+
+    /* 执行必须真的走了 Dispatcher：意图落库、带 target、并已收尾。 */
+    const dispatches = db
+      .prepare('SELECT status, target, subtask_id FROM dispatch_queue')
+      .all() as Array<{ status: string; target: string; subtask_id: string }>
+    expect(dispatches).toHaveLength(1)
+    expect(dispatches[0]?.status).toBe('done')
+    expect(dispatches[0]?.target).toBe('local-acp')
+    expect(dispatches[0]?.subtask_id).toBe(result.subtaskId)
   })
 })
 

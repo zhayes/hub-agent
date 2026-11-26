@@ -14,6 +14,11 @@ import { MIGRATION_012_CHAT_STREAM } from './migrations/012-chat-stream'
 import { MIGRATION_013_EXECUTION_RESUME } from './migrations/013-execution-resume'
 import { MIGRATION_014_CHAT_TOOL_DETAIL } from './migrations/014-chat-tool-detail'
 import { MIGRATION_015_DSH_PERMISSION_MODE } from './migrations/015-dsh-permission-mode'
+import { MIGRATION_016_DECISION_CLAIM_LEASE } from './migrations/016-decision-claim-lease'
+import { MIGRATION_017_DISPATCH_QUEUE } from './migrations/017-dispatch-queue'
+import { MIGRATION_018_DISPATCH_PAYLOAD } from './migrations/018-dispatch-payload'
+import { MIGRATION_019_DISPATCH_EXECUTION_ID } from './migrations/019-dispatch-execution-id'
+import { MIGRATION_020_A2A_TABLES } from './migrations/020-a2a-tables'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -32,6 +37,11 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_013_EXECUTION_RESUME,
   MIGRATION_014_CHAT_TOOL_DETAIL,
   MIGRATION_015_DSH_PERMISSION_MODE,
+  MIGRATION_016_DECISION_CLAIM_LEASE,
+  MIGRATION_017_DISPATCH_QUEUE,
+  MIGRATION_018_DISPATCH_PAYLOAD,
+  MIGRATION_019_DISPATCH_EXECUTION_ID,
+  MIGRATION_020_A2A_TABLES,
 ]
 
 export interface MigrateResult {

@@ -6,7 +6,7 @@ import { asApprovalId, asGoalId } from '../../src/domain/ids'
 import { type DomainState, emptyState } from '../../src/domain/machine'
 import { HubError } from '../../src/shared/errors'
 import { integrityCheck, openDatabase, pragmaValue } from '../../src/storage/db'
-import { migrate } from '../../src/storage/migrate'
+import { MIGRATIONS, migrate } from '../../src/storage/migrate'
 import { loadState } from '../../src/storage/queries/state'
 import {
   appliedSeq,
@@ -67,43 +67,13 @@ describe('数据库与迁移', () => {
 
     try {
       const first = migrate(db)
-      expect(first.applied).toEqual([
-        '001-init',
-        '002-agents',
-        '003-agent-profile',
-        '004-brain',
-        '005-workspace',
-        '006-chat',
-        '007-chat-approval',
-        '008-chat-clarification',
-        '009-agent-catalog',
-        '010-chat-agent',
-        '011-chat-archive',
-        '012-chat-stream',
-        '013-execution-resume',
-        '014-chat-tool-detail',
-        '015-dsh-permission-mode',
-      ])
+      /* 从 MIGRATIONS 派生，不写死清单：新增迁移时这份断言不该再用手改。 */
+      const ids = MIGRATIONS.map((migration) => migration.id)
+      expect(first.applied).toEqual(ids)
 
       const second = migrate(db)
       expect(second.applied).toEqual([])
-      expect(second.skipped).toEqual([
-        '001-init',
-        '002-agents',
-        '003-agent-profile',
-        '004-brain',
-        '005-workspace',
-        '006-chat',
-        '007-chat-approval',
-        '008-chat-clarification',
-        '009-agent-catalog',
-        '010-chat-agent',
-        '011-chat-archive',
-        '012-chat-stream',
-        '013-execution-resume',
-        '014-chat-tool-detail',
-        '015-dsh-permission-mode',
-      ])
+      expect(second.skipped).toEqual(ids)
     } finally {
       db.close()
     }

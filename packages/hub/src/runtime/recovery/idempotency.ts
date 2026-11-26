@@ -22,6 +22,29 @@ export function deriveIdempotencyKey(input: {
   return base32(digest)
 }
 
+/**
+ * Execution ID 由幂等键确定性派生（ADR 0027 D4）。
+ *
+ * 同一个 (goal, subtask, attempt) 重放得到同一个 executionId，于是数据库
+ * 主键本身成为第二道去重闸门：即便上游漏了幂等检查，也不可能出现两条执行。
+ *
+ * 注意：结果只有 26 个 Crockford 字符、形状像 ULID，但**前 10 位不是时间戳**，
+ * 不要用它推时间或依赖它排序。
+ */
+export function deriveExecutionId(idempotencyKey: string): string {
+  if (idempotencyKey === '') {
+    throw new Error('deriveExecutionId 需要非空 idempotencyKey')
+  }
+  const digest = createHash('sha256').update(`execution|${idempotencyKey}`).digest()
+  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+  let out = ''
+  for (let i = 0; i < 26; i += 1) {
+    out += alphabet.charAt((digest[i] ?? 0) & 31)
+  }
+  return out
+}
+
+/** RFC 4648 base32 字母表（幂等键摘要用）。 */
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 
 function base32(bytes: Buffer): string {

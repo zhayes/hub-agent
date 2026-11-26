@@ -20,8 +20,12 @@ import type { RunAcpTaskOptions, RunAcpTaskResult } from './acp-run'
 import type { AgentRecord } from './agent-registry'
 import { runBrainRound } from './brain-loop'
 import { createClarification } from './clarify'
+import { createAcpDispatchExecutor } from './dispatch/acp-executor'
+import { enqueueDispatch } from './dispatch/queue'
+import { drainDispatches } from './dispatch/runner'
 import { cancelTask } from './recovery/cancel'
 import { failGoal } from './recovery/fail'
+import { deriveIdempotencyKey } from './recovery/idempotency'
 import { completeGoal, completeTaskAfterDelivery } from './workspace/finalize'
 
 /**
@@ -248,6 +252,31 @@ export async function runGoalWithBrain(
   let roundIndex = 0
   let replans = 0
 
+  /* 随意图落库的执行规格：调度器从库里捞起意图后靠它重建上下文（provider 不存）。 */
+  const dispatchPayload = {
+    worktree: taskOptions.worktree,
+    ...(taskOptions.checks === undefined ? {} : { checks: taskOptions.checks }),
+    ...(taskOptions.networkMode === undefined ? {} : { networkMode: taskOptions.networkMode }),
+    ...(taskOptions.allowedDomains === undefined
+      ? {}
+      : { allowedDomains: [...taskOptions.allowedDomains] }),
+    ...(taskOptions.allowedWrite === undefined
+      ? {}
+      : { allowedWrite: [...taskOptions.allowedWrite] }),
+    ...(taskOptions.transcriptDir === undefined
+      ? {}
+      : { transcriptDir: taskOptions.transcriptDir }),
+    ...(taskOptions.clientVersion === undefined
+      ? {}
+      : { clientVersion: taskOptions.clientVersion }),
+    ...(taskOptions.promptTimeoutMs === undefined
+      ? {}
+      : { promptTimeoutMs: taskOptions.promptTimeoutMs }),
+    ...(taskOptions.initializeTimeoutMs === undefined
+      ? {}
+      : { initializeTimeoutMs: taskOptions.initializeTimeoutMs }),
+  }
+
   while (roundIndex < 20) {
     const round = await runBrainRound({
       db: options.db,
@@ -339,23 +368,73 @@ export async function runGoalWithBrain(
         text: `派给 ${chosen.name}：${subtask.title}`,
         agent: chosen.name,
       })
-      let result: RunAcpTaskResult
-      try {
-        result = await runAcpWithRetry({
-          ...taskOptions,
-          agent: chosen,
-          goalId,
-          taskId,
-          subtaskId: subtask.id,
-          objective: subtask.description,
-        })
-      } catch (error) {
+
+      /* 意图先落库再执行（ADR 0027 D4）；幂等键与 acp-run 首轮一致（attempt=1），
+         这样重放会命中同一条契约与原 executionId，而不是再开一次会话。 */
+      const idempotencyKey = deriveIdempotencyKey({ goalId, subtaskId: subtask.id, attempt: 1 })
+      const { intent } = enqueueDispatch(options.db, {
+        goalId,
+        taskId,
+        subtaskId: subtask.id,
+        target: 'local-acp',
+        agentId: String(chosen.id),
+        objective: subtask.description,
+        idempotencyKey,
+        payload: dispatchPayload,
+      })
+
+      let result: RunAcpTaskResult | undefined
+      let failure: unknown
+      const executor = createAcpDispatchExecutor({
+        db: options.db,
+        runTask: async (_item, executionId) => {
+          try {
+            result = await runAcpWithRetry({
+              ...taskOptions,
+              agent: chosen,
+              goalId,
+              taskId,
+              subtaskId: subtask.id,
+              objective: subtask.description,
+              executionId,
+            })
+            return result
+          } catch (error) {
+            failure = error
+            throw error
+          }
+        },
+        /* 下一回合的决策点与循环自己的 dedupeKey 一致，避免留下没人领的重复点。 */
+        decisionFor: () => ({
+          reason: 'subtask_terminal',
+          dedupeKey: `goal:${goalId}:dispatch:${roundIndex}`,
+        }),
+      })
+
+      await drainDispatches(options.db, {
+        goalId,
+        intentId: intent.id,
+        max: 1,
+        executor,
+      })
+
+      if (failure !== undefined) {
         report({
           stage: 'failed',
-          text: `${chosen.name} 启动失败：${error instanceof Error ? error.message : String(error)}`,
+          text: `${chosen.name} 启动失败：${
+            failure instanceof Error ? failure.message : String(failure)
+          }`,
           agent: chosen.name,
         })
-        throw error
+        throw failure
+      }
+      if (result === undefined) {
+        /* 只会在“该 subtask/attempt 已有执行”时发生：不重复派发，交给下一回合按真实状态决策。 */
+        throw new HubError('ACTION_REJECTED', '该子任务已有执行，本轮不重复派发', {
+          goalId,
+          subtaskId: subtask.id,
+          idempotencyKey,
+        })
       }
       report(
         result.ok

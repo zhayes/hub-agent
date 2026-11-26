@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp } from '../../src/domain/ids'
 import { emptyState } from '../../src/domain/machine'
-import { deriveIdempotencyKey, reserveDelegation } from '../../src/runtime/recovery/idempotency'
+import {
+  deriveExecutionId,
+  deriveIdempotencyKey,
+  reserveDelegation,
+} from '../../src/runtime/recovery/idempotency'
+import { isUlid } from '../../src/shared/id'
 import { type Db, openDatabase } from '../../src/storage/db'
 import { migrate } from '../../src/storage/migrate'
 import { appendEvent } from '../../src/storage/write/events'
@@ -97,5 +102,28 @@ describe('idempotency：重复投递只有一个契约', () => {
     reserveDelegation(db, { subtaskId: 's1', idempotencyKey: k1 })
     const second = reserveDelegation(db, { subtaskId: 's1', idempotencyKey: k2 })
     expect(second.created).toBe(true)
+  })
+})
+
+describe('deriveExecutionId：确定性派生（ADR 0027 D4）', () => {
+  it('同一 idempotencyKey 总是得到同一个 executionId', () => {
+    const key = deriveIdempotencyKey({ goalId: 'g1', subtaskId: 's1', attempt: 1 })
+    expect(deriveExecutionId(key)).toBe(deriveExecutionId(key))
+  })
+
+  it('不同 attempt 得到不同 executionId', () => {
+    const k1 = deriveIdempotencyKey({ goalId: 'g1', subtaskId: 's1', attempt: 1 })
+    const k2 = deriveIdempotencyKey({ goalId: 'g1', subtaskId: 's1', attempt: 2 })
+    expect(deriveExecutionId(k1)).not.toBe(deriveExecutionId(k2))
+  })
+
+  it('形状与 ULID 一致（26 个 Crockford 字符），可直接做主键', () => {
+    const id = deriveExecutionId('g1:s1:1')
+    expect(id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/)
+    expect(isUlid(id)).toBe(true)
+  })
+
+  it('空键直接报错，不静默产出可碰撞 ID', () => {
+    expect(() => deriveExecutionId('')).toThrow()
   })
 })

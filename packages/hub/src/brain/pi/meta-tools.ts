@@ -23,7 +23,7 @@ export function createMetaTools(input: BrainInput): MetaTools {
   const discover = Type.Object({})
   const agentDetail = Type.Object({ agentId: Type.String() })
   const taskResult = Type.Object({ subtaskId: Type.String() })
-  const awaitAny = Type.Object({ timeoutMs: Type.Optional(Type.Number()) })
+  const awaitAny = Type.Object({})
   const draft = Type.Object({
     title: Type.String(),
     description: Type.String(),
