@@ -32,7 +32,7 @@ const railButton =
   'relative grid size-10 place-items-center rounded-panel transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:border forced-colors:border-CanvasText'
 
 const bodyPane = 'flex min-h-0 flex-1 flex-col overflow-hidden'
-const bodyScroll = 'min-h-0 flex-1 overflow-y-auto px-6 pb-7 max-[1100px]:px-4'
+const bodyScroll = 'min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-7 max-[1100px]:px-4'
 const railButtonIdle = 'text-ink-2 hover:bg-hover hover:text-ink'
 const railButtonActive = 'bg-active text-ink'
 
@@ -239,8 +239,26 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
       <main class="flex min-h-0 min-w-0 flex-col max-[860px]:pb-[calc(52px+env(safe-area-inset-bottom))]">
         <header class="flex h-12 flex-none items-center justify-between gap-4 border-b border-line px-6 max-[1100px]:px-4">
-          <div class="flex min-w-0 items-baseline gap-2.5">
-            <span class="text-meta font-semibold text-ink">{app.t('appName')}</span>
+          {/* The app bar carries the page's identity and status: a breadcrumb
+              instead of a hero title on its own row, so the page content starts
+              right under the bar. */}
+          <div class="flex min-w-0 items-baseline gap-2">
+            <a
+              href="/chat"
+              class="shrink-0 rounded-control text-meta font-semibold text-ink-3 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              {app.t('appName')}
+            </a>
+            <span class="shrink-0 text-meta text-ink-3" aria-hidden="true">
+              /
+            </span>
+            <h1 class="min-w-0 truncate text-body font-semibold text-ink">{title()}</h1>
+            <Show when={note() !== ''}>
+              <span class="min-w-0 truncate text-badge text-ink-3 max-[860px]:hidden">
+                {'· '}
+                {note()}
+              </span>
+            </Show>
           </div>
           <div class="flex items-center gap-1.5">
             <span
@@ -259,15 +277,6 @@ export function AppLayout(props: { children?: JSX.Element }) {
         </header>
 
         <div class="flex min-h-0 flex-1 flex-col">
-          <div class="flex flex-none items-end justify-between gap-4 px-6 pt-[22px] pb-4 max-[1100px]:px-4 max-[860px]:items-start max-[860px]:pt-4 max-[860px]:pb-3 max-[560px]:pt-3.5 max-[560px]:pb-2.5">
-            <div class="min-w-0">
-              <h1 class="text-title text-ink">{title()}</h1>
-              <Show when={note() !== ''}>
-                <p class="mt-1.5 text-meta text-ink-2">{note()}</p>
-              </Show>
-            </div>
-          </div>
-
           <Show when={app.error() !== ''}>
             <div
               class="mx-6 mb-3 flex flex-none items-center justify-between gap-3 rounded-panel bg-danger-soft px-3 py-2.5 text-meta text-danger max-[1100px]:mx-4"
