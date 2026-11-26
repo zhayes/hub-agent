@@ -413,7 +413,18 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 
 验证：`test/unit/a2a-client.test.ts` 用**真实 HTTP** 跑通 SDK 客户端 → 我们自己的 SDK 服务端：拉卡片、非阻塞发送、轮询到终态、`INPUT_REQUIRED` 可读、错 token 失败、取消终态任务被拒。这是第一次两端都是 A2A 协议的互操作验证。
 
-未落地：`remote_task_refs`（迁移 021）、`target='remote-a2a'` 的执行器、断线对账、双 daemon 进程级互委托。
+已落地（出站提交与关联，2026-11-26）：
+
+- 迁移 `021-remote-task-refs`：`remote_task_refs` 表，`idempotency_key` UNIQUE（重放不可能发第二次委托）、`(peer_id, remote_task_id)` UNIQUE（一个远端任务只对应一条关联）、`local_execution_id` UNIQUE 且可空（提交阶段可空，建 Execution 后回填）。
+- `runtime/remote-task.ts`：关联与对账仓储——`rememberRemoteTask` / `findRemoteTaskByIdempotencyKey` / `observeRemoteTask` / `attachLocalExecution` / `listRemoteTasksNeedingPoll`。`observed_state` 只由远端读取写入；撞不同幂等键的同一远端任务抛 `EVENT_REJECTED`，不静默合并。
+- `runtime/remote-dispatch.ts`：`target='remote-a2a'` 的执行器，语义为**只提交**——发送一次 `SendMessage`、落 `remote_task_refs` 后收尾；**重放不重发**；**不发下一决策点**（等对账看到远端终态再产生）；发送抛错按“未知不重试”标失败。`messageId` 由幂等键确定性派生（A2A 协议级去重抓手）。
+- `adapters/a2a/mapping.ts`：`fromTaskState` 把 SDK `TaskState` 映射成 PRD §7.6.1 的小写观测值；`domain/status.ts` 新增 `REMOTE_OBSERVED_STATES` 与 `isTerminalRemoteState`，不把 SDK 枚举泄漏进 Domain/Runtime。
+
+验证：`test/unit/remote-dispatch.test.ts`（12 条）——记录/重放/唯一冲突、观测与游标、回填 Execution、待对账过滤，以及发送一次、重放不重发、缺 peer 失败关闭、发送抛错不落关联、载荷缺 `peerId` 判失败。
+
+未落地：远端状态对账轮询（`GetTask` 推进 `observed_state`/`event_cursor`、到终态才产出决策点，接进调度 tick）、`target='remote-a2a'` 的 Brain 接线与 `local_execution_id` 回填、双 daemon 进程级互委托。
+
+**交付物 manifest（`remote_artifacts`）尚未建表**：§4.1.1 冻结了字段，但按“建表随实现同一个 PR”的约定，它属于远程交付物阶段（A3 验收/交付），不在本次提交范围；当前 `remote_task_refs` 只记录执行状态关联，不代表已能接收代码交付物。
 
 ### A5 核心验收场景
 

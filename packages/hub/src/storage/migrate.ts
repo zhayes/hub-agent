@@ -19,6 +19,7 @@ import { MIGRATION_017_DISPATCH_QUEUE } from './migrations/017-dispatch-queue'
 import { MIGRATION_018_DISPATCH_PAYLOAD } from './migrations/018-dispatch-payload'
 import { MIGRATION_019_DISPATCH_EXECUTION_ID } from './migrations/019-dispatch-execution-id'
 import { MIGRATION_020_A2A_TABLES } from './migrations/020-a2a-tables'
+import { MIGRATION_021_REMOTE_TASK_REFS } from './migrations/021-remote-task-refs'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -42,6 +43,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_018_DISPATCH_PAYLOAD,
   MIGRATION_019_DISPATCH_EXECUTION_ID,
   MIGRATION_020_A2A_TABLES,
+  MIGRATION_021_REMOTE_TASK_REFS,
 ]
 
 export interface MigrateResult {

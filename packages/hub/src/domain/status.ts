@@ -52,6 +52,38 @@ export const EXECUTION_STATUSES = [
 ] as const
 export type ExecutionStatus = (typeof EXECUTION_STATUSES)[number]
 
+/**
+ * 远端 A2A 任务在本地的**观测值**（PRD §7.6.1）。
+ *
+ * 这是“我看到的远端状态”，不是本地 Task/Execution 状态机：本地是否成功仍由
+ * 本地验收决定（ADR 0007）。名称取 PRD 的小写形式，避免把 A2A SDK 枚举
+ * 泄漏进 Domain/Runtime。
+ */
+export const REMOTE_OBSERVED_STATES = [
+  'submitted',
+  'working',
+  'input_required',
+  'auth_required',
+  'completed',
+  'failed',
+  'canceled',
+  'rejected',
+  'unknown',
+] as const
+export type RemoteObservedState = (typeof REMOTE_OBSERVED_STATES)[number]
+
+/** 远端终态：只有这些状态才允许在对账时产出“下一决策点”。 */
+const TERMINAL_REMOTE_STATES: readonly RemoteObservedState[] = [
+  'completed',
+  'failed',
+  'canceled',
+  'rejected',
+]
+
+export function isTerminalRemoteState(state: RemoteObservedState): boolean {
+  return TERMINAL_REMOTE_STATES.includes(state)
+}
+
 export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'expired'] as const
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number]
 

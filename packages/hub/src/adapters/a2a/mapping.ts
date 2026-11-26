@@ -1,5 +1,5 @@
 import { TaskState } from '@a2a-js/sdk'
-import type { TaskStatus } from '../../domain/status'
+import type { RemoteObservedState, TaskStatus } from '../../domain/status'
 
 /**
  * 本地 Task 状态 → A2A `TaskState`（PRD §7.6.2 的实现）。
@@ -44,4 +44,33 @@ export function isInterruptedTaskState(state: TaskState): boolean {
   return (
     state === TaskState.TASK_STATE_INPUT_REQUIRED || state === TaskState.TASK_STATE_AUTH_REQUIRED
   )
+}
+
+/**
+ * 远端 `TaskState` → 本地观测值（PRD §7.6.1 出站列）。
+ *
+ * 只记录“看到了什么”，不据此改本地 Execution/Task 状态——那由 Runtime 对账决定。
+ * `UNSPECIFIED` 与未知数值一律归 `unknown`（ADR 0010：不可知不猜测）。
+ */
+export function fromTaskState(state: TaskState): RemoteObservedState {
+  switch (state) {
+    case TaskState.TASK_STATE_SUBMITTED:
+      return 'submitted'
+    case TaskState.TASK_STATE_WORKING:
+      return 'working'
+    case TaskState.TASK_STATE_INPUT_REQUIRED:
+      return 'input_required'
+    case TaskState.TASK_STATE_AUTH_REQUIRED:
+      return 'auth_required'
+    case TaskState.TASK_STATE_COMPLETED:
+      return 'completed'
+    case TaskState.TASK_STATE_FAILED:
+      return 'failed'
+    case TaskState.TASK_STATE_CANCELED:
+      return 'canceled'
+    case TaskState.TASK_STATE_REJECTED:
+      return 'rejected'
+    default:
+      return 'unknown'
+  }
 }
