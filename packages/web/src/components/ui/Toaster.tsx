@@ -1,40 +1,68 @@
-import {
-  createToaster,
-  Toast,
-  ToastDescription,
-  ToastRegion,
-  ToastTitle,
-} from '@ui-sdk/solid/toast'
-import { onCleanup } from 'solid-js'
+import type { JSX } from '@solidjs/web'
+import { Dynamic } from '@solidjs/web'
+import { type Component, createSignal, Show } from 'solid-js'
 
 /**
- * One toaster for the whole console. Toasts announce without stealing focus,
- * which is what an approval decision needs: the transcript keeps its place.
+ * Toast surface for the console.
+ *
+ * Toasts are only ever triggered by a user action (approve, save, delete), and
+ * the SDK's toast foundation is a large share of the shell bundle, so it is
+ * imported on the first toast instead of at boot. This file must stay tiny:
+ * the shell imports it eagerly.
+ *
+ * Calls made before the module arrives are queued and flushed once the region
+ * is actually mounted, so the first toast is never dropped — only slightly
+ * delayed.
  */
-const toaster = createToaster()
+interface PendingToast {
+  title: string
+  description?: string
+}
+
+let emit: ((title: string, description?: string) => void) | undefined
+let mounted = false
+let loading = false
+const pending: PendingToast[] = []
+
+const [region, setRegion] = createSignal<Component<{ onReady: () => void }>>()
+
+function flush(): void {
+  const show = emit
+  if (show === undefined || !mounted) return
+  while (pending.length > 0) {
+    const item = pending.shift()
+    if (item === undefined) continue
+    show(item.title, item.description)
+  }
+}
 
 export function toast(title: string, description?: string): void {
-  void toaster(title, description === undefined ? {} : { description })
+  if (emit !== undefined && mounted) {
+    emit(title, description)
+    return
+  }
+  pending.push(description === undefined ? { title } : { title, description })
+  if (loading) return
+  loading = true
+  void import('./toast-region').then((module) => {
+    emit = module.show
+    setRegion(() => module.Region)
+  })
 }
 
-export function dismissToasts(): void {
-  void toaster.dismiss()
-}
-
-/** Mount once, at the shell. */
-export function Toaster() {
-  onCleanup(() => dismissToasts())
+/** Mount once, at the shell. Renders nothing until the first toast. */
+export function Toaster(): JSX.Element {
   return (
-    <ToastRegion
-      toaster={toaster}
-      class="fixed right-4 bottom-4 z-50 flex w-[min(320px,calc(100vw-32px))] flex-col gap-2"
-    >
-      {() => (
-        <Toast class="rounded-panel border border-line-strong bg-surface p-3 shadow-popover">
-          <ToastTitle class="text-meta font-medium text-ink" />
-          <ToastDescription class="mt-1 break-words text-badge text-ink-2" />
-        </Toast>
+    <Show when={region()}>
+      {(component) => (
+        <Dynamic
+          component={component()}
+          onReady={() => {
+            mounted = true
+            flush()
+          }}
+        />
       )}
-    </ToastRegion>
+    </Show>
   )
 }
