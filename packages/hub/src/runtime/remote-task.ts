@@ -27,6 +27,8 @@ export interface RemoteTaskRef {
   eventCursor?: string
   createdAt: string
   lastSeenAt: string
+  /** 非空表示已停止对账（远端已无此任务或本地已放弃）；不代表成功。 */
+  closedAt?: string
 }
 
 interface RemoteTaskRefRow {
@@ -42,6 +44,7 @@ interface RemoteTaskRefRow {
   event_cursor: string | null
   created_at: string
   last_seen_at: string
+  closed_at: string | null
 }
 
 function toRef(row: RemoteTaskRefRow): RemoteTaskRef {
@@ -58,6 +61,7 @@ function toRef(row: RemoteTaskRefRow): RemoteTaskRef {
     ...(row.event_cursor === null ? {} : { eventCursor: row.event_cursor }),
     createdAt: row.created_at,
     lastSeenAt: row.last_seen_at,
+    ...(row.closed_at === null ? {} : { closedAt: row.closed_at }),
   }
 }
 
@@ -208,6 +212,38 @@ export function attachLocalExecution(
   return info.changes > 0
 }
 
+export interface CloseRemoteTaskInput {
+  id: string
+  /** 关单时一并记录的观测值（如 `unknown`）；缺省保留原值。 */
+  observedState?: RemoteObservedState
+  now?: Date
+}
+
+/**
+ * 停止对账：远端已无该任务（`TaskNotFound`）或本地已放弃这个委托。
+ *
+ * **关单不是成功**：它只表示不会再有下一轮轮询，结论仍看 `observed_state` 与本地验收。
+ * 重复调用幂等（已关单则返回 false）。
+ */
+export function closeRemoteTask(db: Db, input: CloseRemoteTaskInput): boolean {
+  const now = (input.now ?? new Date()).toISOString()
+  const info =
+    input.observedState === undefined
+      ? db
+          .prepare(
+            `UPDATE remote_task_refs SET closed_at = ?, last_seen_at = ?
+             WHERE id = ? AND closed_at IS NULL`,
+          )
+          .run(now, now, input.id)
+      : db
+          .prepare(
+            `UPDATE remote_task_refs SET closed_at = ?, last_seen_at = ?, observed_state = ?
+             WHERE id = ? AND closed_at IS NULL`,
+          )
+          .run(now, now, input.observedState, input.id)
+  return info.changes > 0
+}
+
 export interface ListNeedingPollOptions {
   now?: Date
   /** 只取“这么久没刷新过”的（避免每 tick 都打所有人）；缺省不限制。 */
@@ -235,14 +271,15 @@ export function listRemoteTasksNeedingPoll(
       ? (db
           .prepare(
             `SELECT * FROM remote_task_refs
-             WHERE observed_state NOT IN (${placeholders})
+             WHERE closed_at IS NULL AND observed_state NOT IN (${placeholders})
              ORDER BY last_seen_at ASC, id ASC LIMIT ?`,
           )
           .all('completed', 'failed', 'canceled', 'rejected', limit) as RemoteTaskRefRow[])
       : (db
           .prepare(
             `SELECT * FROM remote_task_refs
-             WHERE observed_state NOT IN (${placeholders}) AND last_seen_at <= ?
+             WHERE closed_at IS NULL AND observed_state NOT IN (${placeholders})
+               AND last_seen_at <= ?
              ORDER BY last_seen_at ASC, id ASC LIMIT ?`,
           )
           .all(

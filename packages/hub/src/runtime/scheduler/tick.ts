@@ -3,6 +3,11 @@ import { reclaimExpiredDecisionPoints } from '../decision-queue'
 import { reclaimExpiredDispatches } from '../dispatch/queue'
 import { drainDispatches } from '../dispatch/runner'
 import type { DispatchExecutor, DispatchIntent } from '../dispatch/types'
+import {
+  type ReconcileRemotesOptions,
+  type ReconcileReport,
+  reconcileRemoteTasks,
+} from '../remote-reconcile'
 
 export interface SchedulerDeps {
   /**
@@ -13,6 +18,11 @@ export interface SchedulerDeps {
   now?: Date
   /** 单次 tick 最多跑几条派发，避免一次占用太久。 */
   maxDispatches?: number
+  /**
+   * 远端对账。只有配置了出站 peer 解析器时才传——未配置时 daemon 行为不变。
+   * `db` 与 `now` 由 tick 注入，调用方只给解析器与可选项。
+   */
+  reconcile?: Omit<ReconcileRemotesOptions, 'db' | 'now'>
 }
 
 export interface SchedulerReport {
@@ -27,6 +37,8 @@ export interface SchedulerReport {
    * 不在这里伪造 Brain 决策（见 ADR 0027）。
    */
   pendingDecisionGoals: string[]
+  /** 本轮远端对账结果；未配置 `reconcile` 时为 undefined。 */
+  reconciled?: ReconcileReport
 }
 
 /**
@@ -56,6 +68,11 @@ export async function runSchedulerTick(db: Db, deps: SchedulerDeps): Promise<Sch
     )
     .all() as Array<{ goal_id: string }>
 
+  const reconciled =
+    deps.reconcile === undefined
+      ? undefined
+      : await reconcileRemoteTasks({ ...deps.reconcile, db, now })
+
   return {
     reclaimedDecisionPoints,
     reclaimedDispatches,
@@ -63,5 +80,6 @@ export async function runSchedulerTick(db: Db, deps: SchedulerDeps): Promise<Sch
     failed: drained.failed,
     requeued: drained.requeued,
     pendingDecisionGoals: rows.map((row) => row.goal_id),
+    ...(reconciled === undefined ? {} : { reconciled }),
   }
 }

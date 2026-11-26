@@ -422,7 +422,16 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 
 验证：`test/unit/remote-dispatch.test.ts`（12 条）——记录/重放/唯一冲突、观测与游标、回填 Execution、待对账过滤，以及发送一次、重放不重发、缺 peer 失败关闭、发送抛错不落关联、载荷缺 `peerId` 判失败。
 
-未落地：远端状态对账轮询（`GetTask` 推进 `observed_state`/`event_cursor`、到终态才产出决策点，接进调度 tick）、`target='remote-a2a'` 的 Brain 接线与 `local_execution_id` 回填、双 daemon 进程级互委托。
+已落地（断线对账，2026-11-26）：
+
+- 迁移 `022-remote-task-closed-at`：`remote_task_refs.closed_at`，用于“停止对账”的显式关单（终态、`TaskNotFound`、本地放弃）。关单**不代表成功**。
+- `runtime/remote-reconcile.ts`：`reconcileRemoteTasks` 每轮 `GetTask` 读一次 → 写回 `observed_state`/`event_cursor` → 终态时同一事务内关单并产出一条决策点（`remote:<refId>:terminal`）；`TaskNotFound` 关单为 `unknown` 并产出 `remote:<refId>:lost`（交人工）；传输错误只记 `failed`，不改状态、不关单、**绝不重发**。
+- `runtime/scheduler/tick.ts`：`runSchedulerTick` 新增可选 `reconcile`，仅在配置了出站 peer 解析器后才跑对账（未配置时 daemon 行为不变），结果落在 `report.reconciled`。
+- `adapters/a2a/errors.ts`：`isTaskNotFound`，把 SDK 错误类型判定收在适配层。
+
+验证：`test/unit/remote-reconcile.test.ts`（6 条）——运行中只刷观测、终态一次决策且之后不再轮询、`TaskNotFound` 关单、传输错误不关单、缺 peer 不发请求、`staleAfterMs` 内不重复打对端。
+
+未落地：`target='remote-a2a'` 的 **Brain 接线**（= 让 Brain 能选远程目标）与 `local_execution_id` 回填、双 daemon 进程级互委托。前者是**契约级改动**：`Subtask` 目前只有 `assignedAgentId`，没有“远程目标”概念，需先改 PRD §13.5 的 delegate 动作与领域模型，不靠临时字段凑。
 
 **交付物 manifest（`remote_artifacts`）尚未建表**：§4.1.1 冻结了字段，但按“建表随实现同一个 PR”的约定，它属于远程交付物阶段（A3 验收/交付），不在本次提交范围；当前 `remote_task_refs` 只记录执行状态关联，不代表已能接收代码交付物。
 
