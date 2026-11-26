@@ -3,6 +3,7 @@ import type {
   BrainAction,
   BrainBudget,
   BrainInput,
+  ChatTurn,
   DecisionRecord,
   DecisionRecordType,
   OrchestratorBrain,
@@ -31,6 +32,7 @@ export interface RunBrainRoundOptions {
   agents: BrainInput['agents']
   budget?: BrainBudget
   planRevision?: number
+  conversation?: readonly ChatTurn[]
   claimedBy?: string
   payload?: unknown
 }
@@ -47,6 +49,8 @@ function decisionTypeOf(actions: readonly BrainAction[]): DecisionRecordType {
   const first = actions[0]
   if (first === undefined) return 'accept_result'
   switch (first.type) {
+    case 'reply':
+      return 'accept_result'
     case 'revise_plan':
       return 'decompose'
     case 'delegate':
@@ -114,6 +118,7 @@ export async function runBrainRound(
     budget,
     stateVersion: lastSeq(options.db),
     ...(options.planRevision === undefined ? {} : { planRevision: options.planRevision }),
+    ...(options.conversation === undefined ? {} : { conversation: options.conversation }),
   })
 
   const inputTokens = estimateInputTokens(input)

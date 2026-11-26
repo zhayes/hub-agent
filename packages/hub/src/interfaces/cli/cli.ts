@@ -86,6 +86,8 @@ export function createCli(version: string): Command {
           home: handle.home,
           tokenPath: handle.tokenPath,
           webBuilt: handle.webBuilt,
+          webDist: handle.webDist,
+          webBuiltAt: handle.webBuiltAt,
           recovery: handle.recovery,
         }
         if (options.json === true) {
@@ -93,8 +95,17 @@ export function createCli(version: string): Command {
         } else {
           process.stdout.write(`✓ HubAgent 已启动\n`)
           process.stdout.write(`  控制台   ${handle.url}\n`)
+          const preferred =
+            options.port ?? Number.parseInt(process.env['HUBAGENT_PORT'] ?? '7788', 10)
+          if (Number.isFinite(preferred) && handle.port !== preferred) {
+            process.stdout.write(`  端口     ${preferred} 被占用，已改用 ${handle.port}\n`)
+          }
           if (!handle.webBuilt) {
-            process.stdout.write('  控制台尚未构建：先跑 pnpm build:web（当前访问会 404）\n')
+            process.stdout.write(`  前端资源 ${handle.webDist}（未构建：先跑 pnpm build:web）\n`)
+          } else if (handle.webBuiltAt !== undefined) {
+            process.stdout.write(
+              `  前端资源 ${handle.webDist}（构建于 ${new Date(handle.webBuiltAt).toLocaleString()}）\n`,
+            )
           }
           process.stdout.write(`  运行目录 ${handle.home}\n`)
           process.stdout.write('  Ctrl-C 停止\n')
@@ -801,11 +812,15 @@ export function createCli(version: string): Command {
               process.stdout.write(`${JSON.stringify(outputResult, null, 2)}\n`)
             } else {
               process.stdout.write(
-                `${outputResult.ok ? '✓' : '✗'} task ${outputResult.taskId} / execution ${outputResult.executionId ?? '-'}\n`,
+                `${outputResult.ok ? '✓' : '✗'} task ${outputResult.taskId ?? '-'} / execution ${outputResult.executionId ?? '-'}\n`,
               )
               process.stdout.write(`  agent:      ${outputResult.agent.name}\n`)
               process.stdout.write(`  stopReason: ${outputResult.stopReason}\n`)
               process.stdout.write(`  verdict:    ${outputResult.verdict}\n`)
+              const reply = (outputResult as { reply?: string }).reply
+              if (reply !== undefined) {
+                process.stdout.write(`\n${reply}\n`)
+              }
               const decisions = (outputResult as { decisions?: readonly unknown[] }).decisions
               if (decisions !== undefined) {
                 process.stdout.write(`  decisions:  ${decisions.length}\n`)

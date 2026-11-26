@@ -1,5 +1,12 @@
 import { createBrainFromEnv } from '../brain/create-brain'
-import type { BrainBudget, Clarification, DecisionRecord, OrchestratorBrain } from '../brain/types'
+import type {
+  BrainAction,
+  BrainBudget,
+  ChatTurn,
+  Clarification,
+  DecisionRecord,
+  OrchestratorBrain,
+} from '../brain/types'
 import type { Goal, Subtask, Task } from '../domain/entities'
 import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp, type TaskId } from '../domain/ids'
 import { HubError } from '../shared/errors'
@@ -14,7 +21,7 @@ import { runBrainRound } from './brain-loop'
 import { createClarification } from './clarify'
 import { cancelTask } from './recovery/cancel'
 import { failGoal } from './recovery/fail'
-import { completeTaskAfterDelivery } from './workspace/finalize'
+import { completeGoal, completeTaskAfterDelivery } from './workspace/finalize'
 
 /**
  * M6 的 Brain 驱动入口：
@@ -24,14 +31,33 @@ import { completeTaskAfterDelivery } from './workspace/finalize'
  * LLM 输出仍由 brain-loop/validate 做 schema/权限/预算/幂等校验。
  */
 
+export type RunProgressStage =
+  | 'planned'
+  | 'dispatching'
+  | 'retrying'
+  | 'waiting'
+  | 'completed'
+  | 'failed'
+
+/** 执行过程的一个关键点；控制台把它落成 chat message（kind=progress）。 */
+export interface RunProgressStep {
+  stage: RunProgressStage
+  text: string
+  agent?: string
+}
+
 export interface RunGoalWithBrainOptions
   extends Omit<RunAcpTaskOptions, 'goalId' | 'plan' | 'taskId' | 'subtaskId'> {
   brain?: OrchestratorBrain
   budget?: BrainBudget
+  /** Chat 入口的最近若干轮对话；任务/CLI 路径不传 */
+  conversation?: readonly ChatTurn[]
   /** 可参与自动换 Agent 的候选；默认只有 options.agent */
   availableAgents?: readonly AgentRecord[]
   /** 共享工作区完成即落 Task completed；worktree 由交付/merge 后 finalize */
   completeOnSuccess?: boolean
+  /** 执行过程回调；只做展示，异常不得影响执行 */
+  onProgress?: (step: RunProgressStep) => void
   /** Chat/HTTP 需要尽早拿到 goal/task id；回调不得抛错影响执行 */
   onGoalCreated?: (goalId: string) => void
   onTaskCreated?: (input: { goalId: string; taskId: string }) => void
@@ -40,7 +66,10 @@ export interface RunGoalWithBrainOptions
 export interface RunGoalWithBrainResult {
   ok: boolean
   goalId: string
-  taskId: string
+  /** 只回复、没建任务时为空（对话路径）。 */
+  taskId?: string
+  /** Brain 给用户看的最终文本：reply / finish.summary。 */
+  reply?: string
   subtaskId?: string
   executionId?: string
   sessionId?: string
@@ -66,6 +95,7 @@ export async function runGoalWithBrain(
     brain = createBrainFromEnv(),
     budget,
     completeOnSuccess = true,
+    onProgress,
     onGoalCreated,
     onTaskCreated,
     ...taskOptions
@@ -87,6 +117,15 @@ export async function runGoalWithBrain(
   state = appendEvent(options.db, state, { type: 'goal.created', goal }).state
   onGoalCreated?.(goalId)
 
+  const report = (step: RunProgressStep): void => {
+    try {
+      onProgress?.(step)
+    } catch {
+      // 过程展示失败不能拖垮执行。
+    }
+  }
+  const agentLabel = options.agent.name
+
   const availableAgents = options.availableAgents ?? [options.agent]
   const agents = availableAgents.map((agent) => ({
     id: agent.id,
@@ -95,6 +134,7 @@ export async function runGoalWithBrain(
     ...(agent.capabilities === undefined ? {} : { capabilities: agent.capabilities }),
   }))
 
+  const conversation = options.conversation
   const decompose = await runBrainRound({
     db: options.db,
     brain,
@@ -103,20 +143,68 @@ export async function runGoalWithBrain(
     dedupeKey: `goal:${goalId}:decompose`,
     agents,
     ...(budget === undefined ? {} : { budget }),
+    ...(conversation === undefined ? {} : { conversation }),
   })
   if (decompose === undefined) {
     throw new HubError('ACTION_REJECTED', '初始计划决策点已被处理', { goalId })
   }
+  const decisions = [decompose.record]
   let drafts = decompose.actions
     .filter((action) => action.type === 'revise_plan')
     .flatMap((action) => action.subtasks)
   if (drafts.length === 0) {
-    throw new HubError('ACTION_REJECTED', 'Brain 未产出 revise_plan', {
-      goalId,
-      actions: decompose.actions,
-    })
+    /* 还没计划就先问人：把问题落成 Clarification，由控制台渲染成可点选项，
+       而不是把一整轮对话判成失败。 */
+    const human = decompose.actions.find((action) => action.type === 'request_human')
+    if (human !== undefined) {
+      report({ stage: 'waiting', text: `需要你确认：${human.question.slice(0, 120)}` })
+      return waitingResult({
+        goalId,
+        agent: { id: options.agent.id, name: options.agent.name },
+        executions: [],
+        decisions,
+        clarification: createClarification(options.db, {
+          goalId,
+          kind: human.kind === 'clarify' && human.executionId !== undefined ? 'clarify' : 'decide',
+          question: human.question,
+          ...(human.options === undefined ? {} : { options: human.options }),
+          ...(human.executionId === undefined ? {} : { executionId: human.executionId }),
+        }),
+      })
+    }
+    /* 只回答、不动手：直接回给用户，不建 Task。 */
+    const reply = replyTextOf(decompose.actions)
+    if (reply !== undefined) {
+      completeGoal(options.db, goalId)
+      return {
+        ok: true,
+        goalId,
+        agent: { id: options.agent.id, name: options.agent.name },
+        stopReason: 'replied',
+        verdict: 'not_run',
+        durationMs: 0,
+        executions: [],
+        decisions,
+        reply,
+      }
+    }
+    throw new HubError(
+      'ACTION_REJECTED',
+      'Brain 没有产出可执行动作（既没有 revise_plan 也没有 reply）',
+      {
+        goalId,
+        actions: decompose.actions,
+      },
+    )
   }
 
+  report({
+    stage: 'planned',
+    text: `计划 ${drafts.length} 个步骤：${drafts
+      .map((draft) => draft.title)
+      .join(' / ')
+      .slice(0, 120)}`,
+  })
   let createdPlan = createTaskPlan({
     db: options.db,
     goalId,
@@ -129,9 +217,9 @@ export async function runGoalWithBrain(
   let draftSubtasks = createdPlan.subtasks
   onTaskCreated?.({ goalId, taskId })
 
-  const decisions = [decompose.record]
   const executions: RunAcpTaskResult[] = []
   let lastResult: RunAcpTaskResult | undefined
+  let replyText: string | undefined
   let roundIndex = 0
   let replans = 0
 
@@ -144,13 +232,17 @@ export async function runGoalWithBrain(
       dedupeKey: `goal:${goalId}:dispatch:${roundIndex}`,
       agents,
       ...(budget === undefined ? {} : { budget }),
+      ...(conversation === undefined ? {} : { conversation }),
     })
     roundIndex += 1
     if (round === undefined) break
     decisions.push(round.record)
+    const turnReply = replyTextOf(round.actions)
+    if (turnReply !== undefined) replyText = turnReply
 
     const human = round.actions.find((action) => action.type === 'request_human')
     if (human !== undefined) {
+      report({ stage: 'waiting', text: `需要你确认：${human.question.slice(0, 120)}` })
       const clarification = createClarification(options.db, {
         goalId,
         kind: human.kind ?? (human.executionId === undefined ? 'decide' : 'clarify'),
@@ -206,23 +298,57 @@ export async function runGoalWithBrain(
     if (targets.length === 0) break
 
     for (const subtask of targets) {
-      const result = await runAcpWithRetry({
-        ...taskOptions,
-        goalId,
-        taskId,
-        subtaskId: subtask.id,
-        objective: subtask.description,
+      report({
+        stage: 'dispatching',
+        text: `派给 ${agentLabel}：${subtask.title}`,
+        agent: agentLabel,
       })
+      let result: RunAcpTaskResult
+      try {
+        result = await runAcpWithRetry({
+          ...taskOptions,
+          goalId,
+          taskId,
+          subtaskId: subtask.id,
+          objective: subtask.description,
+        })
+      } catch (error) {
+        report({
+          stage: 'failed',
+          text: `${agentLabel} 启动失败：${error instanceof Error ? error.message : String(error)}`,
+          agent: agentLabel,
+        })
+        throw error
+      }
+      report(
+        result.ok
+          ? {
+              stage: 'completed',
+              text: `${agentLabel} 执行完成（验收 ${result.verdict}）`,
+              agent: agentLabel,
+            }
+          : {
+              stage: 'failed',
+              text: `${agentLabel} 执行未通过（${result.stopReason}）`,
+              agent: agentLabel,
+            },
+      )
       executions.push(result)
       lastResult = result
       if (!result.ok) break
     }
     if (lastResult !== undefined && !lastResult.ok) {
       if (lastResult.approval !== undefined || lastResult.stopReason === 'waiting_approval') {
+        report({ stage: 'waiting', text: '等待你批准后继续', agent: agentLabel })
         return { ...lastResult, executions, decisions }
       }
       if (lastResult.replanRequired === true && replans < 2) {
         replans += 1
+        report({
+          stage: 'retrying',
+          text: `换一种做法重试（第 ${replans} 次）`,
+          agent: agentLabel,
+        })
         const replan = await runBrainRound({
           db: options.db,
           brain,
@@ -268,7 +394,21 @@ export async function runGoalWithBrain(
   if (lastResult.ok && completeOnSuccess) {
     completeTaskAfterDelivery(options.db, lastResult.taskId, lastResult.goalId)
   }
-  return { ...lastResult, executions, decisions }
+  return {
+    ...lastResult,
+    executions,
+    decisions,
+    ...(replyText === undefined ? {} : { reply: replyText }),
+  }
+}
+
+/** Brain 想直接对用户说话时返回文本；finish 也算（模型常拿它当回答）。 */
+function replyTextOf(actions: readonly BrainAction[]): string | undefined {
+  for (const action of actions) {
+    if (action.type === 'reply') return action.text
+    if (action.type === 'finish') return action.summary
+  }
+  return undefined
 }
 
 function createTaskPlan(input: {
@@ -332,7 +472,7 @@ function createTaskPlan(input: {
 
 function waitingResult(input: {
   goalId: string
-  taskId: string
+  taskId?: string
   agent: { id: string; name: string }
   executions: RunAcpTaskResult[]
   decisions: DecisionRecord[]
@@ -354,7 +494,7 @@ function waitingResult(input: {
   return {
     ok: false,
     goalId: input.goalId,
-    taskId: input.taskId,
+    ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
     agent: input.agent,
     stopReason,
     verdict: 'not_run',

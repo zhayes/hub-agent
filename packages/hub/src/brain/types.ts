@@ -68,6 +68,12 @@ export interface PendingDecisionView {
   createdAt: string
 }
 
+/** 控制台对话的最近若干轮；只带用户可见文本，不带工具流水。 */
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface BrainInput {
   goal: {
     id: string
@@ -76,6 +82,8 @@ export interface BrainInput {
     status: string
   }
   planRevision: number
+  /** Chat 入口的对话历史；`hubagent run` 等任务路径不传。 */
+  conversation?: ChatTurn[]
   tasks: TaskView[]
   agents: AgentSummary[]
   pending: PendingDecisionView[]
@@ -103,6 +111,8 @@ export interface DelegateRequest {
 }
 
 export type BrainAction =
+  /** 直接回复用户，不建任务（对话模式的主路径）。 */
+  | { type: 'reply'; text: string }
   | { type: 'revise_plan'; subtasks: SubtaskDraft[]; reason: string }
   | { type: 'delegate'; request: DelegateRequest }
   | { type: 'cancel'; executionId: string; reason: string }

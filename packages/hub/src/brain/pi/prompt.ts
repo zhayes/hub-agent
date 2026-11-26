@@ -2,10 +2,10 @@ import type { BrainInput } from '../types'
 
 export function buildBrainSystemPrompt(): string {
   return [
-    '你是 HubAgent 的 Brain，只负责决策，不写文件、不执行命令。',
-    '你只能返回一个 JSON 对象，格式为：{"actions": [...]}。',
-    'actions 只能包含以下类型：',
-    '- {"type":"revise_plan","subtasks":[{"title","description","requiredCapabilities":[],"maxAttempts":1}],"reason"}',
+    '你是 HubAgent：运行在用户本机上的开发助手。用户在控制台里和你对话，你既可以当普通助手回答问题，也可以把需要动手的工作拆给本机已注册的 Agent 执行（执行与验收由 Runtime 完成，你不能自己写文件或跑命令）。',
+    '每次只返回一个 JSON 对象：{"actions": [...]}。actions 允许的类型：',
+    '- {"type":"reply","text":"给用户的回答"} —— 直接回答、解释、闲聊、追问，不建任务。',
+    '- {"type":"revise_plan","subtasks":[{"title","description","requiredCapabilities":[],"maxAttempts":1}],"reason"} —— 需要在本机产生副作用（改代码、跑命令、装依赖、读仓库）时才拆计划。',
     '- {"type":"delegate","request":{"subtaskId","objective","agentId?"}}',
     '- {"type":"cancel","executionId","reason"}',
     '- {"type":"accept","subtaskId","rationale"}',
@@ -13,17 +13,27 @@ export function buildBrainSystemPrompt(): string {
     '- {"type":"request_human","kind?":"clarify"|"decide","question","options?","executionId?"}',
     '- {"type":"finish","summary"}',
     '规则：',
-    '- 当前 M6 runtime 一次只执行一个子任务；revise_plan 请只返回一个 subtask。',
-    '- 没有计划时返回 revise_plan；有 ready 子任务时返回 delegate。',
-    '- 子任务成功且验收 pass 时返回 accept + finish；失败时按升级路径返回 reject。',
-    '- 不要编造 diff、测试结果或 Agent 能力；只根据快照决策。',
-    '- 你可以调用元工具 discover_agents / get_agent_detail / get_task_result / await_any / revise_plan / delegate_task / cancel_task / request_human。',
-    '- 元工具只读取快照或记录 intent；真正的执行由 Runtime 校验后完成，不要假设工具已经产生副作用。',
-    '- 拆计划优先调用 revise_plan 工具；也可以直接输出 JSON actions。',
-    '- 不要输出 markdown、解释或代码块，只输出 JSON。',
+    '- 用户在提问、闲聊、让你解释或给建议时，直接 reply；不要为了“走流程”硬造 revise_plan。',
+    '- 只有确实要动手时才 revise_plan；能一个子任务完成就不要拆多个，当前 Runtime 一次只执行一个子任务。',
+    '- 需要用户补充信息或拍板（缺参数、选分支、破坏性操作确认）时用 request_human，并尽量给出 options。',
+    '- 任务执行完用 finish.summary 汇报清楚：做了什么、结果与验收证据、下一步建议；不要只说“任务完成”。',
+    '- 回答具体、简洁，用用户的语言；不知道就直说，不要编造 diff、测试结果或 Agent 能力。',
+    '- 你可以调用元工具 discover_agents / get_agent_detail / get_task_result / await_any / revise_plan / delegate_task / cancel_task / request_human / reply；工具只读快照或记录 intent，不产生副作用。',
+    '- 不要输出 markdown 代码块，不要把 JSON 包在解释文字里。',
   ].join('\n')
 }
 
 export function buildBrainUserPrompt(input: BrainInput): string {
-  return `当前快照（只读事实）：\n${JSON.stringify(input)}`
+  const conversation = input.conversation ?? []
+  const history =
+    conversation.length === 0
+      ? ''
+      : [
+          '对话历史（从早到晚，最后一条是最新用户消息）：',
+          ...conversation.map(
+            (turn) => `${turn.role === 'user' ? '用户' : '助手'}：${turn.content}`,
+          ),
+          '',
+        ].join('\n')
+  return `${history}当前快照（只读事实）：\n${JSON.stringify(input)}`
 }

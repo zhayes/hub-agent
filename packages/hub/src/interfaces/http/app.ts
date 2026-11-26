@@ -8,6 +8,7 @@ import { scanAgents } from '../../runtime/agent-discovery/scan'
 import { listAgents, removeAgent, setAgentStatus } from '../../runtime/agent-registry'
 import { decideApproval, listApprovals } from '../../runtime/approval'
 import type { ChatService } from '../../runtime/chat/chat-service'
+import { getClarification } from '../../runtime/clarify'
 import { listDecisions } from '../../runtime/decision-record'
 import {
   deleteProvider,
@@ -130,6 +131,14 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       : context.json({ ok: true, decisions: listDecisions(db, view.task.goalId) })
   })
 
+  /* 澄清卡片要 options 才能渲染成按钮：答案必须精确命中选项，手打文本会被拒。 */
+  app.get('/api/v1/clarifications/:id', (context) => {
+    const clarification = getClarification(db, context.req.param('id'))
+    return clarification === undefined
+      ? context.json({ code: 'NOT_FOUND', message: 'clarification not found' }, 404)
+      : context.json({ ok: true, clarification })
+  })
+
   app.post('/api/v1/chat/threads', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     const body = await context.req.json<{ title?: string }>().catch((): { title?: string } => ({}))
@@ -230,15 +239,14 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   app.post('/api/v1/chat/threads/:id/messages', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     const body = await context.req
-      .json<{ text?: string; mode?: 'run' | 'ask'; agentName?: string }>()
-      .catch((): { text?: string; mode?: 'run' | 'ask'; agentName?: string } => ({}))
+      .json<{ text?: string; agentName?: string }>()
+      .catch((): { text?: string; agentName?: string } => ({}))
     if (typeof body.text !== 'string' || body.text.trim().length === 0) {
       return context.json({ code: 'INVALID_INPUT', message: 'text is required' }, 400)
     }
     try {
       const thread = await options.chat.postMessage(context.req.param('id'), {
         text: body.text,
-        ...(body.mode === 'run' || body.mode === 'ask' ? { mode: body.mode } : {}),
         ...(body.agentName === undefined ? {} : { agentName: body.agentName }),
       })
       return context.json(
@@ -508,9 +516,17 @@ export function createHttpApp(options: HttpAppOptions): Hono {
             '</head>',
             `<script>window.__HUBAGENT_TOKEN__ = ${JSON.stringify(token)}</script></head>`,
           )
-        return context.html(html)
+        /* 入口 HTML 绝不能被缓存：重新构建后文件名变了，旧 HTML 会去拉已经不存在的
+           asset，页面就停在旧版本或直接白屏。 */
+        return context.body(html, 200, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+        })
       }
-      return context.body(body, 200, { 'content-type': contentType(target) })
+      return context.body(body, 200, {
+        'content-type': contentType(target),
+        'cache-control': 'no-cache',
+      })
     })
   }
 

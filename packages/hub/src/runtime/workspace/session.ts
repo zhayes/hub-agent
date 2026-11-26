@@ -103,10 +103,11 @@ function gitWritePaths(repoRoot: string, executionId: string): string[] {
 export async function finalizeWorktreeSession(
   db: Db,
   session: WorktreeSession,
-  result: { taskId: string; goalId: string; verdict: string },
+  result: { taskId?: string; goalId: string; verdict: string },
 ): Promise<DeliveryResult | undefined> {
   try {
-    if (result.verdict !== 'pass') return undefined
+    /* 只回复、没建任务的对话回合没有东西可交付，但租约仍要在这里释放。 */
+    if (result.taskId === undefined || result.verdict !== 'pass') return undefined
     const delivery = await executeDelivery({
       mode: 'branch-only',
       runner: session.gitRunner,

@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import type { Server } from 'node:http'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createChatService } from '../../runtime/chat/chat-service'
@@ -45,6 +46,10 @@ export interface HubHandle {
   recovery: HubRecovery
   /** 控制台构建产物是否存在；缺失时服务仍能起，只是页面 404 */
   webBuilt: boolean
+  /** 实际托管的前端目录；排查“页面为什么没更新”时先看这个 */
+  webDist: string
+  /** index.html 的构建时间（ISO）；未构建时缺省 */
+  webBuiltAt?: string
   close: () => Promise<void>
 }
 
@@ -101,7 +106,10 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
 
   const token = ensureHttpToken(home)
   const webDist = options.webDist ?? process.env['HUBAGENT_WEB_DIST'] ?? defaultWebDist()
-  const webBuilt = existsSync(webDist)
+  /* 以 index.html 为准：目录存在但没有入口时，页面同样 404。 */
+  const webIndex = join(webDist, 'index.html')
+  const webBuilt = existsSync(webIndex)
+  const webBuiltAt = webBuilt ? statSync(webIndex).mtime.toISOString() : undefined
   const provider = createSrtProvider()
   const chat = createChatService({
     db,
@@ -171,6 +179,8 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
     lockPath: lockPath(home),
     recovery,
     webBuilt,
+    webDist,
+    ...(webBuiltAt === undefined ? {} : { webBuiltAt }),
     close,
   }
 }

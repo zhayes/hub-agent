@@ -10,6 +10,10 @@ const draftSchema = z.object({
 
 const actionSchema = z.discriminatedUnion('type', [
   z.object({
+    type: z.literal('reply'),
+    text: z.string().min(1),
+  }),
+  z.object({
     type: z.literal('revise_plan'),
     subtasks: z.array(draftSchema).min(1).max(8),
     reason: z.string().min(1),

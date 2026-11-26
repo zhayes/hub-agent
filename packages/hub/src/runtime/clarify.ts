@@ -164,3 +164,10 @@ export function listClarifications(db: Db, goalId: string): Clarification[] {
     .all(goalId) as ClarificationRow[]
   return rows.map(toClarification)
 }
+
+export function getClarification(db: Db, id: string): Clarification | undefined {
+  const row = db.prepare('SELECT * FROM clarifications WHERE id = ?').get(id) as
+    | ClarificationRow
+    | undefined
+  return row === undefined ? undefined : toClarification(row)
+}

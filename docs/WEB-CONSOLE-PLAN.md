@@ -103,15 +103,15 @@ Settings
 
 ### 线程
 
-- 一个 Thread 关联一个 Goal；消息里的 taskId 可跳转 Task detail。
-- 发送后立即插入用户消息和 Planning 占位，不阻塞输入。
+- 一个 Thread 串起多次 Brain 回合；每个用户回合一个 Goal，只有需要执行时才建 Task。消息里的 taskId 可跳转 Task detail。
+- 发送后立即插入用户消息和进行中指示，不阻塞输入。
 - 运行中显示 Stop；Stop 走 cancel API。
-- 完成后 result 卡提供 task 链接、diffstat、verification 摘要。
+- 需要执行时，完成后 result 卡提供 task 链接、diffstat、verification 摘要；直接回答则是一条普通助手消息。
 - 刷新后从服务端恢复；不依赖内存。
 
 ### Composer
 
-- `Run` / `Ask` 两档：Run 创建任务，Ask 只读快照回答。
+- 只有一档输入：发出去就是和 HubAgent 对话，由 Brain 决定直接回答还是建任务；不再有 Run/Ask 切换。
 - 使用 `<form>` + `<button type="submit">`，不用裸 click 代替表单。
 - Enter 提交必须 IME 安全：
   - `event.isComposing`；
@@ -153,7 +153,7 @@ Settings
 | Task Rows | Thread / task 行 | 状态点 + 1px 进度；运行中只更新该行 |
 | Context Cards | Evidence / retrieved logs | 折叠摘要；展开才拉完整内容 |
 | Diff Table | changed files / diff | 懒加载、固定表头、长行截断 |
-| Prompt Bar | Composer | `@agent` / `/command` 后续再做，先保留 Run/Ask |
+| Prompt Bar | Composer | `@agent` / `/command` 后续再做，先保留纯文本输入 |
 
 动效纪律：
 

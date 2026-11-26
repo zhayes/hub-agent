@@ -30,6 +30,7 @@ interface MessageRow {
   task_id: string | null
   approval_id: string | null
   clarification_id: string | null
+  agent_name: string | null
   created_at: string
 }
 
@@ -61,6 +62,7 @@ function toMessage(row: MessageRow): ChatMessage {
     ...(row.task_id === null ? {} : { taskId: asTaskId(row.task_id) }),
     ...(row.approval_id === null ? {} : { approvalId: row.approval_id }),
     ...(row.clarification_id === null ? {} : { clarificationId: row.clarification_id }),
+    ...(row.agent_name === null ? {} : { agentName: row.agent_name }),
     createdAt: asTimestamp(row.created_at),
   }
 }
@@ -207,14 +209,15 @@ export function appendChatMessage(
     taskId?: string
     approvalId?: string
     clarificationId?: string
+    agentName?: string
   },
 ): ChatMessage {
   const now = asTimestamp(new Date().toISOString())
   const id = asChatMessageId(newId())
   const write = db.transaction(() => {
     db.prepare(
-      `INSERT INTO chat_messages (id, thread_id, role, kind, content, goal_id, task_id, approval_id, clarification_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chat_messages (id, thread_id, role, kind, content, goal_id, task_id, approval_id, clarification_id, agent_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.threadId,
@@ -225,6 +228,7 @@ export function appendChatMessage(
       input.taskId ?? null,
       input.approvalId ?? null,
       input.clarificationId ?? null,
+      input.agentName ?? null,
       now,
     )
     db.prepare('UPDATE chat_threads SET updated_at = ? WHERE id = ?').run(now, input.threadId)
@@ -240,6 +244,7 @@ export function appendChatMessage(
     ...(input.taskId === undefined ? {} : { taskId: asTaskId(input.taskId) }),
     ...(input.approvalId === undefined ? {} : { approvalId: input.approvalId }),
     ...(input.clarificationId === undefined ? {} : { clarificationId: input.clarificationId }),
+    ...(input.agentName === undefined ? {} : { agentName: input.agentName }),
     createdAt: now,
   }
 }

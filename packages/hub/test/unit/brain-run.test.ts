@@ -12,7 +12,7 @@ import type {
   OrchestratorBrain,
 } from '../../src/brain/types'
 import { addAgent, resolveAgent } from '../../src/runtime/agent-registry'
-import { runGoalWithBrain } from '../../src/runtime/brain-run'
+import { type RunProgressStep, runGoalWithBrain } from '../../src/runtime/brain-run'
 import type {
   SandboxDescription,
   SandboxedCommand,
@@ -238,6 +238,31 @@ describe('runGoalWithBrain：多子任务', () => {
   })
 })
 
+class ReplyBrain implements OrchestratorBrain {
+  async step(): Promise<BrainAction[]> {
+    return [{ type: 'reply', text: '我是 HubAgent，可以直接回答。' }]
+  }
+  async explain(): Promise<DecisionRationale[]> {
+    return []
+  }
+}
+
+class ClarifyFirstBrain implements OrchestratorBrain {
+  async step(): Promise<BrainAction[]> {
+    return [
+      {
+        type: 'request_human',
+        kind: 'decide',
+        question: '你希望我先做什么？',
+        options: ['打个招呼', '改代码'],
+      },
+    ]
+  }
+  async explain(): Promise<DecisionRationale[]> {
+    return []
+  }
+}
+
 class HumanBrain implements OrchestratorBrain {
   async step(): Promise<BrainAction[]> {
     return [
@@ -309,7 +334,72 @@ class CancelBrain implements OrchestratorBrain {
   }
 }
 
+describe('执行过程回调', () => {
+  it('按计划 → 派单 → 完成上报，且带上 Agent 名', async () => {
+    const db = database()
+    const dir = repo()
+    const steps: RunProgressStep[] = []
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new ScriptedBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: '写 mock-output.txt 并验收',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+      onProgress: (step) => steps.push(step),
+    })
+    expect(result.ok).toBe(true)
+    expect(steps.map((step) => step.stage)).toEqual(['planned', 'dispatching', 'completed'])
+    expect(steps[1]?.text).toContain('mock')
+    expect(steps[2]?.agent).toBe('mock')
+  })
+})
+
 describe('Brain actions：request_human / cancel', () => {
+  it('只回复的回合不建 Task，Goal 直接完成', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new ReplyBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'hi',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(true)
+    expect(result.reply).toContain('HubAgent')
+    expect(result.taskId).toBeUndefined()
+    expect(result.stopReason).toBe('replied')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 })
+    expect(
+      (db.prepare('SELECT status FROM goals WHERE id = ?').get(result.goalId) as { status: string })
+        .status,
+    ).toBe('completed')
+  })
+
+  it('还没计划就先澄清：落 Clarification，不建 Task', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new ClarifyFirstBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'hi',
+      worktree: dir,
+      checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.stopReason).toBe('waiting_input')
+    expect(result.taskId).toBeUndefined()
+    expect(result.clarification?.options).toEqual(['打个招呼', '改代码'])
+    expect(result.clarification?.status).toBe('pending')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 })
+  })
+
   it('request_human 创 Clarification 并把 Task 停在 waiting_input', async () => {
     const db = database()
     const dir = repo()

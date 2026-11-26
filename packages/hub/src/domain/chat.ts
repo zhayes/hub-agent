@@ -10,6 +10,10 @@ export type ChatMessageKind =
   | 'error'
   | 'approval'
   | 'clarification'
+  /** Runtime 上报的执行步骤（计划/派单/重试/验收），只做过程展示，不进模型上下文。 */
+  | 'progress'
+  /** Agent 需要授权：卡片里带 agentName，可直接触发 authenticate。 */
+  | 'auth'
 
 export interface ChatThread {
   id: ChatThreadId
@@ -31,5 +35,7 @@ export interface ChatMessage {
   taskId?: TaskId
   approvalId?: string
   clarificationId?: string
+  /** 'auth' 卡片与 'progress' 步骤关联的 Agent。 */
+  agentName?: string
   createdAt: Timestamp
 }

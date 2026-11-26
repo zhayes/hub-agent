@@ -235,6 +235,7 @@ describe('Web Console 静态托管', () => {
     })
     const index = await app.request('/')
     expect(index.status).toBe(200)
+    expect(index.headers.get('cache-control')).toBe('no-store')
     const html = await index.text()
     expect(html).toContain('__HUBAGENT_TOKEN__')
     expect(html).toContain('web-token')

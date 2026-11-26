@@ -61,7 +61,7 @@ describe('PiBrain：官方 Pi SDK 适配器', () => {
     const actions = await brain.step(snapshot)
     expect(actions[0]?.type).toBe('revise_plan')
     expect(factory.inputs[0]?.cwd).toBe('/tmp/work')
-    expect(factory.inputs[0]?.systemPrompt).toContain('Brain')
+    expect(factory.inputs[0]?.systemPrompt).toContain('HubAgent')
     expect(factory.prompts[0]).toContain('修 bug')
     expect(factory.disposed).toBe(1)
 
@@ -71,19 +71,20 @@ describe('PiBrain：官方 Pi SDK 适配器', () => {
     expect(rationales[0]?.rationale).toBe('单子任务')
   })
 
-  it('非法 JSON 归因 BRAIN_UNAVAILABLE，session 仍 dispose', async () => {
+  it('非 JSON 文本按 reply 处理，不把对话判成失败', async () => {
     const factory = new FakeFactory()
-    factory.text = 'not json'
+    factory.text = '你好，我是 HubAgent。'
     const brain = new PiBrain({ factory })
-    await expect(brain.step(input())).rejects.toMatchObject({ code: 'BRAIN_UNAVAILABLE' })
+    const actions = await brain.step(input())
+    expect(actions).toEqual([{ type: 'reply', text: '你好，我是 HubAgent。' }])
     expect(factory.disposed).toBe(1)
   })
 
-  it('空 assistant 文本拒绝', async () => {
+  it('空 assistant 文本返回空动作', async () => {
     const factory = new FakeFactory()
     factory.text = ''
     const brain = new PiBrain({ factory })
-    await expect(brain.step(input())).rejects.toMatchObject({ code: 'BRAIN_UNAVAILABLE' })
+    await expect(brain.step(input())).resolves.toEqual([])
   })
 })
 
@@ -131,6 +132,7 @@ describe('Pi 元工具循环', () => {
     const factory = new ToolCallingFactory()
     const brain = new PiBrain({ factory })
     const actions = await brain.step(input())
+    expect(factory.seenTools).toContain('reply')
     expect(factory.seenTools).toContain('discover_agents')
     expect(factory.seenTools).toContain('revise_plan')
     expect(actions).toHaveLength(1)

@@ -137,7 +137,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(`${response.status}: ${text}`)
+    /* 后端错误体是 {code,message}：直接把它展示给用户，别露出 `500: {"code":...}`。 */
+    let message = text
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown }
+      if (typeof parsed.message === 'string' && parsed.message !== '') message = parsed.message
+    } catch {
+      // 非 JSON 错误体保持原文
+    }
+    throw new Error(message === '' ? `请求失败（HTTP ${response.status}）` : message)
   }
   /* A dev server answers unknown /api routes with index.html, which used to
      surface as `Unexpected token '<'`. Name the real problem instead. */
@@ -273,18 +281,38 @@ export interface ChatMessage {
   id: string
   threadId: string
   role: 'user' | 'assistant' | 'system'
-  kind: 'text' | 'plan' | 'task' | 'result' | 'error' | 'approval' | 'clarification'
+  kind:
+    | 'text'
+    | 'plan'
+    | 'task'
+    | 'result'
+    | 'error'
+    | 'approval'
+    | 'clarification'
+    | 'progress'
+    | 'auth'
   content: string
   goalId?: string
   taskId?: string
   approvalId?: string
   clarificationId?: string
+  agentName?: string
   createdAt: string
 }
 
 export interface ChatThreadDetail {
   thread: ChatThread
   messages: ChatMessage[]
+}
+
+export interface ClarificationView {
+  id: string
+  goalId: string
+  kind: 'clarify' | 'decide'
+  question: string
+  options: string[]
+  status: 'pending' | 'answered' | 'expired'
+  answer?: string
 }
 
 export const chatApi = {
@@ -312,14 +340,16 @@ export const chatApi = {
     request<{ thread: ChatThread; messages: ChatMessage[] }>(`/api/v1/chat/threads/${id}/resume`, {
       method: 'POST',
     }),
-  post: (id: string, text: string, mode: 'run' | 'ask') =>
+  post: (id: string, text: string) =>
     request<{ thread: ChatThread; messages: ChatMessage[] }>(
       `/api/v1/chat/threads/${id}/messages`,
       {
         method: 'POST',
-        body: JSON.stringify({ text, mode }),
+        body: JSON.stringify({ text }),
       },
     ),
+  clarification: (id: string) =>
+    request<{ clarification: ClarificationView }>(`/api/v1/clarifications/${id}`),
 }
 
 /* --- Agent presence (PLAN-AGENT-OFFICE §3.1) ------------------------------- */

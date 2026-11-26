@@ -24,6 +24,8 @@ async function main(): Promise<void> {
       url: handle.url,
       tokenPath: handle.tokenPath,
       webBuilt: handle.webBuilt,
+      webDist: handle.webDist,
+      webBuiltAt: handle.webBuiltAt,
       recovery: handle.recovery,
     })}\n`,
   )

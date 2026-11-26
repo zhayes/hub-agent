@@ -19,6 +19,7 @@
 | [PLAN.md](PLAN.md) | 里程碑顺序、门禁、每个 M 的实现进度 | 每个里程碑完成或范围调整时 |
 | [PLAN-AGENT-ONBOARDING.md](PLAN-AGENT-ONBOARDING.md) | **Agent 接入**：内置目录、扫描、接入、`authenticate`、`ha web` | 接入规则/目录条目/状态机变化时 |
 | [PLAN-AGENT-OFFICE.md](PLAN-AGENT-OFFICE.md) | 3D Agent 舞台（presence、场景、动效） | 舞台数据或交互变化时 |
+| [PLAN-CHAT-UX.md](PLAN-CHAT-UX.md) | **对话页体验**：状态保持、消息层级、执行过程、授权卡片 | 对话页交互/数据源变化时 |
 | [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md) | 控制台前端的分阶段实施 | 控制台范围变化时 |
 | [UI-SPEC.md](UI-SPEC.md) | 视觉令牌、布局、组件与可访问性规范 | 设计系统或页面规范变化时 |
 | [REAL-HARNESS-BENCH.md](REAL-HARNESS-BENCH.md) | 真实 harness 的实测记录与命令 | 新增/复核真实 harness 时 |

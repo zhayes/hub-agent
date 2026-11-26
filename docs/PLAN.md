@@ -662,7 +662,7 @@ pnpm verify   # 已包含 web typecheck + build
 
 **边界**
 
-- `chat_threads/chat_messages` 已接：异步 run、Ask 快照、approval/clarification 消息、resume 新 attempt；Chat UI 已接真实 API；消息按 100 条分页并可加载更早
+- `chat_threads/chat_messages` 已接：异步 run、对话式直接回复（`reply`/`finish` 不建 Task）、clarification 选项按钮、执行过程时间线（progress）、Agent 授权卡（auth）、approval 消息、resume 新 attempt；Chat UI 已接真实 API 且不再有 Run/Ask 切换（ADR 0022）；消息按 100 条分页并可加载更早
 - 左右栏折叠、主题、无边框 Composer、图标按钮已落 P1/P3；Playwright 3 条 E2E 覆盖路由/主题/折叠/1000 条消息分页；精确 per-execution approval resume 仍延后
 - token 注入同源 HTML，适合 localhost 单用户；远程/V1.1 必须改 cookie/短期 token。
 

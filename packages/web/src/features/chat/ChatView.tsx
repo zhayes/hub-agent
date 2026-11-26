@@ -1,5 +1,5 @@
 import type { JSX } from '@solidjs/web'
-import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
 import { RichText } from '../../components/ui/CodeBlock'
 import { fieldControl } from '../../components/ui/Field'
@@ -11,16 +11,28 @@ import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
 import { toast } from '../../components/ui/Toaster'
 import { type ToolChip, ToolChips } from '../../components/ui/ToolChips'
 import {
+  type AuthMethodView,
   api,
   type ChatMessage,
   type ChatThread,
   type ChatThreadSummary,
+  type ClarificationView,
   chatApi,
   getToken,
+  type ProbeResultView,
   type TaskRow,
 } from '../../shared/api'
 import { relativeTime, shortenId } from '../../shared/format'
 import { type Locale, type MessageKey, statusKey, type Translator } from '../../shared/i18n'
+import {
+  readCachedSummaries,
+  readCachedThread,
+  readUnsavedDraft,
+  rememberThread,
+  writeCachedSummaries,
+  writeCachedThread,
+  writeUnsavedDraft,
+} from './store'
 
 export interface ChatViewProps {
   threadId?: string
@@ -69,16 +81,13 @@ const starterPrompts: MessageKey[] = [
   'starterDelegate',
   'starterReview',
 ]
-const modeButton =
-  'inline-flex h-[26px] items-center gap-1.5 rounded-control px-2 text-badge text-ink-2 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 export function ChatView(props: ChatViewProps) {
-  const [threads, setThreads] = createSignal<ChatThreadSummary[]>([])
+  const [threads, setThreads] = createSignal<ChatThreadSummary[]>(readCachedSummaries() ?? [])
   const [thread, setThread] = createSignal<ChatThread>()
   const [messages, setMessages] = createSignal<ChatMessage[]>([])
   const [query, setQuery] = createSignal('')
-  const [text, setText] = createSignal('')
-  const [mode, setMode] = createSignal<'run' | 'ask'>('run')
+  const [text, setText] = createSignal(readUnsavedDraft())
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal('')
   const [hasMore, setHasMore] = createSignal(false)
@@ -189,7 +198,6 @@ export function ChatView(props: ChatViewProps) {
       setError('')
       const shouldStick = stick
       const detail = await chatApi.thread(id, { limit: 100 })
-      streamSeq = undefined
       setThread(detail.thread)
       /* Same thread → merge, so a refresh cannot drop a message the stream
          already delivered. Different thread → replace outright. */
@@ -212,6 +220,7 @@ export function ChatView(props: ChatViewProps) {
     try {
       const result = await chatApi.threads()
       setThreads(result.threads)
+      writeCachedSummaries(result.threads)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -268,7 +277,7 @@ export function ChatView(props: ChatViewProps) {
 
   const send = async (): Promise<void> => {
     const value = text().trim()
-    if (value === '' || busy()) return
+    if (value === '' || busy() || active()) return
     setBusy(true)
     setError('')
     try {
@@ -278,10 +287,12 @@ export function ChatView(props: ChatViewProps) {
         id = created.thread.id
         props.onOpenThread(id)
       }
-      const result = await chatApi.post(id, value, mode())
+      const result = await chatApi.post(id, value)
       setThread(result.thread)
       setMessages(result.messages)
       setText('')
+      writeUnsavedDraft('')
+      writeCachedThread(id, { draft: '' })
       stick = true
       queueMicrotask(scrollToBottom)
       watch(id)
@@ -359,17 +370,56 @@ export function ChatView(props: ChatViewProps) {
     }
   })
 
+  /* 先用缓存渲染，再拉服务端：从任务页回来时不会先闪一下空态。 */
   createEffect(
     () => props.threadId,
     (id) => {
-      if (id !== undefined) {
-        stick = true
-        void loadThread(id)
+      if (id === undefined) return
+      stick = true
+      const cached = readCachedThread(id)
+      if (cached === undefined) {
+        setThread(undefined)
+        setMessages([])
+        setHasMore(false)
+        setText('')
+        streamSeq = undefined
+      } else {
+        setThread(cached.thread)
+        setMessages(cached.messages)
+        setHasMore(cached.hasMore)
+        setText(cached.draft ?? '')
+        streamSeq = cached.seq
+        queueMicrotask(() => {
+          if (messagesEl === undefined) return
+          messagesEl.scrollTop = cached.scrollTop ?? messagesEl.scrollHeight
+          stick = isNearBottom()
+        })
       }
+      rememberThread(id)
+      void loadThread(id)
+    },
+  )
+
+  /* 缓存只负责“回来的第一帧”；服务端仍是唯一事实来源，别在这里做请求。 */
+  createEffect(
+    () => ({ thread: thread(), messages: messages(), hasMore: hasMore() }),
+    (value) => {
+      const current = value.thread
+      if (current === undefined) return
+      writeCachedThread(current.id, {
+        thread: current,
+        messages: value.messages,
+        hasMore: value.hasMore,
+        ...(streamSeq === undefined ? {} : { seq: streamSeq }),
+      })
     },
   )
 
   onCleanup(() => {
+    const current = thread()
+    if (current !== undefined && messagesEl !== undefined) {
+      writeCachedThread(current.id, { scrollTop: messagesEl.scrollTop })
+    }
     stopWatching()
   })
 
@@ -404,8 +454,6 @@ export function ChatView(props: ChatViewProps) {
     if (value.startsWith('/')) {
       const query = value.slice(1).toLowerCase()
       const commands: MenuItem[] = [
-        { id: 'run', label: props.t('run'), hint: '/run' },
-        { id: 'ask', label: props.t('ask'), hint: '/ask' },
         { id: 'new', label: props.t('newThread'), hint: '/new' },
         { id: 'context', label: props.t('threadContext'), hint: '/context' },
       ]
@@ -438,9 +486,7 @@ export function ChatView(props: ChatViewProps) {
       return
     }
     setText('')
-    if (item.id === 'run') setMode('run')
-    else if (item.id === 'ask') setMode('ask')
-    else if (item.id === 'new') void newThread()
+    if (item.id === 'new') void newThread()
     else if (item.id === 'context') setPane('right', !rightCollapsed())
   }
 
@@ -548,6 +594,57 @@ export function ChatView(props: ChatViewProps) {
     } else {
       setRightWidth(clampWidth(rightWidth() + (grow ? step : -step), RIGHT_MIN, RIGHT_MAX))
     }
+  }
+
+  type TranscriptEntry =
+    | { kind: 'message'; message: ChatMessage }
+    | { kind: 'progress'; id: string; steps: ChatMessage[] }
+
+  /* 连续的执行步骤合成一张过程卡；其余消息保持原样。 */
+  const transcript = createMemo<TranscriptEntry[]>(() => {
+    const entries: TranscriptEntry[] = []
+    for (const message of messages()) {
+      if (message.kind === 'progress') {
+        const tail = entries.at(-1)
+        if (tail !== undefined && tail.kind === 'progress') tail.steps.push(message)
+        else entries.push({ kind: 'progress', id: message.id, steps: [message] })
+        continue
+      }
+      entries.push({ kind: 'message', message })
+    }
+    return entries
+  })
+
+  /* 过程步骤对“谁在说话”是透明的：它不该把同一次回复切成好几段带头像的消息。 */
+  const showMeta = (message: ChatMessage): boolean => {
+    const list = messages()
+    const index = list.findIndex((entry) => entry.id === message.id)
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const previous = list[cursor]
+      if (previous === undefined || previous.kind === 'progress') continue
+      if (previous.role !== message.role) return true
+      const gap = Date.parse(message.createdAt) - Date.parse(previous.createdAt)
+      return !Number.isFinite(gap) || gap > 5 * 60_000
+    }
+    return true
+  }
+
+  /* 失败、等待处理、或紧跟着授权卡时，过程自动展开：用户需要看到卡在哪一步。 */
+  const progressOpen = (index: number): boolean => {
+    const rest = transcript().slice(index + 1)
+    const lastProgress = rest.every((entry) => entry.kind !== 'progress')
+    if (thread()?.status === 'failed' || thread()?.status === 'waiting') return lastProgress
+    return rest.some((entry) => entry.kind === 'message' && entry.message.kind === 'auth')
+  }
+
+  const handleAuthRetried = (result: { thread: ChatThread; messages: ChatMessage[] }): void => {
+    setThread(result.thread)
+    setMessages(result.messages)
+    stick = true
+    queueMicrotask(scrollToBottom)
+    if (result.thread.status === 'active') watch(result.thread.id)
+    else stopWatching()
+    void loadThreads()
   }
 
   /* No credentials: the panes would all be empty, which reads as "broken"
@@ -730,6 +827,10 @@ export function ChatView(props: ChatViewProps) {
           }}
           onScroll={() => {
             stick = isNearBottom()
+            const current = thread()
+            if (current !== undefined && messagesEl !== undefined) {
+              writeCachedThread(current.id, { scrollTop: messagesEl.scrollTop })
+            }
           }}
         >
           {/* Reading measure, matching MessageRow's 74ch so the transcript and
@@ -765,19 +866,31 @@ export function ChatView(props: ChatViewProps) {
                   </Button>
                 </div>
               </Show>
-              <For each={messages()}>
-                {(message) => (
-                  <MessageRow
-                    message={message}
-                    t={props.t}
-                    locale={props.locale}
-                    streaming={active() && messages().at(-1)?.id === message.id}
-                    onOpenTask={props.onOpenTask}
-                    onApprove={(id) => void decideApproval(id, 'approve')}
-                    onReject={(id) => void decideApproval(id, 'reject')}
-                    onAnswer={(id, answer) => void answerClarification(id, answer)}
-                  />
-                )}
+              <For each={transcript()}>
+                {(entry, index) =>
+                  entry.kind === 'progress' ? (
+                    <ProgressTrace
+                      steps={entry.steps}
+                      t={props.t}
+                      locale={props.locale}
+                      open={progressOpen(index())}
+                    />
+                  ) : (
+                    <MessageRow
+                      message={entry.message}
+                      t={props.t}
+                      locale={props.locale}
+                      streaming={active() && messages().at(-1)?.id === entry.message.id}
+                      showMeta={showMeta(entry.message)}
+                      threadId={thread()?.id}
+                      onOpenTask={props.onOpenTask}
+                      onApprove={(id) => void decideApproval(id, 'approve')}
+                      onReject={(id) => void decideApproval(id, 'reject')}
+                      onAnswer={(id, answer) => void answerClarification(id, answer)}
+                      onAuthRetried={handleAuthRetried}
+                    />
+                  )
+                }
               </For>
               <Show when={active()}>
                 <LoadingState label={props.t('loading')} elapsedMs={thinkingMs()} />
@@ -841,40 +954,27 @@ export function ChatView(props: ChatViewProps) {
               }}
               class="block max-h-[200px] min-h-[68px] w-full resize-none rounded-panel border border-line bg-canvas px-3.5 py-3 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
               value={text()}
-              placeholder={
-                mode() === 'run' ? props.t('chatPlaceholder') : props.t('chatAskPlaceholder')
-              }
-              onInput={(event) => setText(event.currentTarget.value)}
+              placeholder={props.t('chatPlaceholder')}
+              onInput={(event) => {
+                const value = event.currentTarget.value
+                setText(value)
+                const current = thread()
+                if (current === undefined) writeUnsavedDraft(value)
+                else writeCachedThread(current.id, { draft: value })
+              }}
               onKeyDown={submitOnEnter}
             />
             <div class="mt-2 flex items-center gap-2.5">
-              <div class="flex flex-none gap-0.5 rounded-panel bg-subtle p-0.5">
-                <button
-                  type="button"
-                  class={`${modeButton} ${mode() === 'run' ? 'bg-surface font-medium text-ink' : ''}`}
-                  aria-pressed={mode() === 'run' ? 'true' : 'false'}
-                  onClick={() => setMode('run')}
-                >
-                  <Icon name="play" size={12} />
-                  <span>{props.t('run')}</span>
-                </button>
-                <button
-                  type="button"
-                  class={`${modeButton} ${mode() === 'ask' ? 'bg-surface font-medium text-ink' : ''}`}
-                  aria-pressed={mode() === 'ask' ? 'true' : 'false'}
-                  onClick={() => setMode('ask')}
-                >
-                  <Icon name="message" size={12} />
-                  <span>{props.t('ask')}</span>
-                </button>
-              </div>
+              <span class="hidden text-badge text-ink-3 min-[560px]:inline">
+                {props.t('chatHint')}
+              </span>
               <span class="flex-1" />
               <button
                 type="submit"
                 class="grid size-9 flex-none place-items-center rounded-full bg-ink text-canvas transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:bg-subtle disabled:text-ink-3 disabled:hover:opacity-100"
-                aria-label={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
-                title={mode() === 'run' ? props.t('runTask') : props.t('askStatus')}
-                disabled={busy() || text().trim() === ''}
+                aria-label={props.t('send')}
+                title={props.t('send')}
+                disabled={busy() || active() || text().trim() === ''}
               >
                 <Icon name="arrowUp" size={16} />
               </button>
@@ -956,10 +1056,14 @@ function MessageRow(props: {
   locale: Locale
   /** Last message of a running thread: its tail is genuinely still arriving. */
   streaming: boolean
+  /** 同一角色连续发言时只显示一次名字/时间。 */
+  showMeta: boolean
+  threadId?: string
   onOpenTask: (id: string) => void
   onApprove: (id: string) => void
   onReject: (id: string) => void
   onAnswer: (id: string, answer: string) => void
+  onAuthRetried: (result: { thread: ChatThread; messages: ChatMessage[] }) => void
 }) {
   const chips = (): ToolChip[] => {
     const message = props.message
@@ -990,104 +1094,311 @@ function MessageRow(props: {
 
   if (props.message.role === 'user') {
     return (
-      <article class="max-w-[min(100%,74ch)]">
-        <div class="mb-1.5 flex items-baseline gap-1.5 text-badge text-ink">
-          <span class="font-medium">{props.t('you')}</span>
-          <span aria-hidden="true">·</span>
-          {time()}
+      <article class="flex flex-col items-end">
+        <div class="max-w-[min(100%,68ch)] rounded-[16px] rounded-br-[4px] bg-accent-soft px-3.5 py-2.5 text-body text-ink">
+          <RichText text={props.message.content} copyLabel={props.t('copy')} />
         </div>
-        <RichText text={props.message.content} copyLabel={props.t('copy')} />
+        <span class="mt-1 pr-1 text-badge text-ink-3">{time()}</span>
       </article>
     )
   }
 
   const plan = (): boolean => props.message.kind === 'plan'
+  const card = (): boolean =>
+    props.message.kind === 'task' ||
+    props.message.kind === 'approval' ||
+    props.message.kind === 'clarification' ||
+    props.message.kind === 'auth'
 
   return (
-    <article class="max-w-[min(100%,74ch)]">
-      <div class="mb-1.5 flex items-baseline gap-1.5 text-badge text-ink-3">
-        <span>{props.t('appName')}</span>
-        <span aria-hidden="true">·</span>
-        {time()}
+    <article class="flex gap-2.5">
+      <div
+        class="mt-[3px] grid size-6 shrink-0 place-items-center rounded-full bg-ink text-[10px] font-semibold tracking-tight text-canvas"
+        aria-hidden="true"
+      >
+        H
       </div>
+      <div class="min-w-0 flex-1">
+        <Show when={props.showMeta}>
+          <div class="mb-1 flex items-baseline gap-1.5 text-badge text-ink-3">
+            <span class="font-medium text-ink-2">{props.t('appName')}</span>
+            {time()}
+          </div>
+        </Show>
 
-      <Show
-        when={
-          chips().length > 0 &&
-          props.message.kind !== 'task' &&
-          props.message.kind !== 'approval' &&
-          props.message.kind !== 'clarification'
-        }
-      >
-        <ToolChips chips={chips()} class="mb-2" />
-      </Show>
+        <Show when={chips().length > 0 && !card() && props.message.kind !== 'error'}>
+          <ToolChips chips={chips()} class="mb-2" />
+        </Show>
 
-      <Show
-        when={props.message.kind === 'clarification' && props.message.clarificationId !== undefined}
-      >
-        <ClarificationCard message={props.message} t={props.t} onAnswer={props.onAnswer} />
-      </Show>
-      <Show when={props.message.kind === 'approval' && props.message.approvalId !== undefined}>
-        <div class="rounded-panel border border-line bg-canvas p-3">
-          <div class="flex items-center gap-2 text-meta font-medium text-warning">
-            <Icon name="alert" size={14} />
-            <span>{props.message.content}</span>
+        <Show
+          when={
+            props.message.kind === 'clarification' && props.message.clarificationId !== undefined
+          }
+        >
+          <ClarificationCard message={props.message} t={props.t} onAnswer={props.onAnswer} />
+        </Show>
+        <Show when={props.message.kind === 'approval' && props.message.approvalId !== undefined}>
+          <div class="rounded-panel border border-line bg-canvas p-3">
+            <div class="flex items-center gap-2 text-meta font-medium text-warning">
+              <Icon name="alert" size={14} />
+              <span>{props.message.content}</span>
+            </div>
+            <div class="mt-2.5 flex items-center gap-2">
+              <Button onClick={() => props.onApprove(props.message.approvalId ?? '')}>
+                {props.t('approve')}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => props.onReject(props.message.approvalId ?? '')}
+              >
+                {props.t('reject')}
+              </Button>
+            </div>
           </div>
-          <div class="mt-2.5 flex items-center gap-2">
-            <Button onClick={() => props.onApprove(props.message.approvalId ?? '')}>
-              {props.t('approve')}
-            </Button>
-            <Button variant="ghost" onClick={() => props.onReject(props.message.approvalId ?? '')}>
-              {props.t('reject')}
-            </Button>
+        </Show>
+        <Show when={props.message.kind === 'task' && props.message.taskId !== undefined}>
+          <div class="rounded-panel border border-line bg-canvas p-3">
+            <div class="flex items-center gap-2 text-meta font-medium text-ink">
+              <Icon name="tasks" size={14} />
+              <span>{props.message.content}</span>
+            </div>
+            <div class="mt-2.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => props.onOpenTask(props.message.taskId ?? '')}
+              >
+                {props.t('openTask')}
+              </Button>
+            </div>
           </div>
-        </div>
-      </Show>
-      <Show when={props.message.kind === 'task' && props.message.taskId !== undefined}>
-        <div class="rounded-panel border border-line bg-canvas p-3">
-          <div class="flex items-center gap-2 text-meta font-medium text-ink">
-            <Icon name="tasks" size={14} />
-            <span>{props.message.content}</span>
-          </div>
-          <div class="mt-2.5">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => props.onOpenTask(props.message.taskId ?? '')}
-            >
-              {props.t('openTask')}
-            </Button>
-          </div>
-        </div>
-      </Show>
+        </Show>
 
-      <Show when={plan()}>
-        <ThinkingTrace title={props.t('stepPlan')} summary={props.message.content.split('\n')[0]}>
+        <Show when={props.message.kind === 'auth'}>
+          <AuthCard
+            message={props.message}
+            t={props.t}
+            {...(props.threadId === undefined ? {} : { threadId: props.threadId })}
+            onRetried={props.onAuthRetried}
+          />
+        </Show>
+
+        <Show when={props.message.kind === 'error'}>
+          <div class="rounded-panel border border-line bg-danger-soft px-3.5 py-2.5">
+            <div class="flex items-center gap-2 text-meta font-medium text-danger">
+              <Icon name="alert" size={14} />
+              <span>{props.t('statusFailed')}</span>
+            </div>
+            <p class="mt-1 break-words whitespace-pre-wrap text-meta text-danger">
+              {props.message.content}
+            </p>
+          </div>
+        </Show>
+
+        <Show when={plan()}>
+          <ThinkingTrace title={props.t('stepPlan')} summary={props.message.content.split('\n')[0]}>
+            <RichText
+              text={props.message.content}
+              copyLabel={props.t('copy')}
+              streaming={props.streaming}
+              quiet
+            />
+          </ThinkingTrace>
+        </Show>
+
+        <Show
+          when={
+            !card() &&
+            props.message.kind !== 'error' &&
+            props.message.kind !== 'progress' &&
+            !plan()
+          }
+        >
           <RichText
             text={props.message.content}
             copyLabel={props.t('copy')}
             streaming={props.streaming}
-            quiet
+            quiet={props.message.kind === 'result'}
           />
-        </ThinkingTrace>
-      </Show>
-
-      <Show
-        when={
-          props.message.kind !== 'task' &&
-          props.message.kind !== 'approval' &&
-          props.message.kind !== 'clarification' &&
-          !plan()
-        }
-      >
-        <RichText
-          text={props.message.content}
-          copyLabel={props.t('copy')}
-          streaming={props.streaming}
-          quiet={props.message.kind === 'result'}
-        />
-      </Show>
+        </Show>
+      </div>
     </article>
+  )
+}
+
+function ProgressTrace(props: {
+  steps: ChatMessage[]
+  t: Translator
+  locale: Locale
+  open: boolean
+}) {
+  const last = (): string => props.steps.at(-1)?.content ?? ''
+  return (
+    <article class="flex gap-2.5">
+      <div class="mt-[3px] grid size-6 shrink-0 place-items-center rounded-full bg-subtle text-ink-3">
+        <Icon name="activity" size={12} />
+      </div>
+      <div class="min-w-0 flex-1">
+        <ThinkingTrace
+          title={props.t('chatProcess')}
+          meta={`${props.steps.length} ${props.t('chatSteps')}`}
+          summary={last()}
+          open={props.open}
+        >
+          <ol class="flex flex-col gap-1.5">
+            <For each={props.steps}>
+              {(step) => (
+                <li class="flex gap-2">
+                  <span class="shrink-0 font-mono text-badge text-ink-3">
+                    {relativeTime(props.locale, step.createdAt)}
+                  </span>
+                  <span class="min-w-0 break-words">{step.content}</span>
+                </li>
+              )}
+            </For>
+          </ol>
+        </ThinkingTrace>
+      </div>
+    </article>
+  )
+}
+
+function AuthCard(props: {
+  message: ChatMessage
+  t: Translator
+  threadId?: string
+  onRetried: (result: { thread: ChatThread; messages: ChatMessage[] }) => void
+}) {
+  const [probe, setProbe] = createSignal<ProbeResultView>()
+  const [checking, setChecking] = createSignal(false)
+  const [busy, setBusy] = createSignal('')
+  const [error, setError] = createSignal('')
+  let retriedCheck = false
+  const name = (): string => props.message.agentName ?? ''
+  const methods = (): AuthMethodView[] => probe()?.authMethods ?? []
+
+  const check = async (): Promise<void> => {
+    if (name() === '') return
+    setChecking(true)
+    setError('')
+    try {
+      const result = await api.verifyAgent(name())
+      setProbe(result.probe)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      /* 探测有单飞锁：挂载时撞上别的探测很常见，稍等再试，不要直接报红。 */
+      if (!retriedCheck && /正在验证|稍后重试/.test(message)) {
+        retriedCheck = true
+        setTimeout(() => void check(), 1_500)
+      } else {
+        setError(message)
+      }
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const resumeRun = async (): Promise<void> => {
+    if (props.threadId === undefined || busy() !== '') return
+    setBusy('resume')
+    setError('')
+    try {
+      props.onRetried(await chatApi.resume(props.threadId))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const login = async (methodId: string): Promise<void> => {
+    if (name() === '' || busy() !== '') return
+    setBusy(methodId)
+    setError('')
+    try {
+      const result = await api.loginAgent(name(), methodId)
+      if (!result.ok) {
+        setError(result.result.error?.message ?? props.t('chatAuthFailed'))
+        return
+      }
+      setProbe(undefined)
+      await check()
+      const current = props.threadId
+      if (current !== undefined) {
+        props.onRetried(await chatApi.resume(current))
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  onSettled(() => {
+    void check()
+  })
+
+  return (
+    <div class="rounded-panel border border-line bg-canvas p-3">
+      <div class="flex items-center gap-2 text-meta font-medium text-warning">
+        <Icon name="key" size={14} />
+        <span>{props.t('chatAuthTitle')}</span>
+      </div>
+      <p class="mt-1.5 text-meta text-ink-2">
+        {name() === '' ? props.t('chatAuthHint') : props.t('chatAuthHintAgent', { agent: name() })}
+      </p>
+      <details class="mt-1.5">
+        <summary class="cursor-pointer text-badge text-ink-3">{props.t('chatAuthDetail')}</summary>
+        <p class="mt-1 break-words whitespace-pre-wrap font-mono text-badge text-ink-3">
+          {props.message.content}
+        </p>
+      </details>
+      <Show when={methods().length > 0}>
+        <div class="mt-2.5 flex flex-wrap gap-2">
+          <For each={methods()}>
+            {(method) => (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy() !== '' || method.type === 'terminal'}
+                title={
+                  method.type === 'terminal'
+                    ? props.t('chatAuthTerminal')
+                    : (method.description ?? '')
+                }
+                onClick={() => void login(method.id)}
+              >
+                {busy() === method.id ? props.t('chatAuthWorking') : (method.name ?? method.id)}
+              </Button>
+            )}
+          </For>
+        </div>
+      </Show>
+      <Show when={methods().length === 0 && !checking()}>
+        <p class="mt-2 text-badge text-ink-3">{props.t('chatAuthManual')}</p>
+      </Show>
+      <Show when={probe()?.status === 'online'}>
+        <div class="mt-2.5">
+          <Button size="sm" disabled={busy() !== ''} onClick={() => void resumeRun()}>
+            {busy() === 'resume' ? props.t('chatAuthWorking') : props.t('chatAuthContinue')}
+          </Button>
+        </div>
+      </Show>
+      <Show when={error() !== ''}>
+        <p class="mt-2 text-badge text-danger">{error()}</p>
+      </Show>
+      <div class="mt-2.5 flex items-center gap-2">
+        <Button variant="ghost" size="sm" disabled={checking()} onClick={() => void check()}>
+          {checking() ? props.t('chatAuthWorking') : props.t('chatAuthProbe')}
+        </Button>
+        <a
+          class="text-badge text-ink-3 underline-offset-2 hover:text-ink hover:underline"
+          href="/registry"
+        >
+          {props.t('chatAuthOpenAgents')}
+        </a>
+      </div>
+    </div>
   )
 }
 
@@ -1097,32 +1408,80 @@ function ClarificationCard(props: {
   onAnswer: (id: string, answer: string) => void
 }) {
   const [value, setValue] = createSignal('')
+  const [detail, setDetail] = createSignal<ClarificationView>()
+
+  /* 选项在 clarifications 表里，消息只带 id：卡片自己取一次，
+     这样刷新后已作答的卡片也能显示当时的选项和答案。 */
+  onSettled(() => {
+    const id = props.message.clarificationId
+    if (id === undefined) return
+    void chatApi
+      .clarification(id)
+      .then((result) => setDetail(result.clarification))
+      .catch(() => undefined)
+  })
+
+  const options = (): string[] => detail()?.options ?? []
+  const pending = (): boolean => detail() === undefined || detail()?.status === 'pending'
+  const submit = (answer: string): void => {
+    const text = answer.trim()
+    if (text === '' || !pending()) return
+    props.onAnswer(props.message.clarificationId ?? '', text)
+  }
+
   return (
-    <form
-      class="mt-2 rounded-panel border border-line bg-canvas p-3"
-      onSubmit={(event) => {
-        event.preventDefault()
-        const answer = value().trim()
-        if (answer !== '') props.onAnswer(props.message.clarificationId ?? '', answer)
-      }}
-    >
+    <div class="mt-2 rounded-panel border border-line bg-canvas p-3">
       <div class="flex items-center gap-2 text-meta font-medium text-ink">
         <Icon name="message" size={14} />
         <span>{props.t('clarification')}</span>
       </div>
       <p class="mt-1.5 text-meta text-ink-2">{props.message.content}</p>
-      <div class="mt-2 flex items-center gap-2">
-        <input
-          class={`${fieldControl} min-w-0 flex-1`}
-          aria-label={props.t('answer')}
-          placeholder={props.t('answer')}
-          value={value()}
-          onInput={(event) => setValue(event.currentTarget.value)}
-        />
-        <Button type="submit" size="sm">
-          {props.t('submit')}
-        </Button>
-      </div>
-    </form>
+      <Show
+        when={pending()}
+        fallback={
+          <p class="mt-2 flex items-center gap-1.5 text-badge text-ink-3">
+            <Icon name="check" size={12} />
+            <span>{props.t('answered')}</span>
+            <Show when={detail()?.answer !== undefined}>
+              <span class="text-ink-2">{detail()?.answer}</span>
+            </Show>
+          </p>
+        }
+      >
+        <Show
+          when={options().length > 0}
+          fallback={
+            <form
+              class="mt-2 flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                submit(value())
+              }}
+            >
+              <input
+                class={`${fieldControl} min-w-0 flex-1`}
+                aria-label={props.t('answer')}
+                placeholder={props.t('answer')}
+                value={value()}
+                onInput={(event) => setValue(event.currentTarget.value)}
+              />
+              <Button type="submit" size="sm">
+                {props.t('submit')}
+              </Button>
+            </form>
+          }
+        >
+          <div class="mt-2 flex flex-wrap gap-2">
+            <For each={options()}>
+              {(option) => (
+                <Button variant="secondary" size="sm" onClick={() => submit(option)}>
+                  {option}
+                </Button>
+              )}
+            </For>
+          </div>
+        </Show>
+      </Show>
+    </div>
   )
 }

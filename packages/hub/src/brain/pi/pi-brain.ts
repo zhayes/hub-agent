@@ -66,14 +66,14 @@ function parseActions(content: string): BrainAction[] {
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')
+  if (text.length === 0) return []
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
-  } catch (error) {
-    throw new HubError('BRAIN_UNAVAILABLE', 'Pi 返回的不是合法 JSON', {
-      reason: error instanceof Error ? error.message : String(error),
-      preview: text.slice(0, 500),
-    })
+  } catch {
+    /* 对话模式下模型直接回自然语言是正常输出，不该把整轮判成失败：
+       当作 reply 交给用户，比丢一条“不是合法 JSON”的错误有用。 */
+    return [{ type: 'reply', text }]
   }
   if (Array.isArray(parsed)) return parsed as BrainAction[]
   if (
@@ -84,6 +84,9 @@ function parseActions(content: string): BrainAction[] {
   ) {
     return (parsed as { actions: BrainAction[] }).actions
   }
+  if (typeof parsed === 'object' && parsed !== null && 'type' in parsed) {
+    return [parsed as BrainAction]
+  }
   throw new HubError('BRAIN_UNAVAILABLE', 'Pi JSON 缺少 actions 数组', {
     preview: text.slice(0, 500),
   })
@@ -91,6 +94,8 @@ function parseActions(content: string): BrainAction[] {
 
 function toRationale(action: BrainAction): DecisionRationale {
   switch (action.type) {
+    case 'reply':
+      return { type: 'accept_result', rationale: action.text }
     case 'revise_plan':
       return { type: 'decompose', rationale: action.reason }
     case 'delegate':

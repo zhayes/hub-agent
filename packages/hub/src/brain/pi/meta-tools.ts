@@ -19,6 +19,7 @@ export function createMetaTools(input: BrainInput): MetaTools {
   const state: MetaToolState = { actions: [] }
   const subtasks = input.tasks.flatMap((task) => task.subtasks)
 
+  const reply = Type.Object({ text: Type.String() })
   const discover = Type.Object({})
   const agentDetail = Type.Object({ agentId: Type.String() })
   const taskResult = Type.Object({ subtaskId: Type.String() })
@@ -47,6 +48,18 @@ export function createMetaTools(input: BrainInput): MetaTools {
   })
 
   const tools: ToolDefinition<TSchema, unknown>[] = [
+    {
+      name: 'reply',
+      label: 'Reply to user',
+      description:
+        'Answer the user directly in the conversation. Use this instead of a plan when no local work is needed.',
+      promptSnippet: 'reply: answer the user without creating a task',
+      parameters: reply,
+      execute: async (_id, params: Static<typeof reply>) => {
+        state.actions.push({ type: 'reply', text: params.text })
+        return text({ queued: 'reply' })
+      },
+    },
     {
       name: 'discover_agents',
       label: 'Discover agents',

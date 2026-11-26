@@ -109,11 +109,11 @@ test('composer slash menu and pane resize are keyboard reachable', async ({ page
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
-  const composer = page.getByRole('textbox', { name: /Describe a task/ })
+  const composer = page.getByRole('textbox', { name: /Ask anything/ })
   await composer.click()
   await page.keyboard.type('/')
   await expect(page.getByRole('listbox')).toBeVisible()
-  await expect(page.getByRole('option', { name: /Ask/ })).toBeVisible()
+  await expect(page.getByRole('option', { name: /New thread/ })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('listbox')).toBeHidden()
 

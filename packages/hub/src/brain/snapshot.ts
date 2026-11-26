@@ -3,6 +3,7 @@ import type {
   AgentSummary,
   BrainBudget,
   BrainInput,
+  ChatTurn,
   PendingDecisionView,
   SubtaskView,
   TaskView,
@@ -16,6 +17,8 @@ export interface BuildBrainInputOptions {
   budget: BrainBudget
   stateVersion: number
   planRevision?: number
+  /** 控制台对话历史；没有对话入口时省略。 */
+  conversation?: readonly ChatTurn[]
 }
 
 /**
@@ -87,6 +90,8 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
       resource: approval.resource,
     }))
 
+  const conversation = options.conversation?.filter((turn) => turn.content.trim() !== '')
+
   return {
     goal: {
       id: goal.id,
@@ -94,6 +99,9 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
       intent: goal.intent,
       status: goal.status,
     },
+    ...(conversation === undefined || conversation.length === 0
+      ? {}
+      : { conversation: [...conversation] }),
     planRevision: options.planRevision ?? 1,
     tasks: taskViews,
     agents: [...options.agents].sort((a, b) => a.id.localeCompare(b.id)),

@@ -7,6 +7,8 @@ export interface ThinkingTraceProps {
   summary?: string
   /** Extra line under the label, e.g. the step count. */
   meta?: string
+  /** 失败/需要用户处理时默认展开；其余保持折叠。 */
+  open?: boolean
   children?: JSX.Element
 }
 
@@ -17,7 +19,7 @@ export interface ThinkingTraceProps {
  */
 export function ThinkingTrace(props: ThinkingTraceProps) {
   return (
-    <details class="group rounded-panel border border-line bg-canvas">
+    <details class="group rounded-panel border border-line bg-canvas" open={props.open}>
       <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-meta font-medium text-ink [&::-webkit-details-marker]:hidden">
         <Icon
           name="chevronRight"
