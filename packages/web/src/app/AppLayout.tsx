@@ -1,7 +1,6 @@
 import { useLocation, useNavigate } from '@solidjs/router'
 import { dynamic, type JSX } from '@solidjs/web'
 import { createSignal, For, onFlush, onSettled, Show } from 'solid-js'
-import { buttonClass } from '../components/ui/Button'
 import type { CommandPaletteProps, PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
@@ -313,20 +312,19 @@ export function AppLayout(props: { children?: JSX.Element }) {
             </div>
           </Show>
 
-          {/* Chat renders its own blocked state with the same action, so the
-              banner would be a second copy of one message on one screen. */}
+          {/* 页面没有拿到注入的 token，说明它不是 daemon 托管的：给出唯一可执行的动作，
+              不提供手动填 token 的入口（token 由 daemon 注入，用户不该经手）。 */}
           <Show when={app.token() === '' && !isChat()}>
             <div
               class="mx-6 mb-3 flex flex-none items-center gap-3 rounded-panel border border-line bg-surface px-3 py-2 max-[1100px]:mx-4"
               role="status"
             >
               <Icon name="key" size={16} class="shrink-0 text-ink-3" />
-              <strong class="min-w-0 flex-1 truncate text-meta font-semibold text-ink">
-                {app.t('tokenRequired')}
-              </strong>
-              <a class={buttonClass({ variant: 'primary' })} href="/settings">
-                {app.t('openSettings')}
-              </a>
+              <span class="min-w-0 flex-1 truncate text-meta text-ink-2">
+                <strong class="font-semibold text-ink">{app.t('daemonOfflineTitle')}</strong>
+                {' — '}
+                {app.t('daemonOfflineHint')}
+              </span>
             </div>
           </Show>
 

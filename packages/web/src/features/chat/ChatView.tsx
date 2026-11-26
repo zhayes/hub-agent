@@ -1,6 +1,6 @@
 import type { JSX } from '@solidjs/web'
 import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
-import { Button, buttonClass } from '../../components/ui/Button'
+import { Button } from '../../components/ui/Button'
 import { RichText } from '../../components/ui/CodeBlock'
 import { fieldControl } from '../../components/ui/Field'
 import { Icon } from '../../components/ui/Icon'
@@ -551,11 +551,11 @@ export function ChatView(props: ChatViewProps) {
           <span class="grid size-12 place-items-center rounded-full bg-subtle text-ink-3">
             <Icon name="key" size={22} />
           </span>
-          <h2 class="text-section text-ink">{props.t('chatBlockedTitle')}</h2>
-          <p class="text-meta text-ink-2">{props.t('chatBlockedBody')}</p>
-          <a href="/settings" class={`${buttonClass({ variant: 'primary' })} mt-1`}>
-            {props.t('openSettings')}
-          </a>
+          <h2 class="text-section text-ink">{props.t('daemonOfflineTitle')}</h2>
+          <p class="text-meta text-ink-2">{props.t('daemonOfflineHint')}</p>
+          <code class="mt-1 rounded-control bg-subtle px-3 py-1.5 font-mono text-meta text-ink-2">
+            pnpm ha web
+          </code>
         </div>
       </div>
     )

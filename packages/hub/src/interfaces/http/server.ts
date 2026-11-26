@@ -69,7 +69,9 @@ function listenOn(
     }
     const onError = (error: NodeJS.ErrnoException): void => {
       server.off('listening', onListening)
-      server.close()
+      server.off('error', onError)
+      // 绑定失败的 server 从未 listening；这里不调 close()，否则它可能再抛一个
+      // ERR_SERVER_NOT_RUNNING 的 'error'，把整个进程带走（端口被占用时尤其明显）。
       reject(error)
     }
     const onListening = (): void => {

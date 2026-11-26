@@ -374,16 +374,15 @@ test('without a token chat shows one blocked card instead of empty panes', async
   )
 
   await page.goto('/chat')
-  await expect(page.getByRole('heading', { name: 'Connect to the daemon' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Daemon not connected' })).toBeVisible()
+  await expect(page.getByText('Run pnpm ha web, then reload this page.')).toBeVisible()
 
   // One message, not three empty panes plus a banner saying the same thing.
   await expect(page.getByRole('complementary', { name: 'Thread context' })).toHaveCount(0)
   await expect(page.getByText('API token required')).toHaveCount(0)
   await expect(page.getByText(/Unexpected token/)).toHaveCount(0)
-
-  await page.getByRole('link', { name: 'Open settings' }).click()
-  await expect(page).toHaveURL(/\/settings$/)
-  await expect(page.getByRole('heading', { name: 'Model' })).toBeVisible()
+  // 不再有"去设置里粘 token"这条路：token 只能由 daemon 注入。
+  await expect(page.getByRole('link', { name: 'Open settings' })).toHaveCount(0)
 })
 
 test('renders only the latest page and loads older messages', async ({ page }) => {

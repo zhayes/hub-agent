@@ -267,7 +267,7 @@ ADR 0021 需要明确：**目录只决定“怎么启动”，不参与“怎么
 | # | 位置 | 现状 | 处理 |
 |---|---|---|---|
 | C1 | `AGENTS.md:100` | 写 `pnpm dev` 启动 daemon，但 `package.json` 没有该脚本 | 改为 `pnpm ha web` |
-| C2 | `AGENTS.md:101` | 说 `dev:web` 代理 `/api`，`vite.config.ts` 实际没有 proxy | 给 vite 加 `/api` proxy（推荐），否则改文档 |
+| C2 | `AGENTS.md:101` | 说 `dev:web` 代理 `/api`，`vite.config.ts` 实际没有 proxy | ✅ 已加 `/api` 代理 + 开发模式 token 注入；设置页的“手动填 token”入口已删除 |
 | C3 | `strings.ts:20,88` | 空态提示 `agent add --command`，实际参数是 `--cmd` | 改正 |
 | C4 | `UI-SPEC.md:271`、`ADR 0020:27` | 提到 `hubagent agents`，实际命令是 `hubagent agent` | 改正 |
 | C5 | `PLAN.md` 多处 | 写死“284 用例”，实际 370 | 改为“以 `pnpm verify` 输出为准” |

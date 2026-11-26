@@ -14,7 +14,6 @@ import {
   api,
   type Decision,
   getToken,
-  saveToken,
   type TaskRow,
   type TaskView,
 } from '../shared/api'
@@ -40,7 +39,6 @@ export interface AppStore {
   openTask: (id: string, clearError?: boolean) => Promise<void>
   decide: (id: string, action: 'approve' | 'reject') => Promise<void>
   setLocale: (locale: Locale) => void
-  saveConnectionToken: (value: string) => void
 }
 
 const LOCALE_KEY = 'hubagent.locale'
@@ -64,7 +62,7 @@ export function AppProvider(props: { children: JSX.Element }) {
   const [decisions, setDecisions] = createSignal<Decision[]>([])
   const [events, setEvents] = createSignal<string[]>([])
   const [error, setError] = createSignal('')
-  const [token, setToken] = createSignal(getToken())
+  const [token] = createSignal(getToken())
   const [locale, setLocaleSignal] = createSignal<Locale>(readLocale())
   const [connection, setConnection] = createSignal<Connection>('offline')
   const theme = createTheme()
@@ -143,15 +141,6 @@ export function AppProvider(props: { children: JSX.Element }) {
     source.addEventListener('error', () => setConnection('connecting'))
   }
 
-  const saveConnectionToken = (value: string): void => {
-    const next = value.trim()
-    saveToken(next)
-    setToken(next)
-    setError('')
-    void refresh()
-    connectEvents()
-  }
-
   onSettled(() => {
     document.documentElement.lang = locale()
     if (token() !== '') {
@@ -178,7 +167,6 @@ export function AppProvider(props: { children: JSX.Element }) {
     openTask,
     decide,
     setLocale,
-    saveConnectionToken,
   }
 
   return <AppContext value={value}>{props.children}</AppContext>

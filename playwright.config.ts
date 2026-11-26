@@ -13,6 +13,8 @@ export default defineConfig({
   },
   webServer: {
     command: 'pnpm --filter @hubagent/web dev --port 4173',
+    // 不注入 token：测试里要显式控制"未连接"与"已连接"两种状态。
+    env: { HUBAGENT_DEV_NO_TOKEN: '1' },
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: true,
     timeout: 120_000,

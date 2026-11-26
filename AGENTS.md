@@ -101,7 +101,7 @@ pnpm lint          # biome + eslint(solid)
 pnpm test:unit     # vitest
 pnpm test:e2e      # playwright
 pnpm ha web        # 启动 daemon + 托管控制台，打印访问地址
-pnpm dev:web       # 只起 vite（仅调 UI；/api 需要同时跑 pnpm ha web，当前无代理）
+pnpm dev:web       # 只起 vite；/api 代理到 7788，token 自动注入（需先 pnpm ha web）
 ```
 
 ---

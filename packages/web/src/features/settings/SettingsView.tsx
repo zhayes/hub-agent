@@ -23,8 +23,6 @@ export interface SettingsViewProps {
   locale: Locale
   t: Translator
   onLocale: (locale: Locale) => void
-  token: string
-  onSaveToken: (token: string) => void
 }
 
 const themeOptions: ThemePreference[] = ['system', 'light', 'dark']
@@ -61,9 +59,6 @@ const addRow =
   'flex w-full items-center justify-center gap-2 rounded-panel border border-dashed border-line-strong py-3 text-meta text-ink-2 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 export function SettingsView(props: SettingsViewProps) {
-  const [token, setToken] = createSignal(props.token)
-  const [saved, setSaved] = createSignal(false)
-
   const [model, setModel] = createSignal<ModelConfigView>()
   const [providers, setProviders] = createSignal<ProviderSummary[]>([])
   const [listError, setListError] = createSignal('')
@@ -91,19 +86,6 @@ export function SettingsView(props: SettingsViewProps) {
   const [deleteTarget, setDeleteTarget] = createSignal<ProviderSummary>()
   const [deleting, setDeleting] = createSignal(false)
   const [deleteError, setDeleteError] = createSignal('')
-
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  const save = (): void => {
-    props.onSaveToken(token())
-    setSaved(true)
-    if (timer !== undefined) clearTimeout(timer)
-    timer = setTimeout(() => setSaved(false), 2400)
-  }
-
-  onCleanup(() => {
-    if (timer !== undefined) clearTimeout(timer)
-  })
 
   const apply = (next: { model: ModelConfigView; providers: ProviderSummary[] }): void => {
     setModel(next.model)
@@ -335,11 +317,6 @@ export function SettingsView(props: SettingsViewProps) {
             <Icon name="key" size={15} class="text-ink-3" />
             <h2 class="text-section text-ink">{props.t('settingsModel')}</h2>
           </div>
-          <Show when={model()?.agentDir !== undefined}>
-            <p class="mt-1 truncate font-mono text-badge text-ink-3" title={model()?.agentDir}>
-              {model()?.agentDir}
-            </p>
-          </Show>
         </div>
         <div class="flex max-w-[520px] flex-col gap-2">
           <Show
@@ -416,48 +393,6 @@ export function SettingsView(props: SettingsViewProps) {
               {props.t('modelAddProvider')}
             </button>
           </Show>
-        </div>
-      </section>
-
-      <section class={section}>
-        <div>
-          <div class="flex items-center gap-2">
-            <Icon name="shield" size={15} class="text-ink-3" />
-            <h2 class="text-section text-ink">{props.t('settingsConnection')}</h2>
-          </div>
-        </div>
-        <div class="flex flex-col gap-2">
-          <Field label={props.t('settingsToken')}>
-            {(control) => (
-              <>
-                <div class="flex items-center gap-2">
-                  <input
-                    id={control.id}
-                    aria-describedby={`${control.id}-status`}
-                    class={`${fieldControl} min-w-0 flex-1`}
-                    type="password"
-                    autocomplete="off"
-                    spellcheck={false}
-                    value={token()}
-                    placeholder={props.t('apiTokenHint')}
-                    onInput={(event) => setToken(event.currentTarget.value)}
-                  />
-                  <Button onClick={save}>{props.t('save')}</Button>
-                </div>
-                <p
-                  id={`${control.id}-status`}
-                  class={`text-badge ${saved() ? 'text-success' : 'text-ink-3'}`}
-                  aria-live="polite"
-                >
-                  {saved()
-                    ? props.t('settingsSaved')
-                    : props.token === ''
-                      ? props.t('tokenMissing')
-                      : props.t('tokenStored')}
-                </p>
-              </>
-            )}
-          </Field>
         </div>
       </section>
 
