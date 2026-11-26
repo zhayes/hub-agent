@@ -431,7 +431,11 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 
 验证：`test/unit/remote-reconcile.test.ts`（6 条）——运行中只刷观测、终态一次决策且之后不再轮询、`TaskNotFound` 关单、传输错误不关单、缺 peer 不发请求、`staleAfterMs` 内不重复打对端。
 
-未落地：`target='remote-a2a'` 的 **Brain 接线**（= 让 Brain 能选远程目标）与 `local_execution_id` 回填、双 daemon 进程级互委托。前者是**契约级改动**：`Subtask` 目前只有 `assignedAgentId`，没有“远程目标”概念，需先改 PRD §13.5 的 delegate 动作与领域模型，不靠临时字段凑。
+已落地（双向互委托，2026-11-26）：
+
+- `test/unit/a2a-bidirectional.test.ts`：两个独立运行时（各自 SQLite + 真实 `startA2aServer` 入站面 + Peer token）通过真实 HTTP/JSON-RPC **互相委托**：A→B 与 B→A 各自“落派发意图 → 提交 → 对账到终态 → 各产出一条决策点”；并验证「同一幂等键重放不会第二次委托」「重复对账不重复产出决策点」。
+
+未落地：`target='remote-a2a'` 的 **Brain 接线**（= 让 Brain 能选远程目标）与 `local_execution_id` 回填。这是**契约级改动**：`Subtask` 目前只有 `assignedAgentId`，没有“远程目标”概念，需先改 PRD §13.5 的 delegate 动作与领域模型，不靠临时字段凑。因此目前的互委托验证是 **Runtime/协议层**（直接下派发意图），还不是“Brain 自己选择远程 Agent”。
 
 **交付物 manifest（`remote_artifacts`）尚未建表**：§4.1.1 冻结了字段，但按“建表随实现同一个 PR”的约定，它属于远程交付物阶段（A3 验收/交付），不在本次提交范围；当前 `remote_task_refs` 只记录执行状态关联，不代表已能接收代码交付物。
 
