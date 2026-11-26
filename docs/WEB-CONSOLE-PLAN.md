@@ -72,7 +72,7 @@
 - `meta[name=color-scheme]` 初始 `light dark`；内联脚本在 `<head>` 中读取 `localStorage` 防 FOUC。
 - CSS 用 `:root:has(> head > meta[name="color-scheme"][content="dark"])` 映射 `color-scheme`，不要用 JS class 作为唯一来源。
 - 订阅系统 `matchMedia` change 和跨 tab `storage`；用户显式选择后不因系统变化自动清空。
-- 控件位置：rail 底部 Settings / 主题菜单；popover 内三项 `System (currently light/dark)`、`Light`、`Dark`。
+- 控件位置：主题与语言都收在 Settings（Appearance / Language 分段控件，各三项）；rail 底部只留一个 Settings 入口，不再放重复开关。
 - `prefers-reduced-motion` 下关闭宽度/抽屉过渡；`forced-colors` 下用系统色和 outline。
 
 ---
