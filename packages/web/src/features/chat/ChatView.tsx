@@ -1,6 +1,7 @@
 import type { JSX } from '@solidjs/web'
 import { createEffect, createSignal, For, onCleanup, onSettled, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
+import { buttonPrimary } from '../../components/ui/button-classes'
 import { RichText } from '../../components/ui/CodeBlock'
 import { fieldControl } from '../../components/ui/Field'
 import { Icon } from '../../components/ui/Icon'
@@ -539,6 +540,26 @@ export function ChatView(props: ChatViewProps) {
     } else {
       setRightWidth(clampWidth(rightWidth() + (grow ? step : -step), RIGHT_MIN, RIGHT_MAX))
     }
+  }
+
+  /* No credentials: the panes would all be empty, which reads as "broken"
+     rather than "not connected yet". Show the reason and the one action
+     instead, and keep the shell's own token banner quiet (see AppLayout). */
+  if (getToken() === '') {
+    return (
+      <div class="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+        <div class="flex max-w-[360px] flex-col items-center gap-3 text-center">
+          <span class="grid size-12 place-items-center rounded-full bg-subtle text-ink-3">
+            <Icon name="key" size={22} />
+          </span>
+          <h2 class="text-section text-ink">{props.t('chatBlockedTitle')}</h2>
+          <p class="text-meta text-ink-2">{props.t('chatBlockedBody')}</p>
+          <a href="/settings" class={`${buttonPrimary} mt-1`}>
+            {props.t('openSettings')}
+          </a>
+        </div>
+      </div>
+    )
   }
 
   return (

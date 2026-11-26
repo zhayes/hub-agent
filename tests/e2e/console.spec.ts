@@ -366,6 +366,26 @@ test('transcript and composer keep a readable measure on wide screens', async ({
   expect(Math.abs((composer?.width ?? 0) - (message?.width ?? 0))).toBeLessThan(2)
 })
 
+test('without a token chat shows one blocked card instead of empty panes', async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem('hubagent_token'))
+  // Dev server answers /api with index.html when there is no daemon behind it.
+  await page.route('**/api/v1/**', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<!doctype html><h1>app</h1>' }),
+  )
+
+  await page.goto('/chat')
+  await expect(page.getByRole('heading', { name: 'Connect to the daemon' })).toBeVisible()
+
+  // One message, not three empty panes plus a banner saying the same thing.
+  await expect(page.getByRole('complementary', { name: 'Thread context' })).toHaveCount(0)
+  await expect(page.getByText('API token required')).toHaveCount(0)
+  await expect(page.getByText(/Unexpected token/)).toHaveCount(0)
+
+  await page.getByRole('link', { name: 'Open settings' }).click()
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(page.getByRole('heading', { name: 'Model' })).toBeVisible()
+})
+
 test('renders only the latest page and loads older messages', async ({ page }) => {
   await page.unroute('**/api/v1/**')
   const all = Array.from({ length: 1000 }, (_, index) => ({

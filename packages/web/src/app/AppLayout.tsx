@@ -310,7 +310,9 @@ export function AppLayout(props: { children?: JSX.Element }) {
             </div>
           </Show>
 
-          <Show when={app.token() === ''}>
+          {/* Chat renders its own blocked state with the same action, so the
+              banner would be a second copy of one message on one screen. */}
+          <Show when={app.token() === '' && !isChat()}>
             <div
               class="mx-6 mb-3 flex flex-none items-center gap-3 rounded-panel border border-line bg-surface px-3 py-2 max-[1100px]:mx-4"
               role="status"
