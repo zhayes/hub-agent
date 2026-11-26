@@ -1,6 +1,7 @@
 import type { ChatMessageId, ChatThreadId, GoalId, TaskId, Timestamp } from './ids'
 
-export type ChatThreadStatus = 'active' | 'waiting' | 'completed' | 'failed'
+/** idle = 已创建但还没有回合；不能当成“运行中”，否则空对话会一直转圈。 */
+export type ChatThreadStatus = 'idle' | 'active' | 'waiting' | 'completed' | 'failed'
 export type ChatRole = 'user' | 'assistant' | 'system'
 export type ChatMessageKind =
   | 'text'

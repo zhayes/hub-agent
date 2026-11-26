@@ -75,14 +75,14 @@ export function createChatThread(
   const id = asChatThreadId(newId())
   db.prepare(
     `INSERT INTO chat_threads (id, title, goal_id, task_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+     VALUES (?, ?, ?, ?, 'idle', ?, ?)`,
   ).run(id, input.title, input.goalId ?? null, input.taskId ?? null, now, now)
   return {
     id,
     title: input.title,
     ...(input.goalId === undefined ? {} : { goalId: asGoalId(input.goalId) }),
     ...(input.taskId === undefined ? {} : { taskId: asTaskId(input.taskId) }),
-    status: 'active',
+    status: 'idle',
     createdAt: now,
     updatedAt: now,
   }

@@ -203,6 +203,10 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
 test('context pane collapses and reopens from the chat header', async ({ page }) => {
   await page.goto('/chat/t1')
   const context = page.getByRole('complementary', { name: 'Thread context' })
+  /* 右侧只放状态与关联任务，默认收起，避免抢占对话正文。 */
+  await expect(context).toBeHidden()
+
+  await page.getByRole('button', { name: 'Expand context' }).click()
   await expect(context).toBeVisible()
 
   /* One toggle in the chat header owns the pane: collapsing removes it entirely
@@ -213,7 +217,7 @@ test('context pane collapses and reopens from the chat header', async ({ page })
   await page.getByRole('button', { name: 'Expand context' }).click()
   await expect(context).toBeVisible()
   await expect(
-    page.getByRole('textbox', { name: 'Describe a task, or ask what is happening…' }),
+    page.getByRole('textbox', { name: 'Ask anything, or describe the work…' }),
   ).toBeVisible()
 })
 
@@ -328,6 +332,8 @@ test('collapsing the threads pane keeps the transcript column wide', async ({ pa
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
+  /* 右侧默认收起；先展开，才能验证“折叠左侧不会把上下文栏挤到中间”。 */
+  await page.getByRole('button', { name: 'Expand context' }).click()
   await page.getByRole('button', { name: 'Collapse threads' }).first().click()
 
   /* Regression: a collapsed pane is display:none, so the grid's auto-placement
@@ -337,7 +343,7 @@ test('collapsing the threads pane keeps the transcript column wide', async ({ pa
   const context = await page.getByRole('complementary', { name: 'Thread context' }).boundingBox()
   expect(transcript?.width ?? 0).toBeGreaterThan(600)
   expect(context?.width ?? 0).toBeLessThan(400)
-  await expect(page.getByRole('textbox', { name: /Describe a task/ })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: /Ask anything/ })).toBeVisible()
 })
 
 test('below 1100px the context pane reserves no empty gutter', async ({ page }) => {
@@ -362,7 +368,7 @@ test('transcript and composer keep a readable measure on wide screens', async ({
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
   const transcript = await page.getByRole('region', { name: 'Chat' }).boundingBox()
-  const composer = await page.getByRole('textbox', { name: /Describe a task/ }).boundingBox()
+  const composer = await page.getByRole('textbox', { name: /Ask anything/ }).boundingBox()
   const message = await page.getByRole('article').first().boundingBox()
   // The pane is wide, but the text column is capped so lines stay scannable...
   expect(transcript?.width ?? 0).toBeGreaterThan(900)

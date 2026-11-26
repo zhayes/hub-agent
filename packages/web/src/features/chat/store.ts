@@ -16,6 +16,8 @@ export interface CachedThread {
   scrollTop?: number
   /** 未发送的草稿：切走再回来不该丢。 */
   draft?: string
+  /** 本次运行第一次被看到的时间；切走再回来时计时继续，而不是归零。 */
+  runStartedAt?: number
   updatedAt: number
 }
 

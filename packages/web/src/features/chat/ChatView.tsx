@@ -6,7 +6,7 @@ import { fieldControl } from '../../components/ui/Field'
 import { Icon } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
 import { LoadingState } from '../../components/ui/LoadingState'
-import { StatusBadge, StatusDot } from '../../components/ui/StatusBadge'
+import { StatusBadge } from '../../components/ui/StatusBadge'
 import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
 import { toast } from '../../components/ui/Toaster'
 import { type ToolChip, ToolChips } from '../../components/ui/ToolChips'
@@ -64,7 +64,7 @@ function storedWidth(key: string, fallback: number, min: number, max: number): n
 }
 
 const threadRow =
-  'grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+  'flex w-full min-w-0 flex-col gap-[3px] rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 /* Empty states lean on a glyph instead of a paragraph: the shape says "nothing
    here yet" without reading like a manual. */
 const emptyGlyph = 'grid size-11 shrink-0 place-items-center rounded-full bg-subtle text-ink-3'
@@ -96,8 +96,9 @@ export function ChatView(props: ChatViewProps) {
   const [leftCollapsed, setLeftCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.left') === 'collapsed',
   )
+  /* 右侧是“状态/关联任务”的补充信息，默认收起，需要时再开。 */
   const [rightCollapsed, setRightCollapsed] = createSignal(
-    localStorage.getItem('hubagent.chat.right') === 'collapsed',
+    localStorage.getItem('hubagent.chat.right') !== 'open',
   )
   const [leftWidth, setLeftWidth] = createSignal(
     storedWidth('hubagent.chat.leftWidth', 300, LEFT_MIN, LEFT_MAX),
@@ -416,6 +417,7 @@ export function ChatView(props: ChatViewProps) {
   )
 
   onCleanup(() => {
+    stopElapsedClock()
     const current = thread()
     if (current !== undefined && messagesEl !== undefined) {
       writeCachedThread(current.id, { scrollTop: messagesEl.scrollTop })
@@ -428,6 +430,11 @@ export function ChatView(props: ChatViewProps) {
     else setRightCollapsed(value)
     localStorage.setItem(`hubagent.chat.${side}`, value ? 'collapsed' : 'open')
   }
+
+  /* 新建 thread 的占位标题由后端写成 'New thread'（它靠这个字面量决定何时改名），
+     展示层换成本地化文案。 */
+  const displayTitle = (title: string): string =>
+    title === 'New thread' ? props.t('newThread') : title
 
   const filteredThreads = (): ChatThreadSummary[] => {
     const needle = query().toLowerCase()
@@ -521,21 +528,43 @@ export function ChatView(props: ChatViewProps) {
     void send()
   }
 
-  const active = (): boolean => thread()?.status === 'active'
+  /* 旧数据里可能存在 status=active 但没有消息的空 thread：不能当成运行中。 */
+  const active = (): boolean => thread()?.status === 'active' && messages().length > 0
 
-  /* Real elapsed time for the loading line: no fake progress, just the clock. */
-  createEffect(
-    () => active(),
-    (running) => {
-      if (!running) {
-        setThinkingMs(0)
-        return
-      }
-      const started = Date.now()
+  /* 旧数据里“新建后没发消息”的 thread 仍是 active；展示成空闲，和新建保持一致。 */
+  const threadStatus = (): string => {
+    const current = thread()
+    if (current === undefined) return 'idle'
+    return current.status === 'active' && messages().length === 0 ? 'idle' : current.status
+  }
+
+  /* Real elapsed time for the loading line: no fake progress, just the clock.
+     必须显式停掉上一支 interval：切换 thread 时只依赖 effect 的 cleanup，
+     旧 timer 会留下来叠加，读数就会“越跳越快”。 */
+  let elapsedClock: ReturnType<typeof setInterval> | undefined
+  const stopElapsedClock = (): void => {
+    if (elapsedClock !== undefined) clearInterval(elapsedClock)
+    elapsedClock = undefined
+  }
+
+  const startElapsedClock = (): void => {
+    stopElapsedClock()
+    const current = thread()
+    if (!active() || current === undefined) {
       setThinkingMs(0)
-      const clock = setInterval(() => setThinkingMs(Date.now() - started), 250)
-      onCleanup(() => clearInterval(clock))
-    },
+      if (current !== undefined) writeCachedThread(current.id, { runStartedAt: undefined })
+      return
+    }
+    const cached = readCachedThread(current.id)?.runStartedAt
+    const started = cached ?? Date.now()
+    if (cached === undefined) writeCachedThread(current.id, { runStartedAt: started })
+    setThinkingMs(Date.now() - started)
+    elapsedClock = setInterval(() => setThinkingMs(Date.now() - started), 250)
+  }
+
+  createEffect(
+    () => ({ running: active(), threadId: thread()?.id }),
+    () => startElapsedClock(),
   )
 
   /* Each pane is pinned to its own column. A collapsed pane renders with
@@ -708,24 +737,24 @@ export function ChatView(props: ChatViewProps) {
                 }}
                 title={item.title}
               >
-                <StatusDot status={item.status} class="mt-[5px]" />
-                <span class="flex min-w-0 flex-col gap-[3px]">
-                  <span
-                    class={`truncate text-meta ${
-                      thread()?.id === item.id ? 'font-semibold text-ink' : 'font-medium text-ink'
-                    }`}
-                  >
-                    {item.title}
+                <span
+                  class={`truncate text-meta ${
+                    thread()?.id === item.id ? 'font-semibold text-ink' : 'font-medium text-ink'
+                  }`}
+                >
+                  {displayTitle(item.title)}
+                </span>
+                <span class="line-clamp-2 text-badge leading-snug text-ink-2">
+                  {item.lastMessage ??
+                    (item.messageCount === 0
+                      ? props.t('chatEmptyPreview')
+                      : displayTitle(item.title))}
+                </span>
+                <span class="mt-0.5 flex flex-wrap gap-2 text-badge text-ink-3">
+                  <span>
+                    {item.messageCount} {props.t('messages')}
                   </span>
-                  <span class="line-clamp-2 text-badge leading-snug text-ink-2">
-                    {item.lastMessage ?? item.title}
-                  </span>
-                  <span class="mt-0.5 flex flex-wrap gap-2 text-badge text-ink-3">
-                    <span>
-                      {item.messageCount} {props.t('messages')}
-                    </span>
-                    <span>{relativeTime(props.locale, item.updatedAt)}</span>
-                  </span>
+                  <span>{relativeTime(props.locale, item.updatedAt)}</span>
                 </span>
               </button>
             )}
@@ -781,11 +810,10 @@ export function ChatView(props: ChatViewProps) {
           />
           <div class="flex min-w-0 flex-1 items-center gap-2">
             <Show when={thread() !== undefined}>
-              <span class="truncate text-section font-semibold text-ink">{thread()?.title}</span>
-              <StatusBadge
-                status={thread()?.status ?? 'active'}
-                label={props.t(statusKey(thread()?.status ?? 'active'))}
-              />
+              <span class="truncate text-section font-semibold text-ink">
+                {displayTitle(thread()?.title ?? '')}
+              </span>
+              <StatusBadge status={threadStatus()} label={props.t(statusKey(threadStatus()))} />
               <Show when={thread()?.taskId}>
                 <span class="shrink-0 font-mono text-badge text-ink-3" title={thread()?.taskId}>
                   {shortenId(thread()?.taskId ?? '')}
@@ -837,7 +865,7 @@ export function ChatView(props: ChatViewProps) {
               the composer line up instead of the composer running full-bleed. */}
           <div class="mx-auto flex w-full max-w-[74ch] flex-1 flex-col gap-4">
             <Show
-              when={thread() !== undefined}
+              when={thread() !== undefined && messages().length > 0}
               fallback={
                 <div class={centeredEmpty}>
                   <div class="flex w-full max-w-[46ch] flex-col gap-1.5">
@@ -991,8 +1019,9 @@ export function ChatView(props: ChatViewProps) {
         style={columnStyle(3)}
       >
         <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-          <div class="mb-3">
+          <div class="mb-3 flex flex-col gap-1">
             <span class="text-meta font-semibold text-ink">{props.t('threadContext')}</span>
+            <p class="text-badge leading-relaxed text-ink-3">{props.t('chatContextHint')}</p>
           </div>
           <Show when={thread()}>
             {(current) => (
@@ -1001,27 +1030,41 @@ export function ChatView(props: ChatViewProps) {
                   <dt class="text-ink-3">{props.t('status')}</dt>
                   <dd class="text-right">
                     <StatusBadge
-                      status={current().status}
-                      label={props.t(statusKey(current().status))}
+                      status={threadStatus()}
+                      label={props.t(statusKey(threadStatus()))}
                     />
-                  </dd>
-                  <dt class="text-ink-3">{props.t('taskId')}</dt>
-                  <dd
-                    class="min-w-0 break-words text-right font-mono text-ink"
-                    title={current().taskId ?? undefined}
-                  >
-                    {current().taskId === undefined ? '—' : shortenId(current().taskId ?? '')}
                   </dd>
                   <dt class="text-ink-3">{props.t('messages')}</dt>
                   <dd class="text-right tabular-nums text-ink">{messages().length}</dd>
+                  <dt class="text-ink-3">{props.t('goal')}</dt>
+                  <dd
+                    class="min-w-0 truncate text-right font-mono text-ink"
+                    title={current().goalId ?? undefined}
+                  >
+                    {current().goalId === undefined ? '—' : shortenId(current().goalId ?? '')}
+                  </dd>
                 </dl>
-                <Show when={contextTask()}>
+                <Show
+                  when={contextTask()}
+                  fallback={
+                    <p class="mt-4 text-badge leading-relaxed text-ink-3">
+                      {current().taskId === undefined
+                        ? props.t('chatNoTask')
+                        : `${props.t('taskId')} ${shortenId(current().taskId ?? '')}`}
+                    </p>
+                  }
+                >
                   {(task) => (
                     <a
                       class="mt-4 flex items-center justify-between gap-2 rounded-panel border border-line bg-surface px-3 py-2.5 text-meta text-ink transition-colors hover:border-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                       href={`/tasks/${task().id}`}
                     >
-                      <span class="truncate">{task().title}</span>
+                      <span class="flex min-w-0 flex-col gap-0.5">
+                        <span class="truncate">{task().title}</span>
+                        <span class="text-badge text-ink-3">
+                          {props.t(statusKey(task().status))}
+                        </span>
+                      </span>
                       <Icon name="external" size={13} />
                     </a>
                   )}

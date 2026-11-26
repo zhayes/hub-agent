@@ -77,7 +77,7 @@ describe('chat storage', () => {
   it('creates threads, appends messages, updates status', () => {
     const db = database()
     const thread = createChatThread(db, { title: 'Fix login' })
-    expect(thread.status).toBe('active')
+    expect(thread.status).toBe('idle')
     appendChatMessage(db, {
       threadId: thread.id,
       role: 'user',
