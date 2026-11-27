@@ -55,6 +55,15 @@ import { runVerification } from './verify/runner'
  *   4. Subtask/Task 不在这里置 succeeded——那需要 M5 的验收证据链。
  */
 
+/**
+ * ACP Agent 默认输出上限。
+ *
+ * 比 `agent-host` 的通用默认（8 MB / 4 MB）宽：Agent 的 stdout 是整段
+ * JSON-RPC 流，带大量工具输出/diff 时很容易过 8 MB，而超限会直接被杀掉。
+ */
+export const DEFAULT_ACP_MAX_STDOUT_BYTES = 32 * 1024 * 1024
+export const DEFAULT_ACP_MAX_STDERR_BYTES = 8 * 1024 * 1024
+
 export interface RunAcpTaskOptions {
   db: Db
   provider: SandboxProvider
@@ -96,6 +105,14 @@ export interface RunAcpTaskOptions {
   agentTimeouts?: Partial<AgentTimeouts>
   initializeTimeoutMs?: number
   promptTimeoutMs?: number
+  /**
+   * Agent 进程 stdout/stderr 的落盘上限。
+   *
+   * stdout 是整段 JSON-RPC 流，并行审查/大 diff 时 8 MB 真会被撑爆，
+   * 一超限 AgentHost 直接杀进程——上层只看到“进程已退出”，任务白跑。
+   */
+  maxStdoutBytes?: number
+  maxStderrBytes?: number
   /** 可执行验收检查；空 = 无法自动判定，verdict 为 manual_required */
   checks?: readonly VerificationCheck[]
   /** 验收日志目录；默认 ~/.hubagent/artifacts/<executionId> */
@@ -196,6 +213,8 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     const agentProcess = await host.spawn(`acp-${newId()}`, {
       worktree,
       command: agent.command,
+      maxStdoutBytes: options.maxStdoutBytes ?? DEFAULT_ACP_MAX_STDOUT_BYTES,
+      maxStderrBytes: options.maxStderrBytes ?? DEFAULT_ACP_MAX_STDERR_BYTES,
       // cwd 由 AgentHost 强制；写授权包含 worktree。
       sandbox: {
         /* Agent 自己的状态目录（如 dsh 的 ~/.dsh）必须可写，否则 profile boot 直接退出。 */
@@ -221,7 +240,19 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         if (!allow) deniedCalls.push(assessment.summary)
         return toPermissionResponse(request, allow)
       },
-      ...(options.onStderr === undefined ? {} : { onStderr: options.onStderr }),
+      /*
+       * Agent 的 stderr 以前完全丢弃：进程被杀时只能猜原因（真实事故里
+       * 只能从代码推断是 stdout 超限）。这里落盘到 transcript，事后可查。
+       */
+      onStderr: (line) => {
+        if (transcriptRef !== undefined) {
+          appendFileSync(
+            transcriptRef,
+            `${JSON.stringify({ type: 'acp.stderr', at: new Date().toISOString(), line })}\n`,
+          )
+        }
+        options.onStderr?.(line)
+      },
       ...(options.initializeTimeoutMs === undefined
         ? {}
         : { initializeTimeoutMs: options.initializeTimeoutMs }),
@@ -420,11 +451,20 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     append({ type: 'execution.status', executionId, to: 'starting', at: at() })
     append({ type: 'execution.status', executionId, to: 'running', at: at() })
 
+    /*
+     * 约束只写“所有任务都成立”的硬边界。以前只写一句“只改 worktree 内文件”，
+     * Agent 照样并行派子 agent、把命令文本搅在一起输出（真实事故：多个子 agent
+     * 的 stdout 交错，命令被拼成 `ad/hub-agent/pfind ... headUsers/chad-h-20`）。
+     */
     const brief: TaskBrief = {
       objective,
       constraints: [
-        '只修改当前任务工作区（worktree）内的文件',
+        `只在本工作区（${worktree}）内操作，不要读写其他目录`,
         '不要读取凭据目录，不要访问白名单之外的网络',
+        '串行执行：一次只跑一个命令/一个工具调用；不要并行派出子 agent，也不要递归派生子 agent',
+        ...(permissionMode === 'read-only'
+          ? ['本次为只读任务：不要修改文件，也不要执行会改变状态的命令']
+          : []),
       ],
       contextRefs: [],
       existingConventions: [],

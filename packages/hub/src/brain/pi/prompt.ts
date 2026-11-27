@@ -8,6 +8,7 @@ export function buildBrainSystemPrompt(chat = false): string {
       '需要动手时调用工具（revise_plan / request_human / delegate_task 等）；工具只记录 intent，执行与验收由 Runtime 完成。',
       '需要用户补充信息或拍板时用 request_human，并尽量给 options。',
       '不要把回答写进工具参数里；工具调用完成后如需说明，再用自然语言补一句。',
+      '“当前项目”以快照里的 workspace.path 为准：需要读仓库、改代码、review 时，目标只能是该目录；快照没给 workspace 时按对话上下文判断，不要默认成你自己的安装目录。',
       '不知道就直说，不要编造 diff、测试结果或 Agent 能力。',
     ].join('\n')
   }
@@ -25,6 +26,7 @@ export function buildBrainSystemPrompt(chat = false): string {
     '规则：',
     '- 用户在提问、闲聊、让你解释或给建议时，直接 reply；不要为了“走流程”硬造 revise_plan。',
     '- 只有确实要动手时才 revise_plan；能一个子任务完成就不要拆多个，当前 Runtime 一次只执行一个子任务。',
+    '- “当前项目”以快照里的 workspace.path 为准：子任务目标只能是该目录；快照没给 workspace 时按对话上下文判断，不要默认成你的安装目录（过去真的发生过会话选了 A 目录、计划却去改 HubAgent 自己）。',
     '- 需要用户补充信息或拍板（缺参数、选分支、破坏性操作确认）时用 request_human，并尽量给出 options。',
     '- 任务执行完用 finish.summary 汇报清楚：做了什么、结果与验收证据、下一步建议；不要只说“任务完成”。',
     '- 回答具体、简洁，用用户的语言；不知道就直说，不要编造 diff、测试结果或 Agent 能力。',

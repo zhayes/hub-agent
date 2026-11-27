@@ -69,6 +69,8 @@ async function connect(
   worktree: string,
   options: {
     onPermissionRequest?: ConstructorParameters<typeof AcpClient>[0]['onPermissionRequest']
+    maxStdoutBytes?: number
+    maxStderrBytes?: number
   } = {},
 ): Promise<{
   host: AgentHost
@@ -83,6 +85,8 @@ async function connect(
     worktree,
     command: 'mock-acp',
     sandbox: { allowedWrite: [] },
+    ...(options.maxStdoutBytes === undefined ? {} : { maxStdoutBytes: options.maxStdoutBytes }),
+    ...(options.maxStderrBytes === undefined ? {} : { maxStderrBytes: options.maxStderrBytes }),
   })
   const events: AcpExecutionEvent[] = []
   const stderr: string[] = []
@@ -253,6 +257,32 @@ describe('ACP client：进程被 kill', () => {
     expect(error).toBeInstanceOf(HubError)
     if (error instanceof HubError) {
       expect(['AGENT_HOST_FAILED', 'ADAPTER_INCOMPATIBLE']).toContain(error.code)
+    }
+  })
+
+  it('被杀的真因写进错误里（不再只说进程已退出）', async () => {
+    const dir = repo()
+    const provider = new MockProvider()
+    provider.env = {
+      ...process.env,
+      MOCK_ACP_DELAY_MS: '5000',
+      MOCK_ACP_FLOOD_STDERR: '8192',
+    }
+    const { client, agentProcess } = await connect(provider, dir, { maxStderrBytes: 1024 })
+
+    await client.start()
+    await client.newSession(dir)
+    const pending = client.prompt('flood stderr').catch((error: unknown) => error)
+
+    const exit = await agentProcess.wait()
+    expect(exit.reason).toBe('output_limit')
+
+    const error = await pending
+    expect(error).toBeInstanceOf(HubError)
+    if (error instanceof HubError) {
+      expect(error.code).toBe('AGENT_HOST_FAILED')
+      expect(error.message).toContain('output_limit')
+      expect((error.details as { exitReason?: string }).exitReason).toBe('output_limit')
     }
   })
 })

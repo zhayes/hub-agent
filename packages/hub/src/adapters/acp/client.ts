@@ -82,6 +82,8 @@ export class AcpClient {
   private closed = false
   private disposed = false
   private transportError: HubError | undefined
+  /* 进程死因要留到报错里，否则上层只看到“进程已退出”，真因（如 stdout 超限）被吞掉。 */
+  private exit: AgentExit | undefined
 
   constructor(options: AcpClientOptions) {
     this.process = options.process
@@ -321,12 +323,22 @@ export class AcpClient {
         })
       }
       if (this.closed) {
-        throw new HubError('AGENT_HOST_FAILED', `${label} 时 ACP 进程已退出`, {
-          label,
-          ...(this.transportError === undefined
-            ? {}
-            : { transportError: this.transportError.message }),
-        })
+        const exit = this.exit
+        throw new HubError(
+          'AGENT_HOST_FAILED',
+          exit === undefined
+            ? `${label} 时 ACP 进程已退出`
+            : `${label} 时 ACP 进程已退出（${exit.reason}）`,
+          {
+            label,
+            ...(exit === undefined
+              ? {}
+              : { exitReason: exit.reason, exitCode: exit.code, exitSignal: exit.signal }),
+            ...(this.transportError === undefined
+              ? {}
+              : { transportError: this.transportError.message }),
+          },
+        )
       }
       throw asIncompatible(label, error)
     } finally {
@@ -376,6 +388,7 @@ export class AcpClient {
 
   private emitProcessExit(exit: AgentExit): void {
     this.closed = true
+    this.exit = exit
     this.emit({
       kind: 'process.exit',
       reason: exit.reason,

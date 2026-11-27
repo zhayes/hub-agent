@@ -279,3 +279,21 @@ describe('Brain 回合：explain 超时（P0）', () => {
     expect(point?.status).toBe('done')
   })
 })
+
+describe('Brain 快照：会话工作区', () => {
+  it('传了 workspace 就写进快照，没传就不出现该字段', () => {
+    const state = goalState()
+    const withWorkspace = buildBrainInput({
+      state,
+      goalId: 'g1',
+      agents: [],
+      pending: [],
+      budget: DEFAULT_BRAIN_BUDGET,
+      stateVersion: 1,
+      workspace: '/Users/me/adstudio',
+    })
+    expect(withWorkspace.workspace).toEqual({ path: '/Users/me/adstudio' })
+
+    expect(input(state).workspace).toBeUndefined()
+  })
+})

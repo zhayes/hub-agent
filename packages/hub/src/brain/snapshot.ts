@@ -14,6 +14,8 @@ export interface BuildBrainInputOptions {
   state: DomainState
   goalId: string
   agents: readonly AgentSummary[]
+  /** 会话工作区；Brain 据此判断“当前项目”是哪个目录。 */
+  workspace?: string
   /** 可委托的远程对端；未配置时快照不带 `peers` 字段。 */
   peers?: readonly RemotePeerSummary[]
   pending: readonly PendingDecisionView[]
@@ -103,6 +105,7 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
       intent: goal.intent,
       status: goal.status,
     },
+    ...(options.workspace === undefined ? {} : { workspace: { path: options.workspace } }),
     ...(conversation === undefined || conversation.length === 0
       ? {}
       : { conversation: [...conversation] }),

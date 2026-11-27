@@ -6,6 +6,8 @@
  * 环境变量：
  *   MOCK_ACP_DELAY_MS=300         prompt 回复前等待，便于测 cancel
  *   MOCK_ACP_REQUEST_PERMISSION=1 先发 session/request_permission，再决定是否写文件
+ *   MOCK_ACP_FLOOD_STDERR=8192    往 stderr 写 N 字节，用来触发 AgentHost 的输出上限
+ *   MOCK_ACP_FLOOD_MARKER=path    配合上面的变量：只在 marker 不存在时灌一次（测重试）
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -17,6 +19,8 @@ const requestPermission = process.env.MOCK_ACP_REQUEST_PERMISSION === '1'
 const writePath = process.env.MOCK_ACP_WRITE_PATH ?? 'mock-output.txt'
 const alwaysFail = process.env.MOCK_ACP_ALWAYS_FAIL === '1'
 const failFirstFile = process.env.MOCK_ACP_FAIL_FIRST_FILE
+const floodStderrBytes = Number(process.env.MOCK_ACP_FLOOD_STDERR ?? '0')
+const floodMarker = process.env.MOCK_ACP_FLOOD_MARKER
 
 const rl = createInterface({ input: process.stdin })
 let sessionId = 'mock-session-1'
@@ -72,6 +76,10 @@ function maybeCommit() {
 
 async function handlePrompt(id, params) {
   process.stderr.write('[mock-acp] prompt\n')
+  if (floodStderrBytes > 0 && (floodMarker === undefined || !existsSync(floodMarker))) {
+    if (floodMarker !== undefined) writeFileSync(floodMarker, 'flooded\n', 'utf8')
+    process.stderr.write('x'.repeat(floodStderrBytes))
+  }
   cancelled = false
   pendingPrompt = id
   if (alwaysFail) {

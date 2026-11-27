@@ -32,6 +32,8 @@ export interface RunBrainRoundOptions {
   reason: string
   dedupeKey: string
   agents: BrainInput['agents']
+  /** 会话工作区；透传进快照，避免 Brain 猜错“当前项目”。 */
+  workspace?: string
   /** 可委托的远程对端（A3）；不给则 Brain 快照里没有 peers。 */
   peers?: BrainInput['peers']
   budget?: BrainBudget
@@ -128,6 +130,7 @@ export async function runBrainRound(
     state,
     goalId: options.goalId,
     agents: options.agents,
+    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
     ...(options.peers === undefined ? {} : { peers: options.peers }),
     pending: pendingDecisionPoints(options.db, options.goalId).map((item) => ({
       id: item.id,

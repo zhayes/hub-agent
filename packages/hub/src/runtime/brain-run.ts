@@ -156,6 +156,8 @@ export async function runGoalWithBrain(
   const agentPool = availableAgents.length > 0 ? availableAgents : [options.agent]
   /* 没配置远程对端时，快照不带 peers，delegate.peerId 会被校验拒绝。 */
   const peersArg = remote === undefined || remote.peers.length === 0 ? {} : { peers: remote.peers }
+  /* 让 Brain 知道“当前项目”就是会话工作区，而不是 daemon 的 cwd。 */
+  const workspaceArg = { workspace: taskOptions.worktree }
   const agentById = new Map<string, AgentRecord>(
     agentPool.map((agent) => [String(agent.id), agent]),
   )
@@ -188,6 +190,7 @@ export async function runGoalWithBrain(
     dedupeKey: `goal:${goalId}:decompose`,
     agents,
     ...peersArg,
+    ...workspaceArg,
     ...(budget === undefined ? {} : { budget }),
     ...(conversation === undefined ? {} : { conversation }),
     ...(options.onBrainDelta === undefined ? {} : { onDelta: options.onBrainDelta }),
@@ -317,6 +320,7 @@ export async function runGoalWithBrain(
       dedupeKey: `goal:${goalId}:dispatch:${roundIndex}`,
       agents,
       ...peersArg,
+      ...workspaceArg,
       ...(budget === undefined ? {} : { budget }),
       ...(conversation === undefined ? {} : { conversation }),
     })
@@ -600,6 +604,7 @@ export async function runGoalWithBrain(
           dedupeKey: `goal:${goalId}:replan:${replans}`,
           agents,
           ...peersArg,
+          ...workspaceArg,
           ...(budget === undefined ? {} : { budget }),
         })
         if (replan !== undefined) decisions.push(replan.record)

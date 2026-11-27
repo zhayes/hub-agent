@@ -496,6 +496,7 @@ interface OrchestratorBrain {
 - 各 Subtask 的状态、进度摘要、证据引用
 - 可用 Agent 的能力与健康摘要（已过滤，只给候选）
 - 待决事项（Approval、无进展告警、失败原因分类）
+- 会话工作区 `workspace.path`（Chat 会话才有）——Brain 靠它判断“当前项目”，没有就只能按上下文猜
 - 版本号（`stateVersion`）
 
 `BrainAction` 是**意图**，不是副作用：

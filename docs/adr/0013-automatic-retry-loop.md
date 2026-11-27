@@ -3,7 +3,7 @@
 - **状态：** 已接受（Accepted）
 - **日期：** 2026-11-24
 - **相关：** PRD §15.1–§15.2；ARCHITECTURE §6.7；PLAN M8
-- **证据：** `brain-run.test.ts`（首次 refusal → 重试成功 / 持续失败只重试一次）
+- **证据：** `brain-run.test.ts`（首次 refusal → 重试成功 / 持续失败只重试一次）、`acp-retry.test.ts`（output_limit 抬额度重试一次）、`acp-client.test.ts`（退出原因进错误）
 
 ---
 
@@ -20,6 +20,10 @@ M8 已有升级链判定库，但 `runAcpTask` 仍在第一次失败时直接把
 5. **每次升级写 DecisionRecord**：`retry` / `abort`，包含 attempt、executionId、verdict、changedFiles、原因。
 6. **sandbox_denied / manual_required 不走重试**：分别走 Approval / waiting_input。
 7. **不伪造换 Agent/重规划**：没有 Selection Engine 时不假装做了。
+8. **进程输出超限（`output_limit`）算“可安全重试”**：AgentHost 的 stdout/stderr 缓冲上限被杀掉进程，不代表任务本身失败（并行审查 + 大 diff 真会到十几 MB）。策略是 **抬额度重试 1 次**（stdout ×4、stderr ×2，尽量换个 Agent），再超限才收敛失败。
+   - 这一条不适用于“有 diff”的判定：超限时进程已死，本轮证据由 Runtime 重新采集，不采信 Agent 自述。
+   - 既有判据“已有任务记录就不重试”把“可能有副作用”和“有记录”混为一谈，已拆开：只有 diff/审批/人工输入才拦。
+9. **每次失败的死因要透传**：`AcpClient` 把进程退出原因（`exited` / `output_limit` / `*_timeout` / `canceled`）写进错误 `details.exitReason` 与 message，上层不再只能看到“ACP 进程已退出”。
 
 ## 3. 后果
 

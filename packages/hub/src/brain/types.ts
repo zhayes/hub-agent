@@ -102,6 +102,13 @@ export interface BrainInput {
     intent: string
     status: string
   }
+  /**
+   * 本会话的工作区（绝对路径）。
+   *
+   * 没这个字段时 Brain 只能按 daemon 的 `process.cwd()` 猜“当前项目”，
+   * 已经真实发生过“会话选了 A 目录，Brain 却去 review HubAgent 自己”的事故。
+   */
+  workspace?: { path: string }
   planRevision: number
   /** Chat 入口的对话历史；`hubagent run` 等任务路径不传。 */
   conversation?: ChatTurn[]

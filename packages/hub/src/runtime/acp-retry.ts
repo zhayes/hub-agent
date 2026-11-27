@@ -1,6 +1,12 @@
 import type { BrainAction } from '../brain/types'
 import { HubError } from '../shared/errors'
-import { type RunAcpTaskOptions, type RunAcpTaskResult, runAcpTask } from './acp-run'
+import {
+  DEFAULT_ACP_MAX_STDERR_BYTES,
+  DEFAULT_ACP_MAX_STDOUT_BYTES,
+  type RunAcpTaskOptions,
+  type RunAcpTaskResult,
+  runAcpTask,
+} from './acp-run'
 import type { AgentRecord } from './agent-registry'
 import { recordDecision } from './decision-record'
 import { failGoal, failTask } from './recovery/fail'
@@ -16,6 +22,8 @@ export interface RunAcpWithRetryOptions
 }
 
 const PROTOCOL_RETRY_LIMIT = 2
+/** stdout 超限只给一次抢救机会（抬额度换人再来），再爆就认输。 */
+const OUTPUT_LIMIT_RETRY_LIMIT = 1
 
 /**
  * M8 自动重试循环：
@@ -34,6 +42,9 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
   let executionId: string | undefined = options.executionId
   let agentSwitches = 0
   const triedAgents = new Set<string>()
+  let outputLimitRetries = 0
+  let maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_ACP_MAX_STDOUT_BYTES
+  let maxStderrBytes = options.maxStderrBytes ?? DEFAULT_ACP_MAX_STDERR_BYTES
 
   for (;;) {
     try {
@@ -45,6 +56,8 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
         executionId,
         attempt,
         retryOnFailure: true,
+        maxStdoutBytes,
+        maxStderrBytes,
         ...(taskId === undefined ? {} : { taskId }),
         ...(subtaskId === undefined ? {} : { subtaskId }),
       })
@@ -148,6 +161,50 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
         error instanceof HubError && typeof error.details === 'object' && error.details !== null
           ? (error.details as Record<string, unknown>)
           : {}
+      /*
+       * stdout 超上限不是“执行出错”，是 AgentHost 的缓冲保护把进程杀了
+       * （并行审查 + 大 diff 真会到十几 MB）。如果按“已有任务记录 = 可能有副作用”
+       * 直接收敛，一次纯读 review 也会被判失败。抬额度再跑一次，尽量换个 Agent。
+       */
+      if (details.exitReason === 'output_limit' && outputLimitRetries < OUTPUT_LIMIT_RETRY_LIMIT) {
+        outputLimitRetries += 1
+        maxStdoutBytes *= 4
+        maxStderrBytes *= 2
+        executionId = undefined
+        attempt += 1
+        /* 沿用已建的 Task/Subtask：否则重试会另开新 Task，旧的那个永久停在 running。 */
+        if (typeof details.taskId === 'string') taskId = details.taskId
+        if (typeof details.subtaskId === 'string') subtaskId = details.subtaskId
+        let next = currentAgent
+        try {
+          next = selectAgent(options.db, {
+            agents: options.availableAgents ?? [options.agent],
+            excludeAgentIds: [...triedAgents, currentAgent.id],
+          })
+          triedAgents.add(currentAgent.id)
+          agentSwitches += 1
+        } catch {
+          /* 没有别的 Agent 就原样重跑；额度已经抬过，这一步本身就值得试。 */
+        }
+        recordDecision(options.db, {
+          goalId: options.goalId,
+          type: 'retry',
+          rationale: `Agent 输出超过 AgentHost 上限被杀，抬高额度后重试（上限 ${maxStdoutBytes} 字节）`,
+          inputs: {
+            attempt,
+            agentId: String(currentAgent.id),
+            nextAgentId: String(next.id),
+            maxStdoutBytes,
+            exitReason: details.exitReason,
+            ...(typeof details.executionId === 'string'
+              ? { executionId: details.executionId }
+              : {}),
+          },
+        })
+        currentAgent = next
+        await delay(300)
+        continue
+      }
       if (typeof details.taskId === 'string' && typeof details.goalId === 'string') {
         failTask(options.db, {
           taskId: details.taskId,
