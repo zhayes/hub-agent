@@ -13,7 +13,7 @@ import { acquireLock } from '../../shared/lock'
 import { dbPath, hubDir, lockPath, resolvePiAgentDir, tokenPath } from '../../shared/paths'
 import { openDatabase } from '../../storage/db'
 import { migrate } from '../../storage/migrate'
-import { type A2aServerHandle, startA2aServer } from '../a2a/server'
+import { type A2aServerHandle, type A2aTlsOptions, startA2aServer } from '../a2a/server'
 import { createHttpApp } from './app'
 import { ensureHttpToken } from './token'
 
@@ -47,7 +47,12 @@ export interface StartHubOptions {
     port?: number
     host?: string
     publicUrl?: string
-    peers?: Array<{ displayName: string; token: string }>
+    peers?: Array<{ displayName: string; token: string; certFingerprint?: string }>
+    /**
+     * TLS / mTLS 配置。**非回环 host 必填**，否则 A2A 面拒绝启动（ADR 0026）。
+     * 需要双向 TLS 时同时给 `ca` 与 `requireClientCert: true`。
+     */
+    tls?: A2aTlsOptions
   }
 }
 
@@ -192,6 +197,7 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
         ...(options.a2a.host === undefined ? {} : { host: options.a2a.host }),
         ...(options.a2a.publicUrl === undefined ? {} : { publicUrl: options.a2a.publicUrl }),
         ...(options.a2a.peers === undefined ? {} : { peers: options.a2a.peers }),
+        ...(options.a2a.tls === undefined ? {} : { tls: options.a2a.tls }),
       })
     } catch (error) {
       clearInterval(keepAlive)

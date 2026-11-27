@@ -1,19 +1,26 @@
 import { connectRemoteAgent, type RemoteAgentClient } from '../adapters/a2a/client'
 import { fromTaskState } from '../adapters/a2a/mapping'
+import type { MutualTlsMaterial } from '../adapters/a2a/mtls'
 import { HubError } from '../shared/errors'
 import type { Db } from '../storage/db'
 import type { DispatchExecutor, DispatchIntent, DispatchOutcome } from './dispatch/types'
 import { findRemoteTaskByIdempotencyKey, rememberRemoteTask } from './remote-task'
 
-/** 出站所需的最小对端信息；token 只在执行时从配置解析，绝不落库。 */
+/**
+ * 出站所需的最小对端信息。
+ *
+ * token 与 tls 二选一或共存：`tls` 给出时用客户端证书（mTLS），token 只作为兼容。
+ * token 只在执行时从配置解析，绝不落库（dispatch payload 与 DB 都不存）。
+ */
 export interface PeerEndpoint {
   url: string
-  token: string
+  token?: string
+  tls?: MutualTlsMaterial
 }
 
 export type ResolvePeerEndpoint = (peerId: string) => PeerEndpoint | undefined
 
-export type ConnectRemote = (options: { url: string; token: string }) => Promise<RemoteAgentClient>
+export type ConnectRemote = (options: PeerEndpoint) => Promise<RemoteAgentClient>
 
 export interface RemoteDispatchExecutorOptions {
   db: Db
@@ -69,7 +76,7 @@ export function createRemoteDispatchExecutor(
     const messageId = deriveMessageId(intent.idempotencyKey)
     let sent: Awaited<ReturnType<RemoteAgentClient['send']>>
     try {
-      const client = await connect({ url: endpoint.url, token: endpoint.token })
+      const client = await connect(endpoint)
       sent = await client.send({ text: intent.objective, messageId })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)

@@ -56,6 +56,25 @@ A2 阶段的做法：
 
 原结论中的其它部分（独立端口、默认关闭、配对码、本地方向性撤销、Agent Card 不等于授权）不变。
 
+## 复审 / 变更（2026-11-27）：mTLS 前置已落地
+
+**变更：** 上面那条“A4 之前必须消除”的遗留风险已消除——A2A 监听面现在能承载双向 TLS，且身份来自客户端证书。
+
+已实现（有测试）：
+
+- **TLS 由 A2A Server 自己终止**：`startA2aServer({ tls })` 用 `node:https` 监听（必须显式传 `createServer`，否则 `@hono/node-server` 会退回明文监听），Agent Card 的 URL 自动改用 `https://`。
+- **非回环监听强制 TLS**：`host` 不是回环地址且未配置 `tls` 时**拒绝启动**（`CONFIG_INVALID`）。宁可起不来，也不要明文暴露。
+- **mTLS 身份 = 客户端证书**：`requireClientCert: true` 时 `requestCert + rejectUnauthorized`，证书链由 Node 在握手阶段校验（不受信 CA 直接握手失败）；应用层再把证书指纹映射到 peerId，未注册/已撤销 → 401，零副作用。
+- **不降级**：mTLS 模式下**忽略** `Authorization`，不存在“有合法 token 就能绕过证书要求”的路径。
+- **指纹绑定统一进 peer 模型**：`a2a_peers.cert_fingerprint`（仅 DER 的 sha256，不存证书/私钥），部分唯一索引，支持本地撤销（撤销立即生效）。
+- **出站也支持 mTLS**：`connectRemoteAgent({ tls })` 用 `node:https` 实现的 fetch 携带客户端证书（全局 fetch 无法带证书，而项目不引 undici）；Agent Card 拉取与 JSON-RPC 走同一条通道。
+
+不在本次范围（仍是后续工作）：
+
+- 证书**签发/轮换/分发**的用户流程（配对码换证、到期提醒）尚未做；当前由配置注入 PEM。
+- Relay 的 TLS 终止点、信封加密与路由授权（A4 本体）未做；本变更只保证“监听面能要求 mTLS、身份可绑定可撤销”。
+- 未引入 OCSP/CRL：撤销以本地 `a2a_peers.status` 为准，符合“撤销不依赖对端配合”。
+
 ## 复审触发条件
 
 - 出现“组织内多租户 / 需要 SSO”的真实需求；

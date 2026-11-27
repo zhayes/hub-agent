@@ -75,7 +75,7 @@ export async function reconcileRemoteTasks(
     let client = clients.get(ref.peerId)
     if (client === undefined) {
       try {
-        client = await connect({ url: endpoint.url, token: endpoint.token })
+        client = await connect(endpoint)
       } catch (error) {
         report.failed.push({ id: ref.id, error: `连接失败：${messageOf(error)}` })
         continue

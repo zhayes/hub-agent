@@ -143,16 +143,19 @@ A0 只冻结字段、主键与不变量；建表迁移与 A2 的实现同一个 
 
 **`peers`（对端身份与授权）**
 
+> **实现口径（2026-11-27）：** 表名 `a2a_peers`（迁移 020 + 023）。当前已实现 `id` / `display_name` / `token_hash` / `cert_fingerprint` / `status` / `created_at` / `revoked_at`。`token_hash` 存 token 的 sha256（配对引导用），`cert_fingerprint` 存客户端证书 DER 的 sha256（mTLS 身份）。下表其余字段（`card_fingerprint` / `capabilities` / `budget` / `trusted_at`）是尚未实现的目标字段，**不要当成已有列读写**。
+
 | 字段 | 说明 |
 |---|---|
 | `id` (PK) | 本地生成的 peerId，不用对端自报的名字 |
 | `display_name` | 便于人读，可重复 |
-| `public_key` | 配对时交换的长期公钥（mTLS/请求签名用） |
-| `card_fingerprint` | Agent Card 签名摘要，变更即重新校验 |
+| `token_hash` | 配对码派生 token 的 sha256；mTLS 模式下不参与身份判定 |
+| `cert_fingerprint` | 客户端证书 DER 的 sha256；绑定后是该 peer 的传输层身份（mTLS） |
+| `card_fingerprint` | 「待实现」Agent Card 签名摘要，变更即重新校验 |
 | `status` | `pending` / `trusted` / `revoked` |
-| `capabilities` | 允许调用哪些能力（白名单，JSON） |
-| `budget` | 预算/并发/速率上限（JSON） |
-| `created_at` / `trusted_at` / `revoked_at` | 审计用 |
+| `capabilities` | 「待实现」允许调用哪些能力（白名单，JSON） |
+| `budget` | 「待实现」预算/并发/速率上限（JSON） |
+| `created_at` / `trusted_at` / `revoked_at` | 审计用（`trusted_at` 待实现） |
 
 不变量：`status=revoked` 的 peer 不得新建任务（在创建任务之前拒绝）；撤销不依赖对端配合。
 
@@ -347,6 +350,8 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 - 现有本地 HTTP API 继续只监听 loopback；A2A Server 作为独立受控监听面，默认关闭，显式启用后要求 TLS/受信反向代理或 Relay，不复用本地 token。
 
 > **与现行规则冲突，需先立 ADR。** AGENTS.md 写死“本地服务只监听回环地址”。在 ADR 批准前，A2A Server 不得监听非回环地址；ADR 需同时定下：独立端口/独立进程/反向代理三选一、TLS 终止点、Peer 身份机制（配对密钥 / mTLS / access token）、撤销与轮换的存放位置、Relay 可见的元数据范围。
+
+**现状（ADR 0026 已于 2026-11-27 补变更）：** 监听面已能自己终止 TLS；`host` 非回环且未配置 `tls` 时**拒绝启动**；`requireClientCert: true` 时身份来自客户端证书指纹（mTLS），且**不接受 token 降级**；撤销以本地 `a2a_peers.status` 为准。证书签发/轮换流程与 Relay 的 TLS 终止点仍属 A4。
 - Agent Card 只公开管理员允许的能力、输入/输出模式、协议版本与可达端点；Agent Card 本身不代表授权。
 - Peer 身份、授权策略、撤销、密钥轮换和审计记录属于 A2A 接入门禁。未知 peer 默认拒绝；首次配对需要可验证的用户操作。
 - 每个入站请求限大小、并发、速率、任务时长、模型预算、Artifact 总量与二次委托深度；超限失败关闭。
@@ -375,7 +380,7 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 | Agent Card（`.well-known/agent-card.json`）+ 签名校验 | Relay 跨 NAT 穿透（A4） |
 | `SendMessage` / `GetTask` / `ListTasks` / `CancelTask` | Push notification callback（需单独安全评审） |
 | `SubscribeToTask`（SSE）+ 断线重订阅 | gRPC / HTTP+JSON binding |
-| `INPUT_REQUIRED` / `AUTH_REQUIRED` 续聊 | mTLS（A4 之前必须补，见 ADR 0026） |
+| `INPUT_REQUIRED` / `AUTH_REQUIRED` 续聊 | mTLS（**已提前到 A4 之前完成**，见 ADR 0026 变更节与本文 §A4 前置） |
 | 状态 → 本地实体映射（PRD §7.6.2） | Extended Agent Card |
 | 按 peer 的 token 鉴权与本地撤销 | 二次委托（默认禁止，需显式授权） |
 
@@ -438,6 +443,24 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 未落地：`target='remote-a2a'` 的 **Brain 接线**（= 让 Brain 能选远程目标）与 `local_execution_id` 回填。这是**契约级改动**：`Subtask` 目前只有 `assignedAgentId`，没有“远程目标”概念，需先改 PRD §13.5 的 delegate 动作与领域模型，不靠临时字段凑。因此目前的互委托验证是 **Runtime/协议层**（直接下派发意图），还不是“Brain 自己选择远程 Agent”。
 
 **交付物 manifest（`remote_artifacts`）尚未建表**：§4.1.1 冻结了字段，但按“建表随实现同一个 PR”的约定，它属于远程交付物阶段（A3 验收/交付），不在本次提交范围；当前 `remote_task_refs` 只记录执行状态关联，不代表已能接收代码交付物。
+
+### A4 前置：mTLS 已落地（2026-11-27）
+
+ADR 0026 要求“启用 Relay 之前必须补上 mTLS”。这一步已完成，Relay（A4）本体仍未开工。
+
+已落地（有测试，`test/unit/a2a-mtls.test.ts`）：
+
+- 迁移 `023-a2a-peer-cert`：`a2a_peers.cert_fingerprint`（DER 的 sha256，部分唯一索引），不存证书/私钥。
+- `interfaces/a2a/server.ts`：`tls?: { key, cert, ca?, requireClientCert? }`；用 `node:https` 终止 TLS；**非回环监听未配 TLS 拒绝启动**；`requireClientCert` 缺 `ca` 拒绝启动；卡片 URL 切 `https://`。
+- `interfaces/a2a/routes.ts`：从 TLS socket 取客户端证书算指纹；`requireCertificate` 时**只认证书**，忽略 `Authorization`（防降级）。
+- `runtime/a2a-peers.ts`：`bindPeerCertificate` / `verifyPeerCertificate`，撤销立即生效。
+- `adapters/a2a/fingerprint.ts`：指纹口径统一（小写无冒号 hex），入站出站共用。
+- `adapters/a2a/mtls.ts` + `client.ts`：出站 mTLS——基于 `node:https` 的 fetch 携带客户端证书，卡片拉取与 JSON-RPC 走同一通道（不引 undici）。
+- 测试覆盖：非回环无 TLS 拒启、缺 ca 拒启、已绑证书完成委托、同 CA 未注册证书 401 且零任务、撤销立即失效、不受信 CA 握手即拒、**token 不能降级绕过证书要求**。
+
+测试证书在 `packages/hub/test/fixtures/a2a-tls/`（`regenerate.sh` 可重建；仅测试用，随仓库公开）。
+
+仍未做：证书签发/轮换/到期的用户流程、Relay 的 TLS 终止点与信封加密（A4 本体）、按 peer 的能力/预算/速率限制。
 
 ### A5 核心验收场景
 

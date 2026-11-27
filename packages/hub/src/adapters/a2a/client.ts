@@ -1,13 +1,23 @@
 import type { AgentCard, Task, TaskState } from '@a2a-js/sdk'
-import { ClientFactory, JsonRpcTransportFactory } from '@a2a-js/sdk/client'
+import {
+  ClientFactory,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client'
+import { createMutualTlsFetch, type MutualTlsMaterial } from './mtls'
 
 export interface RemoteAgentOptions {
   /** 对端地址（origin 或已带路径均可；`createFromUrl` 会去取 well-known 卡片）。 */
   url: string
-  /** Peer token；只放在 Authorization 头里。 */
-  token: string
-  /** 测试可注入的 fetch；默认全局。 */
+  /** Peer token；只放在 Authorization 头里。mTLS 模式下可省略（服务端不看它）。 */
+  token?: string
+  /** 测试可注入的 fetch；默认全局 fetch。传了 `tls` 时忽略。 */
   fetchImpl?: typeof fetch
+  /**
+   * 出站 mTLS 材料（客户端证书）。给了就用基于 `node:https` 的 fetch，
+   * 而不是全局 fetch——全局 fetch 无法携带客户端证书（除非引入 undici）。
+   */
+  tls?: MutualTlsMaterial
 }
 
 export interface RemoteSendResult {
@@ -36,16 +46,23 @@ export interface RemoteAgentClient {
  *    自动发 `A2A-Version`，我们不再手写（手写反而可能与卡片不一致）。
  */
 export async function connectRemoteAgent(options: RemoteAgentOptions): Promise<RemoteAgentClient> {
-  const baseFetch = options.fetchImpl ?? fetch
+  /* mTLS 优先：需要客户端证书时必须用 https fetch，全局 fetch 带不了证书。 */
+  const baseFetch: typeof fetch =
+    options.tls !== undefined ? createMutualTlsFetch(options.tls) : (options.fetchImpl ?? fetch)
+  const token = options.token
   const authedFetch: typeof fetch = (input, init) => {
     const headers = new Headers(init?.headers)
-    headers.set('authorization', `Bearer ${options.token}`)
+    /* mTLS 模式下服务端不看 token；不传就不发，避免无意义地把凭据送上线路。 */
+    if (token !== undefined) headers.set('authorization', `Bearer ${token}`)
     return baseFetch(input, { ...init, headers })
   }
 
   const factory = new ClientFactory({
     transports: [new JsonRpcTransportFactory({ fetchImpl: authedFetch })],
     clientConfig: { polling: true },
+    /* 卡片拉取走的是 resolver 自己的 fetch，必须显式传，否则会落到全局 fetch
+       （mTLS 场景下就连不上了：全局 fetch 带不了客户端证书）。 */
+    cardResolver: new DefaultAgentCardResolver({ fetchImpl: authedFetch }),
   })
   const client = await factory.createFromUrl(options.url)
 

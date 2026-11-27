@@ -59,7 +59,7 @@ function serverApp(db: Db, taskRunner: InboundTaskRunner) {
   return createA2aApp({
     handler,
     agentCard: card,
-    verify: (authorization) => {
+    identify: ({ authorization }) => {
       const token = bearerOf(authorization)
       return token === undefined ? undefined : verifyPeerToken(db, token)
     },
