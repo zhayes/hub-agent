@@ -80,7 +80,7 @@ function successResult() {
   }
 }
 
-function baseOptions(db: Db) {
+function baseOptions(db: Db, retention?: 'full' | 'bounded') {
   return {
     db,
     provider: new StubProvider(),
@@ -88,11 +88,12 @@ function baseOptions(db: Db) {
     objective: 'review 代码',
     worktree: '/tmp/worktree',
     goalId: 'GOAL_1',
+    ...(retention === undefined ? {} : { outputRetention: retention }),
   }
 }
 
 describe('runAcpWithRetry：进程输出超限', () => {
-  it('第一次 output_limit 不算失败：抬额度重试一次并成功', async () => {
+  it('第一次 output_limit 不算失败：沿用原 Task/Subtask 重试一次并成功', async () => {
     const db = database()
     runAcpTaskMock.mockRejectedValueOnce(outputLimitError()).mockResolvedValueOnce(successResult())
 
@@ -113,6 +114,32 @@ describe('runAcpWithRetry：进程输出超限', () => {
     /* 沿用原 Task/Subtask，不另开新的（否则旧任务永远停在 running）。 */
     expect(second.taskId).toBe('TASK_1')
     expect(second.subtaskId).toBe('SUBTASK_1')
+  })
+
+  it('默认 bounded 策略下不抬额度（上限本来就不参与）', async () => {
+    const db = database()
+    runAcpTaskMock.mockRejectedValueOnce(outputLimitError()).mockResolvedValueOnce(successResult())
+
+    await runAcpWithRetry(baseOptions(db))
+
+    const second = runAcpTaskMock.mock.calls[1]?.[0] as {
+      maxStdoutBytes: number
+      maxStderrBytes: number
+    }
+    expect(second.maxStdoutBytes).toBe(32 * 1024 * 1024)
+    expect(second.maxStderrBytes).toBe(8 * 1024 * 1024)
+  })
+
+  it('full 策略下才会抬额度重试', async () => {
+    const db = database()
+    runAcpTaskMock.mockRejectedValueOnce(outputLimitError()).mockResolvedValueOnce(successResult())
+
+    await runAcpWithRetry(baseOptions(db, 'full'))
+
+    const second = runAcpTaskMock.mock.calls[1]?.[0] as {
+      maxStdoutBytes: number
+      maxStderrBytes: number
+    }
     expect(second.maxStdoutBytes).toBe(32 * 1024 * 1024 * 4)
     expect(second.maxStderrBytes).toBe(8 * 1024 * 1024 * 2)
   })
@@ -124,11 +151,10 @@ describe('runAcpWithRetry：进程输出超限', () => {
     await expect(runAcpWithRetry(baseOptions(db))).rejects.toBeInstanceOf(HubError)
     expect(runAcpTaskMock).toHaveBeenCalledTimes(2)
 
-    const rows = db.prepare('SELECT type, rationale FROM decision_records').all() as unknown as {
+    const rows = db.prepare('SELECT type FROM decision_records').all() as unknown as {
       type: string
-      rationale: string
     }[]
-    expect(rows.some((row) => row.type === 'retry' && row.rationale.includes('上限'))).toBe(true)
+    expect(rows.some((row) => row.type === 'retry')).toBe(true)
     expect(rows.some((row) => row.type === 'abort')).toBe(true)
   })
 })

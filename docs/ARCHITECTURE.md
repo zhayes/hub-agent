@@ -1091,7 +1091,10 @@ Verifier  ──► SandboxProvider.wrap(spec) ──► spawn
 - 调用方只给 `worktree`，AgentHost 自己填 `SandboxSpec.cwd` 与 spawn `cwd`，从结构上保证 C2。
 - stdout / stderr 分行，stderr 不进协议流；POSIX 用新进程组 + 负 pid 收尸，Windows 用 `taskkill /T /F`。
 - 三层超时：`startupMs`（首段输出前）、`idleMs`（输出间隔）、`totalMs`（总时长）；取消走 SIGTERM → `killGraceMs` → SIGKILL。
-- 每流独立输出上限；超限即终止并标记 truncated。
+- 输出保留策略按调用形态分两种（`outputRetention`）：
+  - `full`（默认，短命令：验收、git）：整段留在内存，退出时经 `AgentExit.stdout/stderr` 交回；每流独立字节上限，超限即终止并标记 truncated。
+  - `bounded`（长驻 ACP Agent）：只留头 16 KB + 尾 64 KB，中间丢弃并标记 truncated；**不因累计输出过多而终止进程**。它边到边消费行事件（转发/落盘），退出时没人读 `stdout`——真实事故是 review 回合 7.2 MB 输出顶穿 8 MB 上限，Agent 被误杀。
+  - 唯一例外：`bounded` 下单行超过 4 MB 仍会终止（病态输出，正常 ACP 消息 ≤ 1 MB），避免 OOM。
 - 退出路径只有一条：超时、取消、自然退出、spawn 失败最终都走 `finalize()`，并在此调用 `release(commandId)`。
 - 真实链路冒烟：`pnpm test:srt-acp`（srt 包装层 + JSON-RPC 行往返 + 越界写拒绝）。
 

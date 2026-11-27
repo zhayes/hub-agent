@@ -562,8 +562,9 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 - `runtime/recovery/idempotency.ts`：`idempotencyKey` 派生 + `delegation_contracts` 唯一约束；`runAcpTask` 已接入，重复投递拒绝新 Execution。
 - `runtime/recovery/scan.ts`：重启扫描把非终态 Execution 收敛为 `unknown` 并写恢复决策点；`hubagentd` 启动时执行。
 - `runtime/recovery/pause.ts`：Task/Execution/Subtask 暂停与反向恢复。
-- `runtime/acp-retry.ts`：协议/启动重试最多 2 次；执行失败无 diff 时同 Agent 重试 1 次；**进程输出超限（`output_limit`）抬额度重试 1 次**；有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。判据与阈值见 ADR 0013。
-- 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2、`brain-run.test.ts` 新增 2 个自动重试用例、`acp-retry.test.ts` 2 个输出超限用例。
+- `runtime/acp-retry.ts`：协议/启动重试最多 2 次；执行失败无 diff 时同 Agent 重试 1 次；**进程输出超限（`output_limit`）重试 1 次（沿用原 Task/Subtask）**；有 diff/审批/人工输入不静默重试；重试耗尽才 `failTask`，每次升级写 DecisionRecord。判据与阈值见 ADR 0013。
+- `agent-host` 输出保留分两种：`full`（短命令，超上限即终止）与 `bounded`（长驻 ACP Agent，只留头 16 KB + 尾 64 KB，**不因累计输出杀进程**）；真实事故是 review 回合 7.2 MB 输出顶穿 8 MB 上限。
+- 测试：`escalation.test.ts` 5、`no-progress.test.ts` 5、`idempotency.test.ts` 2、`recovery.test.ts` 4、`side-effect.test.ts` 2、`brain-run.test.ts` 新增 2 个自动重试用例、`acp-retry.test.ts` 4 个输出超限用例、`agent-host.test.ts` 新增 3 个 bounded 用例。
 
 `pnpm verify` 全绿（用例数与模块数以实际输出为准）。**已接**：Selection Engine + 自动换 Agent + 自动重规划（最多 2 次）；`task retry` 对 paused 任务 resume，对 failed 任务创建新 attempt（新 Goal/Task）并执行。
 

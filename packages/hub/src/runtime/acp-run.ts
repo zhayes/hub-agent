@@ -5,7 +5,7 @@ import { AcpClient } from '../adapters/acp/client'
 import type { AcpExecutionEvent } from '../adapters/acp/event'
 import { collectGitEvidence, type GitEvidence, readGitHead } from '../adapters/acp/git-evidence'
 import { AgentHost } from '../agent-host/agent-host'
-import type { AgentTimeouts } from '../agent-host/types'
+import type { AgentTimeouts, OutputRetention } from '../agent-host/types'
 import type {
   Approval,
   ExecutionEvidence,
@@ -108,11 +108,19 @@ export interface RunAcpTaskOptions {
   /**
    * Agent 进程 stdout/stderr 的落盘上限。
    *
-   * stdout 是整段 JSON-RPC 流，并行审查/大 diff 时 8 MB 真会被撑爆，
-   * 一超限 AgentHost 直接杀进程——上层只看到“进程已退出”，任务白跑。
+   * 只在 `outputRetention: 'full'` 时生效；ACP Agent 默认走 `bounded`，
+   * 靠“只留头尾”控内存，不靠上限杀进程。
    */
   maxStdoutBytes?: number
   maxStderrBytes?: number
+  /**
+   * 输出保留策略，默认 `bounded`。
+   *
+   * ACP Agent 是长驻进程：数据边到边转发/落盘，退出时没人读 `exit.stdout`，
+   * 所以不需要整段留内存（真实事故：review 回合 7.2 MB 输出把 8 MB 上限顶穿，
+   * Agent 干得好好的被杀了）。
+   */
+  outputRetention?: OutputRetention
   /** 可执行验收检查；空 = 无法自动判定，verdict 为 manual_required */
   checks?: readonly VerificationCheck[]
   /** 验收日志目录；默认 ~/.hubagent/artifacts/<executionId> */
@@ -215,6 +223,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       command: agent.command,
       maxStdoutBytes: options.maxStdoutBytes ?? DEFAULT_ACP_MAX_STDOUT_BYTES,
       maxStderrBytes: options.maxStderrBytes ?? DEFAULT_ACP_MAX_STDERR_BYTES,
+      outputRetention: options.outputRetention ?? 'bounded',
       // cwd 由 AgentHost 强制；写授权包含 worktree。
       sandbox: {
         /* Agent 自己的状态目录（如 dsh 的 ~/.dsh）必须可写，否则 profile boot 直接退出。 */

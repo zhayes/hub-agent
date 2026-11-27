@@ -101,6 +101,7 @@ export class AgentHost {
         timeouts,
         maxStdoutBytes,
         maxStderrBytes,
+        retention: request.outputRetention ?? 'full',
       })
       this.active.set(id, process)
 

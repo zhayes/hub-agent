@@ -43,6 +43,11 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
   let agentSwitches = 0
   const triedAgents = new Set<string>()
   let outputLimitRetries = 0
+  /*
+   * `bounded` 策略下上限根本不参与（只留头尾），抬额度没有意义；
+   * 真要抬的只有 `full`。
+   */
+  const boundedOutput = (options.outputRetention ?? 'bounded') === 'bounded'
   let maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_ACP_MAX_STDOUT_BYTES
   let maxStderrBytes = options.maxStderrBytes ?? DEFAULT_ACP_MAX_STDERR_BYTES
 
@@ -168,8 +173,10 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
        */
       if (details.exitReason === 'output_limit' && outputLimitRetries < OUTPUT_LIMIT_RETRY_LIMIT) {
         outputLimitRetries += 1
-        maxStdoutBytes *= 4
-        maxStderrBytes *= 2
+        if (!boundedOutput) {
+          maxStdoutBytes *= 4
+          maxStderrBytes *= 2
+        }
         executionId = undefined
         attempt += 1
         /* 沿用已建的 Task/Subtask：否则重试会另开新 Task，旧的那个永久停在 running。 */
@@ -189,7 +196,9 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
         recordDecision(options.db, {
           goalId: options.goalId,
           type: 'retry',
-          rationale: `Agent 输出超过 AgentHost 上限被杀，抬高额度后重试（上限 ${maxStdoutBytes} 字节）`,
+          rationale: boundedOutput
+            ? 'Agent 单条输出超长导致进程被杀，换个 Agent 重试一次'
+            : `Agent 输出超过 AgentHost 上限被杀，抬额度后重试（上限 ${maxStdoutBytes} 字节）`,
           inputs: {
             attempt,
             agentId: String(currentAgent.id),

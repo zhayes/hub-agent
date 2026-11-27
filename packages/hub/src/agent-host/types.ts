@@ -33,6 +33,10 @@ export interface AgentExit {
   signal: NodeJS.Signals | null
   reason: AgentExitReason
   durationMs: number
+  /**
+   * 保留策略为 `full` 时是完整输出；`bounded` 时只有首尾片段
+   * （中间省略的地方会带一行标记，`truncated` 为 true）。
+   */
   stdout: string
   stderr: string
   stdoutTruncated: boolean
@@ -40,6 +44,16 @@ export interface AgentExit {
   /** spawn 失败时的原始错误信息；其他情况不出现 */
   error?: string
 }
+
+/**
+ * 子进程输出的保留策略。
+ *
+ * - `full`（默认）：整段留在内存，退出时通过 `AgentExit.stdout/stderr` 一次性交回；
+ *   超过上限即终止进程——保护短命令（`git diff`、验收命令），避免失控刷屏撑爆内存。
+ * - `bounded`：只留头尾各一小段，中间丢弃；**不会因为累计输出过多而终止进程**。
+ *   长驻的 ACP Agent 用这个：它边到边消费行事件（转发/落盘），退出时没人读 `stdout`。
+ */
+export type OutputRetention = 'full' | 'bounded'
 
 export type AgentProcessEvent =
   | { type: 'spawned'; pid: number }
@@ -63,6 +77,8 @@ export interface AgentSpawnRequest {
   timeouts?: Partial<AgentTimeouts>
   maxStdoutBytes?: number
   maxStderrBytes?: number
+  /** 输出保留策略；默认 `full`。长驻协议进程传 `bounded`。 */
+  outputRetention?: OutputRetention
 }
 
 /** 一个已启动（或正在启动）的受管进程 */

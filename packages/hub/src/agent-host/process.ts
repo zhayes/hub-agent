@@ -7,6 +7,7 @@ import type {
   AgentProcess,
   AgentProcessEvent,
   AgentTimeouts,
+  OutputRetention,
 } from './types'
 
 export interface SandboxedAgentProcessOptions {
@@ -17,9 +18,23 @@ export interface SandboxedAgentProcessOptions {
   timeouts: AgentTimeouts
   maxStdoutBytes: number
   maxStderrBytes: number
+  retention: OutputRetention
 }
 
 type StreamName = 'stdout' | 'stderr'
+
+/**
+ * `bounded` 策略下头/尾各留多少（按**字符**算，UTF-8 下一个字符最多 3 字节，
+ * 所以实际内存上界是这里的 3 倍左右）。头部用来看“它一开始在干什么”，
+ * 尾部用来抓报错；中间对排障几乎无用。
+ */
+const BOUNDED_HEAD_CHARS = 16 * 1024
+const BOUNDED_TAIL_CHARS = 64 * 1024
+/**
+ * `bounded` 下单行还无限长就是病态输出（ACP 单条消息本来 ≤ 1 MB，
+ * 上层 transport 也另有 1 MB 上限）。吞掉这行并终止，避免 OOM。
+ */
+const BOUNDED_MAX_LINE_CHARS = 4 * 1024 * 1024
 
 /**
  * 一个受 AgentHost 监管的沙箱子进程。
@@ -49,11 +64,15 @@ export class SandboxedAgentProcess implements AgentProcess {
   private totalTimer: NodeJS.Timeout | undefined
   private killTimer: NodeJS.Timeout | undefined
   private readonly output: Record<StreamName, string> = { stdout: '', stderr: '' }
+  /* bounded 策略专用：头尾两段，内存有界。 */
+  private readonly head: Record<StreamName, string> = { stdout: '', stderr: '' }
+  private readonly tail: Record<StreamName, string> = { stdout: '', stderr: '' }
   private readonly lineBuffers: Record<StreamName, string> = { stdout: '', stderr: '' }
   private readonly bytes: Record<StreamName, number> = { stdout: 0, stderr: 0 }
   private readonly truncated: Record<StreamName, boolean> = { stdout: false, stderr: false }
   private firstOutput = false
   private settled = false
+  private readonly retention: OutputRetention
 
   constructor(options: SandboxedAgentProcessOptions) {
     const [file, ...args] = options.wrapped.argv
@@ -69,6 +88,7 @@ export class SandboxedAgentProcess implements AgentProcess {
       stdout: options.maxStdoutBytes,
       stderr: options.maxStderrBytes,
     }
+    this.retention = options.retention
 
     this.exitPromise = new Promise<AgentExit>((resolve) => {
       this.resolveExit = resolve
@@ -222,6 +242,32 @@ export class SandboxedAgentProcess implements AgentProcess {
     }
     this.armIdle()
 
+    if (this.retention === 'full') {
+      this.onFullData(stream, chunk)
+      return
+    }
+
+    /*
+     * bounded：数据照样逐行往外发（转发/落盘全靠它），只是**不再整段留副本**。
+     * 这里绝不能因为累计量大而杀进程——长驻 Agent 说得多不是错误。
+     */
+    this.bytes[stream] += chunk.length
+    const text = chunk.toString('utf8')
+    this.retain(stream, text)
+
+    this.lineBuffers[stream] += text
+    if (this.lineBuffers[stream].length > BOUNDED_MAX_LINE_CHARS) {
+      /* 单行无限长说明对端已经坏了（正常 ACP 消息 ≤ 1 MB），吞掉并终止。 */
+      this.lineBuffers[stream] = ''
+      this.truncated[stream] = true
+      this.terminate('output_limit')
+      return
+    }
+    this.flushLines(stream)
+  }
+
+  /** `full`：全量留内存 + 超上限就杀（短命令用，行为与以前一致）。 */
+  private onFullData(stream: StreamName, chunk: Buffer): void {
     const cap = this.maxBytes[stream]
     const used = this.bytes[stream]
     if (used >= cap) {
@@ -241,6 +287,23 @@ export class SandboxedAgentProcess implements AgentProcess {
     if (chunk.length > remaining) {
       this.truncated[stream] = true
       this.terminate('output_limit')
+    }
+  }
+
+  /** 把文本放进“头 + 尾”两个有界缓冲；中间的丢弃并置 truncated。 */
+  private retain(stream: StreamName, text: string): void {
+    let rest = text
+    const headRoom = BOUNDED_HEAD_CHARS - this.head[stream].length
+    if (headRoom > 0) {
+      this.head[stream] += rest.slice(0, headRoom)
+      rest = rest.slice(headRoom)
+      if (rest.length === 0) return
+    }
+
+    this.tail[stream] += rest
+    if (this.tail[stream].length > BOUNDED_TAIL_CHARS) {
+      this.tail[stream] = this.tail[stream].slice(-BOUNDED_TAIL_CHARS)
+      this.truncated[stream] = true
     }
   }
 
@@ -341,8 +404,8 @@ export class SandboxedAgentProcess implements AgentProcess {
       signal,
       reason,
       durationMs: Date.now() - this.startedAt,
-      stdout: this.output.stdout,
-      stderr: this.output.stderr,
+      stdout: this.composeOutput('stdout'),
+      stderr: this.composeOutput('stderr'),
       stdoutTruncated: this.truncated.stdout,
       stderrTruncated: this.truncated.stderr,
       ...(error === undefined ? {} : { error }),
@@ -354,6 +417,15 @@ export class SandboxedAgentProcess implements AgentProcess {
 
   private emit(event: AgentProcessEvent): void {
     for (const listener of [...this.listeners]) listener(event)
+  }
+
+  private composeOutput(stream: StreamName): string {
+    if (this.retention === 'full') return this.output[stream]
+    const head = this.head[stream]
+    const tail = this.tail[stream]
+    if (!this.truncated[stream]) return head + tail
+    /* 诊断文本，不参与任何解析：说清楚“中间被丢了”比伪造连续内容诚实。 */
+    return `${head}\n… [HubAgent 只保留首尾：该流共 ${this.bytes[stream]} 字节，中间已省略] …\n${tail}`
   }
 }
 

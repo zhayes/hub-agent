@@ -329,6 +329,84 @@ describe('AgentHost：三层超时', () => {
   })
 })
 
+describe('AgentHost：输出保留策略（bounded）', () => {
+  it('累计输出再多也不杀进程，只保留首尾', async () => {
+    const dir = worktree()
+    const provider = new FakeProvider()
+    /* 先头、再一大段中间、最后尾巴；总共写 ~220 KB。 */
+    provider.argv = script(`
+      process.stdout.write('HEAD'.repeat(5000))
+      process.stdout.write('MID'.repeat(60000))
+      process.stdout.write('\\nTAILMARK\\n')
+    `)
+    const host = hostWith(provider)
+
+    const process = await host.spawn('p1', {
+      worktree: dir,
+      command: 'x',
+      maxStdoutBytes: 300,
+      outputRetention: 'bounded',
+    })
+    const exit = await process.wait()
+
+    /* 关键：不是 output_limit，正常退出。bounded 下上限不参与。 */
+    expect(exit.reason).toBe('exited')
+    expect(exit.code).toBe(0)
+    expect(exit.stdoutTruncated).toBe(true)
+    /* 头尾都在，中间被丢。 */
+    expect(exit.stdout.startsWith('HEADHEAD')).toBe(true)
+    expect(exit.stdout).toContain('TAILMARK')
+    expect(exit.stdout).toContain('中间已省略')
+    expect(exit.stdout.length).toBeLessThan(100_000)
+  })
+
+  it('输出不大时就是完整内容，不标记 truncated', async () => {
+    const dir = worktree()
+    const provider = new FakeProvider()
+    provider.argv = script(`
+      console.log('line-1')
+      console.log('line-2')
+    `)
+    const host = hostWith(provider)
+
+    const process = await host.spawn('p1', {
+      worktree: dir,
+      command: 'x',
+      outputRetention: 'bounded',
+    })
+    const exit = await process.wait()
+
+    expect(exit.reason).toBe('exited')
+    expect(exit.stdoutTruncated).toBe(false)
+    expect(exit.stdout).toContain('line-1')
+    expect(exit.stdout).toContain('line-2')
+  })
+
+  it('行事件照旧逐行发出（转发不依赖保留策略）', async () => {
+    const dir = worktree()
+    const provider = new FakeProvider()
+    provider.argv = script(`
+      for (let i = 0; i < 50; i += 1) console.log('n-' + i)
+    `)
+    const host = hostWith(provider)
+
+    const process = await host.spawn('p1', {
+      worktree: dir,
+      command: 'x',
+      outputRetention: 'bounded',
+    })
+    const lines: string[] = []
+    process.onEvent((event) => {
+      if (event.type === 'stdout') lines.push(event.line)
+    })
+    await process.wait()
+
+    expect(lines).toContain('n-0')
+    expect(lines).toContain('n-49')
+    expect(lines).toHaveLength(50)
+  })
+})
+
 describe('AgentHost：输出上限与取消', () => {
   it('stdout 超过上限即终止并标记 truncated', async () => {
     const dir = worktree()
