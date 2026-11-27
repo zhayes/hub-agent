@@ -611,6 +611,25 @@ interfaces/a2a（组合根）→ 创建 adapter 的编解码器
 - [ ] 为远程 peer、委托二次分发、Artifact 安全建立 ADR。
 - [ ] 已同步 `docs/ARCHITECTURE.md`、`docs/PLAN.md`、`docs/README.md` 一次（2026-11-26，标注了实现缺口）；此后每次实现变化同 PR 更新，避免文档再次声称尚不存在的能力。
 
+### A2A 剩余待办（按优先级，2026-11-27 盘点）
+
+已完成的主链路（不在下表）：mTLS 前置、Brain 选远程目标、远端结果→本地 Execution、交付物 manifest + 应用/验收、配置驱动 daemon、人工验收（HTTP + 澄清答案）。
+
+| 优先级 | 待办 | 现状 / 为什么现在是这个状态 | 完成判据 |
+|---|---|---|---|
+| P1 | Web 控制台「接受/拒绝」按钮 | 后端已就绪：`POST /api/v1/executions/:id/accept\|reject`，且在澄清上回答 `accept`/`reject` 也会收敛。只差 UI | 控制台能看到 `waiting_input` 的执行并一键收敛，走的是同一条 API |
+| P1 | CLI `ha a2a peer add`（配对/发证） | 现在靠手写 `config.toml` + 外部证书（`test/fixtures/a2a-tls/regenerate.sh` 是参考，不是产品路径） | 一条命令生成 token/证书、写入配置并打印对端需要的信息 |
+| P2 | 文件型/外链 Artifact 下载 | **按决定暂缓**。现在只支持内联文本 patch；大 patch 必须下载，需要大小/数量/MIME 上限、解包路径穿越防护、hash 校验 | 能下载并校验，超限 fail-closed，恶意 Artifact 有拒绝路径 |
+| P2 | A0 余项：状态映射兼容性测试 | 映射已实现（`adapters/a2a/mapping.ts` + `runtime/remote-execution.ts`），但还没有穷尽性用例锁死 `TASK_STATE_* → 本地实体` | 任一 SDK 状态新增/改名时测试会失败 |
+| P3 | PRD §13.5 是否收录 `reply` | 实现与提示词已有 `reply`，PRD 的 8 个元工具里没有它 | PRD 与实现二者一致（收编或删除） |
+| P3 | ADR：远程 peer / 二次委托 / Artifact 安全 | 二次委托默认禁止且无显式授权入口；Artifact 安全目前只有“内联文本 + 不采信自述” | 三个议题各有 ADR，且与实现不冲突 |
+| P3 | A4 Relay 本体 | mTLS 前置已完成（ADR 0026 变更节）；Relay 的路由、信封加密、重放保护未开始 | PLAN-A2A §7 的 A4 门禁全绿 |
+
+**已知测试基线（不是本次引入的问题，不要当回归去“修”）**：
+
+- `packages/web/test/i18n.test.ts` 恒红（中文字体子集缺字），改动前即如此。
+- `agent-host` / `hub-server`（端口顺延）/ `brain-run`（重试换人）在**并行满载**时偶发失败，单独跑均通过——属于时序敏感，不是逻辑错误。
+
 ## 参考
 
 - [A2A Protocol v1.0 Specification](https://a2a-protocol.org/latest/specification/)：实施时以锁定的正式版本为准，不能混用旧版字段/状态表。
