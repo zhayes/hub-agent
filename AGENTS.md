@@ -38,11 +38,16 @@ packages/hub/src/
   bin/             ha.ts（主入口）、hubagentd.ts、hubagent.ts（兼容）
 
 packages/web/src/
+  app/             壳层（AppLayout）、路由拓扑、全局 store
   routes/          页面骨架与路由参数
-  features/        tasks / agents / approvals / network / settings
-  components/      graph/（自研任务图）、charts/、ui/
-  shared/          api 客户端、SSE 原语、格式化
+  features/        chat / tasks / inbox / agents / registry / approvals / settings
+  components/ui/   设计系统门面（features 与 routes 不得直连 @ui-sdk / @lucide/solid）
+  dev/             组件画廊（仅 DEV 进图）
+  shared/          api 客户端、注意力派生（attention）、i18n、格式化
+  styles/          令牌、Tailwind 入口、动效
 ```
+
+返回目录
 
 `packages/hub/catalog/` 是内置 Agent 目录；`fixtures/` 存放回归基线任务与 ACP 录制样本。
 

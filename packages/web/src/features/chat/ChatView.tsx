@@ -942,6 +942,15 @@ export function ChatView(props: ChatViewProps) {
     return list
   })
 
+  /* 渲染窗口：DOM 里只保留最近 N 个回合。
+     历史仍按 100 条一页从服务端拉（「加载更早」），但“已经拉下来”的长度没有上限；
+     不设窗口的话 1000 条要一次性建 1000 个行组件（实测最长任务 ~1s），
+     而屏幕上一次只看得到三四个回合。多出来的仍留在内存里，点一下就能展开。 */
+  const RENDER_TURNS = 200
+  const [renderLimit, setRenderLimit] = createSignal(RENDER_TURNS)
+  const visibleTurns = createMemo<TurnView[]>(() => turns().slice(-renderLimit()))
+  const hiddenTurns = (): number => Math.max(0, turns().length - renderLimit())
+
   const lastTurnKey = (): string | undefined => turns().at(-1)?.key
 
   const turnElapsed = (turn: TurnView): number => {
@@ -1321,6 +1330,18 @@ export function ChatView(props: ChatViewProps) {
                 </div>
               }
             >
+              {/* 已经拉下来但被渲染窗口挡住的：先展开，不必再请求一次。 */}
+              <Show when={hiddenTurns() > 0}>
+                <div class="flex justify-center pb-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setRenderLimit((current) => current + RENDER_TURNS)}
+                  >
+                    {props.t('showOlderTurns', { count: hiddenTurns() })}
+                  </Button>
+                </div>
+              </Show>
               <Show when={hasMore()}>
                 <div class="flex justify-center pb-1">
                   <Button variant="ghost" size="sm" onClick={() => void loadOlder()}>
@@ -1328,9 +1349,12 @@ export function ChatView(props: ChatViewProps) {
                   </Button>
                 </div>
               </Show>
-              <For each={turns()}>
+              <For each={visibleTurns()}>
                 {(turn) => (
-                  <>
+                  /* 长历史里只有看得到的那几回合需要参与布局/绘制（motion.css 的
+                     hx-virtual-row = content-visibility:auto）：10k 条一次铺开会把首屏
+                     拖到几十秒。高度用 auto 记住上一次的大小，避免滚动时跳。 */
+                  <div class="hx-virtual-row">
                     <Show when={turn.user}>
                       {(user) => (
                         <MessageRow
@@ -1400,7 +1424,7 @@ export function ChatView(props: ChatViewProps) {
                         onAuthRetried={handleAuthRetried}
                       />
                     </Show>
-                  </>
+                  </div>
                 )}
               </For>
               <Show when={active() && (turns().at(-1)?.steps.length ?? 0) === 0}>

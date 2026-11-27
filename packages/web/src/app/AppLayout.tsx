@@ -52,6 +52,9 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
   const isChat = (): boolean => path() === '/' || path().startsWith('/chat')
   const isTasks = (): boolean => path().startsWith('/tasks')
+  /* 运行详情页自己有一个 h1（任务标题）；顶栏再排一个 h1 就会出现两个一级标题，
+     读屏目录也会重复。这里只降为普通文本标签。 */
+  const isTaskDetail = (): boolean => isTasks() && path().length > '/tasks'.length
   /* Agent 是一个目的地、两个分段（现场 / 接入）：分段控件在页面里（AgentsPage），
      顶栏只按深链页的规矩显示页名。 */
   const isAgentsSection = (): boolean =>
@@ -226,7 +229,14 @@ export function AppLayout(props: { children?: JSX.Element }) {
           when={!isChat() && !isAgentsSection()}
           fallback={<h1 class="visually-hidden">{title()}</h1>}
         >
-          <h1 class="min-w-0 truncate text-meta font-semibold text-ink">{title()}</h1>
+          <Show
+            when={!isTaskDetail()}
+            fallback={
+              <span class="min-w-0 truncate text-meta font-semibold text-ink">{title()}</span>
+            }
+          >
+            <h1 class="min-w-0 truncate text-meta font-semibold text-ink">{title()}</h1>
+          </Show>
         </Show>
         <span class="flex-1" />
 

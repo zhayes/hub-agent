@@ -1,9 +1,10 @@
 import { For, Show } from 'solid-js'
-import { Button } from '../../components/ui/Button'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import type { ApprovalRow } from '../../shared/api'
+import { approvalToAttention } from '../../shared/attention'
 import { shortenId } from '../../shared/format'
 import { statusKey, type Translator } from '../../shared/i18n'
+import { DecisionBody } from '../inbox/DecisionBody'
 
 export interface ApprovalsViewProps {
   approvals: ApprovalRow[]
@@ -12,79 +13,82 @@ export interface ApprovalsViewProps {
   onReject: (id: string) => void
 }
 
-const page = 'max-w-[880px] pb-6'
+/* 与全站同一条量度：720 居中。 */
+const page = 'mx-auto w-full max-w-[720px] pb-6'
 const sectionHeading =
-  'flex items-baseline justify-between gap-3 pb-2.5 text-meta font-semibold text-ink'
+  'flex items-baseline justify-between gap-3 pb-3 text-meta font-semibold text-ink'
 const emptyState =
   'rounded-panel border border-dashed border-line-strong px-4 py-4 text-meta text-ink-2 forced-colors:border forced-colors:border-CanvasText'
-const list = 'flex flex-col gap-2.5 border-t border-line'
-const cardBase =
-  'flex items-start justify-between gap-6 rounded-control border bg-surface px-4 py-[14px] forced-colors:border forced-colors:border-CanvasText'
-const cardTone = (risk: string): string => (risk === 'high' ? 'border-danger/40' : 'border-line')
-const titleRow = 'flex min-w-0 items-center gap-3'
-const title = 'm-0 min-w-0 max-w-[46ch] truncate text-section font-semibold text-ink'
-const resource = 'mt-1.5 break-words font-mono text-meta tabular-nums text-ink-2'
-const meta = 'mt-2 flex flex-wrap items-center gap-1.5 text-meta text-ink-3'
-const metaLink =
-  'font-mono tabular-nums text-ink-2 underline decoration-line-strong underline-offset-2 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
-const monoId = 'font-mono tabular-nums'
-const actions = 'flex shrink-0 items-center gap-1'
+const list = 'flex flex-col gap-2.5'
+const panel =
+  'rounded-panel border border-line bg-surface px-4 py-4 forced-colors:border forced-colors:border-CanvasText'
+const settledList = 'flex flex-col border-t border-line'
+const settledRow = 'flex items-center gap-3 border-b border-line py-2.5'
+const settledReason = 'min-w-0 flex-1 truncate text-meta text-ink-2'
+const taskLink =
+  'shrink-0 font-mono text-badge tabular-nums text-ink-3 underline decoration-line-strong underline-offset-2 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
+/**
+ * 审批深链页（`/approvals`）。
+ *
+ * 待批的用 `DecisionBody`——与浮层队列、dock、任务详情页是同一个决策对象，
+ * 早就该是同一副样子；这里曾经自绘一套卡片，结果同一个审批在不同页面长得不一样。
+ * 已处理的降为只读行：它的用途是回看“当时批了什么”，不再需要动作。
+ */
 export function ApprovalsView(props: ApprovalsViewProps) {
+  const pending = (): ApprovalRow[] => props.approvals.filter((item) => item.status === 'pending')
+  const settled = (): ApprovalRow[] => props.approvals.filter((item) => item.status !== 'pending')
+
   return (
     <section class={page} aria-label={props.t('approvals')}>
-      <div class={sectionHeading}>
-        <span>{props.t('pendingItems')}</span>
-      </div>
       <Show
-        when={props.approvals.length > 0}
+        when={pending().length > 0 || settled().length > 0}
         fallback={<p class={emptyState}>{props.t('noApprovals')}</p>}
       >
-        <div class={list}>
-          <For each={props.approvals}>
-            {(approval) => (
-              <article class={`${cardBase} ${cardTone(approval.riskLevel)}`}>
-                <div class="min-w-0">
-                  <div class={titleRow}>
-                    <h2 class={title}>{approval.reason}</h2>
+        <Show when={pending().length > 0}>
+          <div class={sectionHeading}>
+            <h2 class="m-0 text-meta font-semibold text-ink">{props.t('pendingItems')}</h2>
+            <span class="text-badge tabular-nums text-ink-3">{pending().length}</span>
+          </div>
+          <div class={list}>
+            <For each={pending()}>
+              {(approval) => (
+                <article class={panel}>
+                  <DecisionBody
+                    item={approvalToAttention(approval)}
+                    t={props.t}
+                    onApprove={props.onApprove}
+                    onReject={props.onReject}
+                  />
+                </article>
+              )}
+            </For>
+          </div>
+        </Show>
+
+        <Show when={settled().length > 0}>
+          <div class="mt-6">
+            <div class={sectionHeading}>
+              <h2 class="m-0 text-meta font-semibold text-ink">{props.t('recentlyResolved')}</h2>
+            </div>
+            <ul class={`${settledList} m-0 list-none p-0`}>
+              <For each={settled()}>
+                {(approval) => (
+                  <li class={settledRow}>
+                    <span class={settledReason}>{approval.reason}</span>
                     <StatusBadge
                       status={approval.status}
                       label={props.t(statusKey(approval.status))}
                     />
-                  </div>
-                  <p class={resource}>{approval.resource}</p>
-                  <div class={meta}>
-                    <a class={metaLink} href={`/tasks/${approval.taskId}`} title={approval.taskId}>
+                    <a class={taskLink} href={`/tasks/${approval.taskId}`}>
                       {shortenId(approval.taskId)}
                     </a>
-                    <span aria-hidden="true">·</span>
-                    <span>
-                      {props.t('risk')} · <span class="capitalize">{approval.riskLevel}</span>
-                    </span>
-                    <Show when={approval.executionId !== ''}>
-                      <span aria-hidden="true">·</span>
-                      <span class={monoId}>{shortenId(approval.executionId)}</span>
-                    </Show>
-                  </div>
-                </div>
-                <Show when={approval.status === 'pending'}>
-                  <div class={actions}>
-                    <Button
-                      variant="primary"
-                      size="md"
-                      onClick={() => props.onApprove(approval.id)}
-                    >
-                      {props.t('approve')}
-                    </Button>
-                    <Button variant="ghost" size="md" onClick={() => props.onReject(approval.id)}>
-                      {props.t('reject')}
-                    </Button>
-                  </div>
-                </Show>
-              </article>
-            )}
-          </For>
-        </div>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </div>
+        </Show>
       </Show>
     </section>
   )

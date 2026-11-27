@@ -37,8 +37,10 @@ const apiOptions = [
 /** 空字符串 = 不写 defaultThinkingLevel，沿用模型默认。 */
 const thinkingOptions = ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
+/* 与全站同一条量度：720 居中。设置页是表单，所以保留「标签列 + 控件列」的两栏，
+   但标签列收窄到 140——980px 的两栏会让控件贴着左边缘、右边留一大片空白。 */
 const section =
-  'grid grid-cols-[minmax(0,300px)_minmax(0,1fr)] gap-6 border-b border-line py-[22px] max-[1100px]:grid-cols-[minmax(0,240px)_minmax(0,1fr)] max-[860px]:grid-cols-1 max-[860px]:gap-2.5'
+  'grid grid-cols-[140px_minmax(0,1fr)] gap-x-6 gap-y-2.5 border-b border-line py-[22px] max-[860px]:grid-cols-1 max-[860px]:gap-y-2'
 
 /* No preflight, so the fieldset's UA border/margin/padding must be reset here. */
 const segmented =
@@ -251,7 +253,7 @@ export function SettingsView(props: SettingsViewProps) {
     }))
 
   return (
-    <div class="max-w-[980px] pb-8">
+    <div class="mx-auto w-full max-w-[720px] pb-8">
       <section class={section}>
         <div>
           <div class="flex items-center gap-2">

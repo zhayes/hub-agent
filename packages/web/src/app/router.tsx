@@ -1,5 +1,5 @@
 import { createRouter, type RouteDefinition } from '@solidjs/router'
-import { DevUiView } from '../features/dev/DevUiView'
+import { DevUiView } from '../dev/DevUiView'
 import { AgentsRoute } from '../routes/AgentsRoute'
 import { ApprovalsRoute } from '../routes/ApprovalsRoute'
 import { ChatRoute } from '../routes/ChatRoute'

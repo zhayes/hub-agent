@@ -1,7 +1,7 @@
 # HubAgent Console 交互重构计划
 
-- **状态：** P2（壳层 + Graphite 令牌）、P3（活数据）、P4（浮层队列）、P5（运行详情）、P6（对话降噪）、P7（Agent 资产）已落地，P8（五项能力迁移）部分落地（2026-11-27）；P8 剩余项 / P9 待做
-- **日期：** 2026-11-27
+- **状态：** P2（壳层 + Graphite 令牌）、P3（活数据）、P4（浮层队列）、P5（运行详情）、P6（对话降噪）、P7（Agent 资产）、P9（收口）已落地；P8（五项能力迁移）部分落地（2026-11-28，剩 `auto-merge` 与契约级预算）
+- **日期：** 2026-11-28
 - **范围：** `packages/web`（信息架构、导航、页面交互、注意力模型）+ 控制台必须接管的 CLI 能力
 - **不在范围：** 后端状态机与契约、A2A/网络页（尚未实现）
 - **决策依据：** [ADR 0029](adr/0029-attention-first-console.md)（结论与备选方案都在那里，本文不重复）
@@ -732,13 +732,13 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | **P6 对话降噪** ✅ | 已完成：`verdict`/`stopReason` 映射成中文（`runtime/labels.ts`）；过程流去框去横线、箭头在左、悬停图标换箭头、三态默认；dock 上移到输入框上方（卡片 + Agent 行 + 审批 + 剩余数）；会话列表默认收起（`⌘K` 可达）；上下文栏仅在有关联任务时占位 | chat e2e 全绿；591 单测；真实 daemon 上跑一轮多 Agent 任务（**尚未做**） | 3.5d |
 | **P7 Agent 资产** ✅ | 已完成：`AgentsPage` 把两页合成一个目的地（分段控件从顶栏移到页面内，窄屏也能切）；接入行改用 §3.8.5 行规格；两处空态都给可执行的下一步（链接 + CLI 命令）；unsupported 卡中文化且补齐诊断；顺手修掉 HUD 窄屏叠在一块（`left-1/2` shrink-to-fit 把可用宽砍半、`w-72` 卡片溢出） | 零 Agent 路径走通（e2e）；3D unsupported 卡完整（明暗 × 1440/390）；320px 无横向溢出 | 1d |
 | **P8 五项能力迁移** 〰️ | **部分完成**（见 §6.1）：验收命令 / 可用 Agent（扇出范围）/ 预算上限 进会话运行设置；后台执行已成立（`void this.run` 在 daemon 侧跑）并写进 UI；交付策略落成任务页的一次显式「导出补丁」 | 已验：三项设置端到端（单测 16 + e2e 2）；后台执行与补丁导出有 e2e。**未达门禁**：`auto-merge` 与契约级预算（`maxTokens`/`maxCostUsd`）仍未执行 → **`ha run` 不得关闭** | 2–3d |
-| **P9 收口** | UI-SPEC §9 勾选清零；视觉回归覆盖全部目的地；`pnpm fonts:write`；文档同步 | `pnpm verify` + 视觉回归 + tells 复跑 | 1d |
+| **P9 收口** ✅ | 已完成：UI-SPEC §9 十项全部达成（对比度由 `pnpm contrast` 守，修掉 `success` 4.47 与 `line-control` 1.8 两处真问题）；视觉回归覆盖 7 个目的地 × 3 宽度 × 2 主题（`/agents` 3D 只跑 axe）；10k 历史加渲染窗口（本机实测首屏 36.4s → 1.3s、最坏长任务 17.6s → 393ms）；画廊移出 `features/` 并加门面守卫测试；设置页对齐 720 量度；修掉任务详情页两个 `h1` | `pnpm verify` + 视觉回归 + `fonts:write` 全绿 | 1d |
 
 合计约 **13–14 人日**（P5 渲染评审反复可能 +1–2 天）。
 
 **顺序建议：** P0 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9。P8 必须在"关闭 CLI 创建"之前完成；在此之前 `ha run` 保持能跑（带 `--allow-task-create` 开关）。
 
-### 6.1 落地记录（P2/P3/P4/P5/P6/P7/P8，2026-11-27）
+### 6.1 落地记录（P2/P3/P4/P5/P6/P7/P8/P9，2026-11-28）
 
 做了什么、没做什么，按可核对的口径写：
 
@@ -757,7 +757,9 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | 交付（P8） | `POST /api/v1/tasks/:id/deliver` + 任务页「导出补丁」：`branch-only` 只回报分支；`patch-export` 写 `~/.hubagent/artifacts/<taskId>.patch` | **`auto-merge` 直接拒绝**：PRD 要求项目配置 `targetRef` + `autoMerge`，项目记录里还没有这两个字段；没有 `delivery` 表级记录（只有返回值与页面上的路径）|
 | 后台执行（P8） | 核实已成立：`ChatService.start` 是 `void this.run(...)`，运行在 daemon 侧，关页面不中断；面板里直说 | 没有单独开关：控制台里它本来就是后台的，不需要一个“假开关” |
 | Agent 分段（P7 的一半） | app bar 里 `/agents` 与 `/registry` 合成一个目的地：现场 / 接入分段，导航只留一个“Agent” | 两个页面本体未合并，仍是两条路由；分段控件窄屏隐藏（320px 装不下），接入从现场空态链接可达 |
-| 验收 | `pnpm typecheck` / `lint`（零 error）/ `test:unit` 624 例 / `test:e2e` 23 例 / `build:web` / `arch` 全绿；四态与 Agent 页五态截图（明暗 × 1440/390）+ 运行设置弹层截图对照 | **没在真实 daemon + 真实 Agent 上跑过**（仍是最大未验项）；视觉基线未重做 |
+| 验收 | `pnpm typecheck` / `lint`（零 error）/ `test:unit` / `test:e2e` / `build:web` / `arch` / `contrast` / 视觉 + axe **全绿**（用例数以 `pnpm verify` 实际输出为准）；四态与 Agent 页五态截图（明暗 × 1440/390）+ 运行设置弹层截图对照 | **没在真实 daemon + 真实 Agent 上跑过**（仍是最大未验项）；视觉基线与覆盖面已在 P9 补齐（见下条） |
+| 收口（P9） | `scripts/contrast.mjs` 进 `pnpm verify`，把「对比度脚本可测」从口号变成门禁；`packages/web/test/{ui-boundary,spacing-scale}.test.ts` 两条守卫（门面/间距刻度）；`tests/e2e/transcript-window.spec.ts` 守住 10k 历史的 DOM 行数与长任务；`ChatView` 加 200 回合渲染窗口（多出的仍在内存，一键展开）；画廊从 `features/dev/` 移到 `src/dev/`；设置页从 `max-w-[980px]` 两栏收到 `mx-auto max-w-[720px]` + `[140px,1fr]`；任务详情页顶栏页名降为 `span`（消除两个 `h1`） | 间距没有真的回到纯 4px 网格：已批准稿的 18/14/22/9 保留，改成「4px + 审核例外 + 单测看守」（见决策 AD）；`line-control` 提亮后全局边框变重一档，已确认可接受 |
+| 审批页（P9 收尾） | 待批项改用 `DecisionBody`（与浮层/dock 同源），已处理降为只读行；页宽 880 → 720 | 待批多条时会有多个 primary 按钮（旧版也如此，未新增问题）；没有分页，待批很多时是一长列 |
 
 ### 6.2 视觉稿的优先级（哪块以哪份稿为准）
 
@@ -787,7 +789,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 
 **性能备注：** 全量 e2e 在本机从 25s 变到 1.5–2 分钟，经 stash 对照确认是环境（Vite 冷启动 / 机器负载）而非本轮改动；`mask-image` 经同用例两次对照（11.6–15.6s vs 13.8–13.9s）不构成回退，保留。
 
-### 6.3 各页对齐现状（截至 2026-11-27）
+### 6.3 各页对齐现状（截至 2026-11-28）
 
 | 页面 | 对齐哪份稿 | 现状 | 还差什么 |
 |---|---|---|---|
@@ -797,13 +799,13 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | 决策体 / 浮层队列 | v9 + v7 | ✅ 已对齐（动作标题 / 过期 / 三问） | — |
 | **任务详情 `/tasks/:id`** | **t1 稿**（本仓自出，数值已收进 §3.8.12） | ✅ 已对齐：判决条 + 竖向证据脊柱（计划 → 需要你 → 执行 → 验收 → 记录）；diff 与检查表一级可见；失败节点就地给动作 | 重试/取消运行需后端端点；完整审计时间线需按任务查事件 |
 | **任务列表 `/tasks`** | §3.8.12 行规格 | ✅ 已对齐：降为深链入口（不再有左「队列」列），行只写能核对的事实 | 行里没有 Agent 数 / diffstat（列表接口未给） |
-| **审批页 `/approvals`** | §4.2 浮层是主路径 | ⬜ 保留旧卡片样式 | 要么改成只读回看（作为深链），要么直接复用 `DecisionBody` |
+| **审批页 `/approvals`** | §4.2 浮层是主路径 + v9 决策体 | ✅ 已对齐：待批项复用 `DecisionBody`（与浮层/dock/任务详情同一个决策对象同一种长相）；已处理降为只读行（回看用，不再给动作）；页宽收到 720 | 多个待批项时一屏会同时出现多个 primary 按钮（旧版也如此）；待批数 >3 时是否分页留待实用后判 |
 | **Agent 现场 `/agents`** | PLAN-AGENT-OFFICE + §3.8.13 | ✅ 已对齐：页内分段、`h-full` 面板（不再靠 `calc(100dvh - 10.5rem)`）、HUD 按 861px 分档 | 镜头预设在手机上隐藏，桌面以外的 HUD 布局仍需 office 模块单独一轮 |
 | **Agent 接入 `/registry`** | §3.8.13 | ✅ 已对齐：720px 列、行规格、状态点、零 Agent 给 CLI 命令；修掉 `bg-surface-2` 这个不存在的令牌 | 接入行没有“最近一次探测时间”（行里只写扫描期的事实） |
-| **设置 `/settings`** | v2 | 〰️ 用新令牌，但布局是旧的 | P9 收口时统一行距/量度 |
-| 视觉基线 `tests/visual` | — | ⬜ 仍是 Warm Ink 基线 | P9 重做 |
+| **设置 `/settings`** | v2 + §4 量度 | ✅ 已对齐：`mx-auto max-w-[720px]` + `[140px,1fr]` 两栏（标签列收窄，控件不再贴左缘、右侧不留大片空白） | — |
+| 视觉基线 `tests/visual` | — | ✅ 已重做：7 个目的地像素（42 张）+ 8 个目的地 axe；`/agents` 只跑 axe | 基线不入库，跨平台需本地重建 |
 
-> 结论：**对话页、壳层、任务页与 Agent 页已全部对齐**；剩下的是设置页与视觉基线（P9）。
+> 结论：**全部目的地（壳层 / 对话 / 任务 / 审批 / Agent / 设置）已对齐设计稿**；视觉回归与 axe 覆盖到每个目的地。P8 的两项能力门禁仍未关闭（见 §6 与 ADR 0029 §2.4）。
 
 ---
 
@@ -825,9 +827,12 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 |---|---|---|
 | 类型/构建 | `pnpm typecheck`、`pnpm build:web` | 全量 |
 | 架构 | `pnpm arch`（R1–R9） | 新增目录不得越过依赖方向 |
-| 门面 | `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直连 | 新增文件 |
-| 可访问性 | `pnpm test:visual`（axe） | 每个目的地 |
-| 渲染 | `observe.mjs` 截图 + `tells`，1440/768/390 × 明暗；设计稿走 `docs/design/comps.spec.ts`（含“字面量标记”自检） | 改动页 |
+| 门面 | `packages/web/test/ui-boundary.test.ts`（单测） | `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直连；只有 `components/ui/**` 与 `src/dev/` 画廊例外 |
+| 对比度 | `pnpm contrast`（`scripts/contrast.mjs`，已进 `pnpm verify`） | 46 组文字 ≥4.5、8 组控件边界 ≥3，明暗各算一遍 |
+| 量度 | `packages/web/test/spacing-scale.test.ts`（单测） | 间距只允许 4px 网格 + 审核例外 |
+| 性能 | `tests/e2e/transcript-window.spec.ts` | 10k 历史：DOM 行数不随历史增长、无 >1.5s 长任务 |
+| 可访问性 | `pnpm test:visual`（axe，`playwright.visual.config.ts`） | 8 个目的地（含 `/agents` 3D 现场） |
+| 渲染 | `pnpm test:visual`：1440/768/390 × 明暗像素比对（`VISUAL_SNAPSHOTS=1` 才比，基线不入库）+ `dev-ui.spec.ts` 组件画廊；设计稿走 `docs/design/comps.spec.ts` | 7 个目的地（`/agents` 用 `?unsupported=1` 的确定性阻断态） |
 | 行为 | `pnpm test:e2e` | 路由、深链、筛选、审批流 |
 | 文案 | zh/en 同步；`pnpm fonts:write` 重跑，单测钉住 zh ⊆ cjk-chars.txt | 新增文案 |
 | 规范 | UI-SPEC §9 清单 | 收口时逐条打勾 |
@@ -885,6 +890,10 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | AA | 现场/接入 的分段放顶栏还是页面里 | **已定（P7）**：页面里。顶栏 ≤560px 会藏掉分段，那时手机上就无法切换；页面内分段任何宽度都在，且与顶栏页签同一套样式。代价是顶栏只剩页签（不再表达分段），页名对该页退回 `visually-hidden` |
 | AB | 验收命令 / 预算 / 可用 Agent 存哪里 | **已定（P8）**：会话级一列 JSON。它们永远是整份读写，没有按字段查询的需求；拆成四列只会让加一个设置就要一次迁移。坏值由 `parseRunSettings` 退到默认值 |
 | AC | 交付方式是会话设置还是页面动作 | **已定（P8）**：页面动作。PRD §6.12.4 的第一优先级就是「用户单次显式指定」；做成会话默认值反而要回答“哪一次运行用了哪种模式”，而没有交付记录表时无法回答 |
+| AD | 间距刻度是「严格 4px」还是「4px + 审核例外」 | **已定（P9）**：4px 网格 + 一组明确列出的例外（2/3/5/7 光学校正、9/14/18/22 来自已批准稿、26 过程流缩进），由 `spacing-scale.test.ts` 看守新增值。理由：为对齐清单去改已评审的视觉稿是本末倒置，而“靠人记例外”又必然漂移——把当前这套固化、让新增值变红，才是可守的 |
+| AE | 长历史用分页还是渲染窗口 | **已定（P9）**：两者都要。分页（100 条/页）解决“传输与首屏请求”，渲染窗口（200 回合 + `content-visibility`）解决“已拉下来的长度无上限”。只有分页时 1000 条一次建 1000 个行组件（实测最长任务 ~1s）；只加 `content-visibility` 时首屏仍 18.7s |
+| AF | 3D 舞台是否参与像素回归 | **已定（P9）**：不参与。WebGL 场景非确定（光照/时序/GPU 差异），像素比对只会制造假失败；`/agents` 只跑 axe，像素用 `?unsupported=1` 的确定性阻断态 |
+| AG | 审批页是复用决策体还是做成只读回看 | **已定（P9）**：待批项复用 `DecisionBody`，已处理项只读。同一个审批对象在浮层、dock、任务详情、审批页必须长得一样，这是同一份语义的四个容器（决策 K）；只读回看只适用于**已经处理完**的那些 |
 
 ---
 
@@ -898,8 +907,8 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | [PLAN.md](PLAN.md) | ✅ 已改 | M9 范围收窄；`run` 按诊断入口阅读；原则 P3 改为「入口最后关闭」；M11 指向本计划 |
 | [README.md](../README.md) | ✅ 已改 | 「跑一个任务」改为控制台入口；命令表标注 `ha run` 为诊断入口 |
 | [docs/README.md](README.md) | ✅ 已登记 | 本文件进索引 |
-| [UI-SPEC.md](UI-SPEC.md) | ✅ 已改（§2） | 色板换 Graphite（ADR 0030）；状态语义改“运行中不用琥珀”；动效令牌入表 |
-| [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md) | ⬜ 待 P2 | 指向本计划，避免两份计划并行 |
-| [PLAN-CHAT-UX.md](PLAN-CHAT-UX.md) | ⬜ 待 P6 | 对话页布局变化（抽屉化、上下文条件化） |
+| [UI-SPEC.md](UI-SPEC.md) | ✅ 已改（§2/§4/§9） | 色板换 Graphite（ADR 0030）；状态语义改“运行中不用琥珀”；动效令牌入表；§4 量度/圆角改 6/12/16 + 小件例外；§9 验收清单重写为可复跑的证据表 |
+| [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md) | ✅ 已标注被取代（2026-11-27） | 只作历史记录，导航与页面结构以 ADR 0029 + 本计划为准 |
+| [PLAN-CHAT-UX.md](PLAN-CHAT-UX.md) | ✅ 已标注被 P6 取代 | 对话页布局改为单栏 + dock + 无框过程流；本文只留“状态保持/消息层级” |
 | [adr/0030](adr/0030-graphite-visual-layer.md) | ✅ 已新增 | Graphite 令牌、颜色语义收窄、被否方案、复审触发 |
-| [AGENTS.md](../AGENTS.md) | ⬜ 待 P7 | 目录地图补 `features/inbox`（若新建）；标注 `features/network` 未实现 |
+| [AGENTS.md](../AGENTS.md) | ✅ 已改（P9） | web 目录地图补 `app/`、`dev/`、`styles/`，features 改成实际七个，`components/ui` 标注门面约束 |

@@ -25,7 +25,9 @@
 
   --hx-line-subtle: light-dark(#e4e7eb, #22262b);
   --hx-line-default: light-dark(#cfd5dc, #2e343b);
-  --hx-line-control: light-dark(#b3bac3, #3a424a);
+  /* 控件的边界必须能被看见：UI-SPEC §9 要求 ≥3:1。原值 #b3bac3 / #3a424a
+     在画布上只有 1.8–1.9，输入框的边就“只剩一个隐约的框”。 */
+  --hx-line-control: light-dark(#838b95, #5f6873);
 
   /* Elevation. 暗色用顶部高光代替投影，否则近黑底上的黑影读起来是平的。 */
   --hx-shadow-card:
@@ -38,8 +40,9 @@
   --hx-accent-hover: light-dark(#6d4700, #ffbe4d);
   --hx-accent-soft: light-dark(#fdf3e0, #2a2010);
 
-  /* 判决：pass 绿 / fail 红。除这两处与 signal 之外不出现彩色。 */
-  --hx-success: light-dark(#1a7f37, #3fb950);
+  /* 判决：pass 绿 / fail 红。除这两处与 signal 之外不出现彩色。
+     pass 亮色取 #187531：原 #1a7f37 在 success-soft 上只有 4.47，差 0.03 也不降。 */
+  --hx-success: light-dark(#187531, #3fb950);
   --hx-success-soft: light-dark(#e8f3ec, #10221a);
   --hx-warning: light-dark(#8a5a00, #f5a524);
   --hx-warning-soft: light-dark(#fdf3e0, #2a2010);

@@ -231,6 +231,67 @@ async function mockApi(page: Page): Promise<void> {
         },
       })
     if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/agents/presence')
+      return route.fulfill({
+        json: {
+          ok: true,
+          asOf: '2026-01-01T12:00:00Z',
+          agents: [
+            {
+              id: 'a1',
+              name: 'Claude Code',
+              status: 'online',
+              presence: 'busy',
+              networkMode: 'agent-managed',
+              allowedWrite: [],
+              allowedDomains: [],
+              capabilities: ['fs'],
+              parallelCount: 0,
+              pendingApprovals: [],
+              activity: {
+                executionId: 'exe1',
+                executionStatus: 'running',
+                taskId: 'task1',
+                taskTitle: 'Fix the login redirect loop',
+                subtaskId: 's2',
+                subtaskTitle: 'Move the cookie read after jar sync',
+                attempt: 2,
+                waitingOn: null,
+              },
+            },
+          ],
+        },
+      })
+    if (path === '/api/v1/agents/scan')
+      return route.fulfill({
+        json: {
+          ok: true,
+          version: 1,
+          scannedAt: '2026-01-01T11:00:00Z',
+          problems: [],
+          agents: [
+            {
+              catalogId: 'dsh',
+              label: 'DeepSeek Harness',
+              name: 'dsh',
+              variants: [
+                {
+                  id: 'desktop',
+                  label: 'Desktop',
+                  command: 'ELECTRON_RUN_AS_NODE=1 "/Applications/DeepSeek Harness.app" --profile acp',
+                  source: '/Applications/DeepSeek Harness.app',
+                  allowedWrite: [],
+                  missingRequires: [],
+                  adoptable: true,
+                },
+              ],
+              chosenVariant: 'desktop',
+              registered: true,
+              agentStatus: 'online',
+            },
+          ],
+        },
+      })
     if (path === '/api/v1/approvals')
       return route.fulfill({ json: { ok: true, approvals: [approval] } })
     return route.fulfill({ json: { ok: true } })
@@ -246,8 +307,16 @@ const cases = [
 const pages = [
   { name: 'chat', path: '/chat/t1' },
   { name: 'tasks', path: '/tasks/task1' },
+  { name: 'task-list', path: '/tasks' },
+  { name: 'approvals', path: '/approvals' },
   { name: 'settings', path: '/settings' },
+  { name: 'registry', path: '/registry' },
+  /* 现场是 WebGL 画布，像素比对不稳；截图用阻断态（确定性 DOM），3D 现场只做 axe。 */
+  { name: 'agents-unsupported', path: '/agents?unsupported=1' },
 ] as const
+
+/** 只做 axe、不做像素的目的地（3D 画布）。 */
+const axeOnly = [{ name: 'agents', path: '/agents' }] as const
 
 const themes = ['light', 'dark'] as const
 
@@ -279,7 +348,7 @@ for (const theme of themes) {
   }
 }
 
-for (const target of pages) {
+for (const target of [...pages, ...axeOnly]) {
   test(`${target.name} has no critical or serious axe violations`, async ({ page }) => {
     await page.clock.setFixedTime(FIXED_NOW)
     await page.addInitScript(() => {

@@ -1,10 +1,10 @@
 # HubAgent Console UI 规范（v1）
 
-- **状态：** 草案（P0 输入，随 P1 落地更新）
-- **日期：** 2026-11-25
+- **状态：** 生效（P2–P9 已落地，2026-11-28）
+- **日期：** 2026-11-28
 - **适用：** `packages/web`
-- **决策来源：** ADR 0019、ADR 0016、ADR 0004
-- **实现状态：** 未开始；本文件先于代码存在，P0 起作为验收口径
+- **决策来源：** ADR 0019、ADR 0030、ADR 0029、ADR 0016、ADR 0004
+- **实现状态：** 令牌、基元、壳层与六个目的地均已实现（进度见 [PLAN-CONSOLE-INTERACTION.md](PLAN-CONSOLE-INTERACTION.md) §6）；§9 是当前验收口径
 
 ---
 
@@ -29,26 +29,30 @@
 
 | token | Light | Dark | 用途 | 实测对比 |
 |---|---|---|---|---|
-| `--bg-canvas` | `#F6F7F9` | `#0B0C0E` | 页面底 | — |
-| `--bg-surface` | `#FFFFFF` | `#111316` | 面板、对话区、dock 卡片 | — |
+| `--bg-canvas` | `#F6F7F9` | `#0B0C0E` | 页面底、**对话区**、命令块 | — |
+| `--bg-surface` | `#FFFFFF` | `#111316` | dock 卡片、弹层、面板 | — |
+| `--bg-raised` | `#FFFFFF` | `#171A1E` | 输入壳、用户气泡、激活页签 | — |
 | `--bg-subtle` | `#F1F3F6` | `#171A1E` | 证据块、代码、命令 | — |
 | `--bg-hover` | `#ECEFF3` | `#1C2025` | hover 填充 | — |
 | `--bg-active` | `#E5E9EE` | `#22272D` | 选中填充 | — |
 | `--fg-default` | `#12151A` | `#E6E8EB` | 正文、标题 | 17.1 / 15.9 |
 | `--fg-muted` | `#545B65` | `#A8AEB6` | 次级文字 | 6.40 / 8.75 |
 | `--fg-subtle` | `#636B78` | `#7C848E` | 元信息（最低档） | 5.02 / 5.17 |
-| `--line-subtle` | `#E4E7EB` | `#22262B` | 面板边界、表格行线 | ≈1.2 |
-| `--line-default` | `#CFD5DC` | `#2E343B` | 分组线 | ≈1.4 |
-| `--line-control` | `#B3BAC3` | `#3A424A` | 输入框/控件边界 | ≥3:1 |
+| `--line-subtle` | `#E4E7EB` | `#22262B` | 面板边界、表格行线 | ≈1.2（装饰） |
+| `--line-default` | `#CFD5DC` | `#2E343B` | 分组线、卡片边 | ≈1.4（装饰） |
+| `--line-control` | `#838B95` | `#5F6873` | 输入框/控件边界 | 3.22–3.46 |
 | `--accent`（signal） | `#8A5A00` | `#F5A524` | **只表示「需要你」** | 5.53 / 9.59 |
 | `--accent-hover` | `#6D4700` | `#FFBE4D` | signal hover | — |
 | `--accent-soft` | `#FDF3E0` | `#2A2010` | 「等你」容器浅底 | — |
-| `--success` / `--success-soft` | `#1A7F37` / `#E8F3EC` | `#3FB950` / `#10221A` | **判决通过**、完成 | ≥4.5 |
+| `--success` / `--success-soft` | `#187531` / `#E8F3EC` | `#3FB950` / `#10221A` | **判决通过**、完成 | ≥5.09 |
 | `--warning` / `--warning-soft` | `#8A5A00` / `#FDF3E0` | `#F5A524` / `#2A2010` | 待你处理（= signal） | 5.53 / 9.59 |
-| `--danger` / `--danger-soft` | `#B3261E` / `#FBECEB` | `#F85149` / `#2A1414` | **判决未通过**、拒绝 | ≥4.5 |
-| `--ring` | `#8A5A00` | `#F5A524` | 焦点环（与 signal 同源） | ≥3:1 |
+| `--danger` / `--danger-soft` | `#B3261E` / `#FBECEB` | `#F85149` / `#2A1414` | **判决未通过**、拒绝 | ≥5.18 |
+| `--ring` | `#8A5A00` | `#F5A524` | 焦点环（与 signal 同源） | 5.53–5.93 / 9.12–9.59 |
 
-对比度为 2026-11-27 用 WCAG 公式实测（`contrast.py`，见 PLAN-CONSOLE-INTERACTION §3.3）。
+对比度**由脚本守**，不靠手记：`pnpm contrast`（`scripts/contrast.mjs`）读 `tokens.css` 的
+`light-dark(a, b)`，对全部文字/边界配对按明暗两套算（当前 46 组文字 ≥4.5、8 组控制边界 ≥3），
+不过线就退出非 0，已接进 `pnpm verify`。P9 就是靠它拓到两处真问题：`success` 在 `success-soft` 上只有 4.47、
+`line-control` 只有 1.8（两者均已重取）。
 
 **令牌不只颜色：动效也进令牌层**（`--hx-ease-out: cubic-bezier(.23,1,.32,1)`、`--hx-ease-drawer`、`--hx-dur-{fast,base,enter,exit}`）。内置 `ease` 太软，撑不起“有意为之”的观感。
 
@@ -59,7 +63,8 @@
 - **边框三档：**
   - 面板/表格行：`--line-subtle`（1.2:1，靠 tone 分离即可）；
   - 分组：`--line-default`；
-  - 控件：`--line-control`（≥3:1，WCAG 1.4.11）。
+  - 控件：`--line-control`（3.22–3.46，WCAG 1.4.11）。
+  - **四层背景不得混用**：画布/卡片/抬升面/次级块在两种主题下必须是四个可区分的值（细则见 PLAN-CONSOLE-INTERACTION §3.8.1）。
 - **焦点：** `outline: 2px solid var(--ring); outline-offset: 2px`；输入框可用 `offset: -1px`。
 - **禁止：** 渐变、发光、玻璃、彩色图标底、彩色 KPI 卡。
 
@@ -124,14 +129,18 @@
 
 ## 4. 空间、圆角、层级
 
-- **间距阶梯：** 4 / 8 / 12 / 16 / 24 / 32 / 48。除此之外的数值需要理由。
-- **页面留白：** 桌面 24px，≤860px 16px；面板内 16px；表格行 44px；列表行 40px。
-- **圆角（3 种）：** `--radius-control: 6px`、`--radius-panel: 10px`、`--radius-pill: 999px`。
+- **间距：** 4px 网格为主（4 / 8 / 12 / 16 / 20 / 24 / 32 / 48），外加一组**已审核的**例外：
+  2 / 3 / 5 / 7（控件内光学校正）、9 / 14 / 18 / 22（来自 v9 / v2 已批准视觉稿）、26（过程流标识位缩进）。
+  由单测 `spacing-scale.test.ts` 看守：**新增**的任意值直接变红，避免量度慢慢漂移。
+- **内容量度：** 720px 居中（对话/正文/dock/输入框/任务页/Agent 页/设置页共用）。
+- **页面留白：** 桌面 24px，≤860px 16px；面板内 16px；列表行 40–44px。
+- **圆角（三档 + 全圆）：** `--radius-control: 6px`、`--radius-panel: 12px`、`--radius-shell: 16px`；状态点/胶囊用 `rounded-full`。
+  - 两个**小件例外**：行内代码 `5px`、代码块 `8px`（等宽字小件的光学校正，跟着字号与行高走，不按面板档走）。
 - **抬升（仅浮层）：**
-  - popover：`0 8px 24px rgb(0 0 0 / 8%)` + 1px 线；
-  - dialog：`0 24px 64px rgb(0 0 0 / 18%)` + 1px 线。
+  - popover：`--shadow-popover` + 1px 线；
+  - dialog：`--shadow-dialog` + 1px 线。
   - 静置卡片与面板**不加阴影**。
-- **外壳：** rail 56px（纯图标，保持现状）、app bar 48px、screen head 24px/20px、断点 1100 / 860 / 560。
+- **外壳：** app bar 50px（≤860px 48px）+ 移动端底部条 52px；**无 rail**（ADR 0029 §2.2）；断点 1100 / 860 / 560。
 
 ---
 
@@ -139,14 +148,14 @@
 
 | 组件 | 规格 | 状态 | 备注 |
 |---|---|---|---|
-| Button | 32px 高，6px 圆角，13/500；primary/secondary/ghost/danger | hover / focus / disabled / loading | 一屏一个 primary |
-| IconButton | 32×32；rail 40×40 | hover / active / focus | 必须有 `aria-label` |
+| Button | 32px 高，6px 圆角，13/500；primary/secondary/ghost/danger | hover / focus / disabled / loading | 一屏一个 primary；**例外**：审批页这种“多个并列的独立决策”清单，每个待批项各有一个（它们不属于同一个操作） |
+| IconButton | 32×32 | hover / active / focus | 必须有 `aria-label` |
 | Field / Input | 36px 高，1px `--line-control`，6px 圆角 | focus / invalid / disabled / hint | label 在上，不用 placeholder 顶替；控件本身用 `TextInput` |
 | Select | 36px，原生 `<select>` + 自绘 chevron（`SelectInput`，`appearance-none pr-9`） | 同 Field | 复杂筛选才用 `@ui-sdk/select` |
-| Panel | `--bg-surface`，1px `--line-subtle`，10px 圆角，16px 内边距 | — | 不加阴影 |
+| Panel | `--bg-surface`，1px `--line-subtle`，12px 圆角（`--radius-panel`），16px 内边距 | — | 不加阴影 |
 | StatusDot / StatusBadge | 7px 点；胶囊 20px 高、11px 字 | — | 见 §2.3 |
 | Segmented / Tabs | 30px 高，track `--bg-subtle`，active `--bg-surface` | 键盘左右 | Run/Ask、主题、语言 |
-| Tooltip | 浮层 1 行，12px；`@ui-sdk/tooltip` | hover / focus | rail 图标必须有 |
+| Tooltip | 浮层 1 行，12px；`@ui-sdk/tooltip` | hover / focus | 纯图标按钮必须有 |
 | Dialog | 原生 `<dialog>` + `showModal()`；宽 400–520 | open / closing | 平台给焦点陷阱与 Esc；`:backdrop` 在 tailwind.css |
 | Toast | `@ui-sdk/toast`；4s，hover 暂停 | success / error | 不做全局横幅 |
 | CommandPalette | `@ui-sdk/command`；Cmd+K | 空查询 / 无结果 | 跳任务/线程/Agent |
@@ -154,14 +163,14 @@
 | Skeleton | 与最终尺寸同高的灰条，无 shimmer | — | 不用渐变 |
 | ThreadRow | 40px+，标题 13/500，预览 12，meta 13 | hover / active / running | dot 与首行对齐 |
 | TaskRow | 两行；标题 13/500；meta 13 | hover / selected | 不显示完整 ID |
-| RunSpine | 计划→执行→验收→决策，4 段 | done / active / failed / todo | 产品签名元素 |
+| EvidenceSpine | 竖向：计划 → 需要你 → 执行 → 验收 → 记录（`features/tasks/EvidenceNode.tsx`） | done / active / failed / todo | 产品签名元素（P5 取代旧的 RunSpine 横排四段） |
 | ApprovalCard | 标题 15/600，资源 mono 12，风险 13 | pending / resolved | 主操作 Approve 实心 |
 | ThinkingTrace | 折叠面板，步骤/推理/搜索/编码 | collapsed / streaming | 数据来自真实事件 |
 | ToolChips | 20px 高 chips，最多 6 + `+n` | hover | 命令、attempt、exit |
 | StreamingText | 末尾 8px 淡入 + 光标 | streaming / done | 不做逐字假流 |
 | PromptBar | 54px 起；Run/Ask；`@`、`/` | focus / busy | IME 安全 |
 | CodeBlock / Diff | 11.5px mono，行号，unified diff | — | 替换现有 `<pre>` |
-| ContextCards | 证据/验收/决策卡片 | empty / filled | 右侧 Context 栏 |
+| ContextCards | 证据/验收/决策卡片（`ChatView` 的 `<aside>`） | empty / filled | 右侧 Context 栏，**仅当会话关联任务时**出现（窄屏隐藏） |
 
 ---
 
@@ -201,28 +210,31 @@
 ## 8. 可访问性
 
 - 正文 ≥4.5:1；控件边界 ≥3:1；焦点环可见且不被遮挡。
-- 所有图标按钮有 `aria-label`；rail 有 tooltip。
+- 所有图标按钮有 `aria-label`；纯图标按钮有 tooltip。
 - 键盘顺序遵循阅读顺序；Dialog/CommandPalette 焦点陷阱与回退。
 - 状态变化使用 `aria-live="polite"`，但避免每次轮询都播报。
 - `prefers-reduced-motion` 与 `forced-colors` 都要有可读呈现。
 
 ---
 
-## 9. 验收清单（P1 起逐条打勾）
+## 9. 验收清单（P9 收口，2026-11-28 逐条核对）
 
-- [ ] 文案对比度全部 ≥4.5:1；控件边界 ≥3:1（脚本可测）。
-- [x] 字号只有 24 / 16 / 14 / 13 / 11 五级（`text-title` / `section` / `body` / `meta` / `badge`，无任意值）。
-- [x] 圆角只有 6 / 10 / 999 三种（`rounded-control` / `panel` / `full`）。
-- [ ] 间距全部落在 4/8/12/16/24/32/48。（还留着少数为了与 legacy 像素对齐的任意值，如 `px-[18px]`；等旧样式彻底退役后再收。）
-- [ ] 一个页面只有一个主操作；三种信号不共用一色。
-- [x] Inter / JetBrains Mono / Noto SC 子集实际加载（P1 起 legacy `--font` / `--mono` 指向自托管字体）。
-- [ ] 每页 axe 0 critical / serious（当前 gallery + Chat/Tasks 已覆盖）。
-- [x] 视觉回归：1440 / 768 / 390 × 明暗覆盖 chat / tasks / settings / gallery。
-  - **基线不入库**：`pnpm test:visual` 默认只跑 axe；像素比对要 `VISUAL_SNAPSHOTS=1`，产物写到 `tests/visual/*-snapshots/`（已 gitignore）。
-  - 覆盖：`dev-ui.spec.ts`（组件画廊）+ `console.spec.ts`（Chat 与 Tasks 真实页面，mock 接口 + 固定时钟 + reduced motion）。Agents / Approvals / Settings 待补。
-- [ ] 10k 消息滚动不掉帧；流式期间无长任务。
-- [ ] `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直接引用。
-  - 当前唯一例外是 `features/dev/DevUiView.tsx`：gallery 的用途就是展示 SDK 裸行为，且已被 `import.meta.env.DEV` 从生产包剔除。P3 把它移出 `features/`（或改成只经门面）后即可勾上。
+每条都给了可复跑的验法。没有机器守卫的项，写明人工走查的范围，不拿“已通过”糊过去。
+
+| # | 项 | 状态 | 验法 / 证据 |
+|---|---|---|---|
+| 1 | 文案对比度 ≥4.5:1；控件边界 ≥3:1 | ✅ | `pnpm contrast`（`scripts/contrast.mjs`，已接进 `pnpm verify`）：全部文字与边界配对按明暗各算一遍（当前 46 组文字 + 8 组边界）。P9 靠它抓到两处**真不达标**并改掉：`--hx-success` 在 `success-soft` 上只有 4.47（`#1a7f37` → `#187531`，现 5.09）；`--hx-line-control` 只有 1.8（`#b3bac3`/`#3a424a` → `#838b95`/`#5f6873`，现 3.22–3.46） |
+| 2 | 字号只有 24 / 16 / 14 / 13 / 11 五级 | ✅ | `text-title` / `section` / `body` / `meta` / `badge`，无任意字号（§3.3） |
+| 3 | 圆角只有 6 / 12 / 16 + full | ✅（两个小件例外） | `--radius-control: 6` / `--radius-panel: 12` / `--radius-shell: 16`；行内代码 5、代码块 8 是等宽字小件的光学校正（见 §4） |
+| 4 | 间距落在同一套刻度上 | ✅ | 4px 网格（4/8/12/16/20/24/32/48）+ **已审核例外**（2/3/5/7 光学校正、9/14/18/22 来自已批准稿、26 过程流缩进）。`packages/web/test/spacing-scale.test.ts` 看守：新增任意间距值直接变红 |
+| 5 | 一个页面只有一个主操作；三种信号不共用一色 | ✅（人工走查） | 颜色只有三种语义：signal = 需要你、success = 通过、danger = 失败，由 `tokens.css` 定义并被 #1 的配对覆盖。主操作的唯一性：单决策容器（dock / 浮层 / 任务详情）一个 primary；审批页是**并列的独立决策清单**，每个待批项各一个（见 §5 例外）。靠渲染评审（P5–P9）与视觉回归人工确认，**没有自动守卫**。本轮顺手修掉任务详情页两个 `h1`（顶栏页名降为 `span`） |
+| 6 | Inter / JetBrains Mono / Noto SC 子集实际加载 | ✅ | 自托管 woff2（§3.2）；CJK 子集由 `pnpm fonts:write` 从 `packages/web/src` 提取，当前约 167KB（预算 ≤600KB），单测钉住「zh 文案 ⊆ `cjk-chars.txt`」 |
+| 7 | 每页 axe 0 critical / serious | ✅ | `playwright.visual.config.ts` → `tests/visual/console.spec.ts`：8 个目的地（chat / tasks / task-list / approvals / settings / registry / agents-unsupported / agents），0 critical / serious |
+| 8 | 视觉回归覆盖全部目的地（1440 / 768 / 390 × 明暗） | ✅（基线不入库） | 7 个目的地做像素比对（7 × 3 宽度 × 2 主题 = 42 张）：`chat / tasks / task-list / approvals / settings / registry / agents-unsupported`。`/agents` 是 WebGL 舞台、场景非确定 → **只跑 axe**；像素用 `?unsupported=1`（确定性阻断态 DOM）。基线落在 `tests/visual/*-snapshots/`（gitignore），像素比对需 `VISUAL_SNAPSHOTS=1`，CI 只跑 axe |
+| 9 | 10k 消息滚动不掉帧；流式期间无长任务 | ✅ | 历史按 100 条/页从服务端拉；DOM 只保留最近 200 个回合（`ChatView` 的 `visibleTurns` / `RENDER_TURNS`）+ `content-visibility: auto`（`.hx-virtual-row`）。实测 10k：首屏 36.4s → 1.3s、最坏长任务 17.6s → 393ms、DOM 恒 ~400 行。守卫 e2e：`tests/e2e/transcript-window.spec.ts`（断言行数 <600、无 >1.5s 长任务、可一键展开更早回合） |
+| 10 | `features/**`、`routes/**` 无 `@ui-sdk/*`、`@lucide/solid` 直连 | ✅ | 画廊已移出 `features/` → `packages/web/src/dev/DevUiView.tsx`（`import.meta.env.DEV` 才进图）；`packages/web/test/ui-boundary.test.ts` 三条守卫：只有 `components/ui/**` 与画廊可 import、features/routes 一律走门面、画廊不得回到 `features/` |
+
+> 结论：10 项全部达成。唯一“无自动守卫”的是 #5（主操作唯一性），按人工走查记账；其余都能用一条命令复跑。
 
 ---
 
