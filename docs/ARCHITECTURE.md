@@ -1128,7 +1128,7 @@ Verifier  ──► SandboxProvider.wrap(spec) ──► spawn
 | 模型调用 | 每次调用记录 provider/model/token/耗时/成本/是否命中缓存 |
 | 指标 | 本地计数器表 + `/system/status` 暴露；可选 OTLP 导出（默认关闭） |
 | 事件回放 | `events` 表 + 投影重建命令；用于排障与回归 |
-| Agent transcript | 落文件、库里存引用；默认保留 30 天或 1 GB（先删最老），删除后引用标记为 `purged`（PRD §14.7） |
+| Agent transcript | 落文件、库里存引用；默认保留 30 天或 1 GB（先删最老），删除后引用标记为 `purged`（PRD §14.7）。落盘前痦身：丢 `raw._meta`（provider 遥测）、`message.delta` 的 `raw`、`tool.call.update` 的 `rawInput`——实测 7.88 MB → 2.42 MB，语义字段（kind/text/toolCallId/status/content/entries）全保留；推给 UI 的仍是原始事件（`runtime/acp-transcript.ts`） |
 
 ---
 

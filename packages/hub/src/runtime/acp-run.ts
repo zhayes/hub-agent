@@ -39,6 +39,7 @@ import { saveExecutionResume } from '../storage/queries/execution-resume'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
 import { decidePermission, toPermissionResponse } from './acp-permission'
+import { slimTranscriptEvent } from './acp-transcript'
 import { type AgentRecord, markAgentSeen } from './agent-registry'
 import { createSandboxDeniedApproval } from './approval'
 import { deriveIdempotencyKey, reserveDelegation } from './recovery/idempotency'
@@ -190,7 +191,12 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
   let transcriptRef: string | undefined
   let acp: AcpClient | undefined
   let baseSha: string | undefined
-  const events: AcpExecutionEvent[] = []
+  /*
+   * transcript 文件建好之前到达的事件先缓冲（建文件时一次写出）；建好之后事件
+   * 直接落盘，不再留在内存——一个回合的完整事件集能到 7 MB，而内存里只需计数。
+   */
+  const pendingEvents: AcpExecutionEvent[] = []
+  let eventCount = 0
   const networkMode = options.networkMode ?? 'agent-managed'
   /* 缺省与“工作区内修改”一致：沙箱兜底，不逐次弹确认。 */
   const permissionMode: PermissionMode = options.permissionMode ?? 'workspace-write'
@@ -202,14 +208,21 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
   }
 
   const recordEvent = (event: AcpExecutionEvent): void => {
-    events.push(event)
+    eventCount += 1
+    /* UI 拿原始事件（含 raw）；只给落盘副本瘦身。 */
     options.onEvent?.(event)
-    if (transcriptRef !== undefined) {
-      appendFileSync(
-        transcriptRef,
-        `${JSON.stringify({ type: 'acp.event', at: new Date().toISOString(), event })}\n`,
-      )
+    if (transcriptRef === undefined) {
+      pendingEvents.push(event)
+      return
     }
+    appendFileSync(
+      transcriptRef,
+      `${JSON.stringify({
+        type: 'acp.event',
+        at: new Date().toISOString(),
+        event: slimTranscriptEvent(event),
+      })}\n`,
+    )
   }
 
   const host = new AgentHost({
@@ -356,12 +369,18 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       transcriptRef,
       `${[
         JSON.stringify(header),
-        ...events.map((event) =>
-          JSON.stringify({ type: 'acp.event', at: new Date().toISOString(), event }),
+        ...pendingEvents.map((event) =>
+          JSON.stringify({
+            type: 'acp.event',
+            at: new Date().toISOString(),
+            event: slimTranscriptEvent(event),
+          }),
         ),
       ].join('\n')}\n`,
       'utf8',
     )
+    /* 缓冲已经落盘：清掉，后面的回合不再把事件常驻内存。 */
+    pendingEvents.length = 0
 
     const title = objective.length > 80 ? `${objective.slice(0, 77)}...` : objective
     if (options.goalId === undefined) {
@@ -514,7 +533,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         verdict: 'not_run',
         evidence,
         transcriptRef,
-        updates: events.length,
+        updates: eventCount,
         durationMs: Date.now() - startedAt,
       }
     }
@@ -590,7 +609,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       ...(approval === undefined ? {} : { approval }),
       evidence,
       transcriptRef,
-      updates: events.length,
+      updates: eventCount,
       durationMs: Date.now() - startedAt,
     }
   } catch (error) {

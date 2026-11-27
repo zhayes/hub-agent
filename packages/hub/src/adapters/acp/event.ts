@@ -13,7 +13,8 @@ import type {
  *
  * 映射原则（ARCHITECTURE §7.1）：
  *   - 一类 ACP update 对应一类内部事件；
- *   - 每条事件都带 `raw`，便于回放与排障，不丢协议字段；
+ *   - 每条事件都带 `raw`，便于回放与排障，不丢协议字段（注：写入 transcript 文件时会痦身，
+ *     见 `runtime/acp-transcript.ts`；内存里的事件和推给 UI 的仍是带 raw 的原始版）；
  *   - 未知/新增 update 不丢弃，统一进 `session.notice`，避免版本升级时静默失明。
  */
 
