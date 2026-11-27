@@ -1,4 +1,4 @@
-import { For, Show } from 'solid-js'
+import { For } from 'solid-js'
 import { StatusDot } from '../../../../components/ui/StatusBadge'
 import type { AgentPresence } from '../../../../shared/api'
 import type { OfficeTranslate } from '../strings'
@@ -21,13 +21,9 @@ const seatBase =
  */
 export function CallSheet(props: CallSheetProps) {
   return (
-    <div class="pointer-events-auto absolute inset-x-4 bottom-4 z-10 flex items-stretch gap-2 overflow-x-auto pr-40">
+    <div class="pointer-events-auto absolute inset-x-4 bottom-4 z-10 flex items-stretch gap-2 overflow-x-auto pr-4 min-[861px]:pr-40">
       <span class="sr-only">{props.t('callSheet')}</span>
-      <Show when={props.agents.length === 0}>
-        <span class="rounded-panel border border-line bg-surface/90 px-3 py-2 text-badge text-ink-2">
-          {props.t('ignoreEmpty')}
-        </span>
-      </Show>
+      {/* 名单为空时不在这里再说一遍：空态卡（StageEntry）已经把下一步说清楚了。 */}
       <For each={props.agents}>
         {(agent) => (
           <button

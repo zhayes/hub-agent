@@ -25,7 +25,7 @@ export function DispatchCard(props: DispatchCardProps) {
   }
 
   return (
-    <section class="pointer-events-auto absolute top-4 right-4 z-10 w-72 rounded-panel border border-line bg-surface/92 p-3.5 shadow-card backdrop-blur">
+    <section class="pointer-events-auto absolute top-4 right-4 z-10 w-72 max-w-[calc(100%-2rem)] rounded-panel border border-line bg-surface/92 p-3.5 shadow-card backdrop-blur">
       <header class="flex items-baseline justify-between gap-2">
         <h2 class="text-section text-ink">{props.t('dispatch')}</h2>
         <span class="font-mono text-badge text-ink-3">

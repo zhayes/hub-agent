@@ -315,7 +315,7 @@ export function StageEntry() {
   }
 
   return (
-    <div class="relative h-[calc(100dvh-10.5rem)] min-h-[520px] w-full overflow-hidden rounded-panel border border-line bg-subtle">
+    <div class="relative h-full min-h-0 w-full overflow-hidden rounded-panel border border-line bg-subtle">
       {/* 3D canvas 是纯视觉表现，交互都在 HUD；按 PLAN-AGENT-OFFICE §6.2 设 aria-hidden。 */}
       {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative canvas, interactions live in the HUD */}
       <canvas
@@ -328,7 +328,8 @@ export function StageEntry() {
 
       {/* 顶部状态条（3D 视图的一部分，不是 2D 列表） */}
       <Show when={mode() === 'ready'}>
-        <div class="pointer-events-none absolute top-4 left-4 z-10 flex items-center gap-2">
+        {/* 地板标签与连接状态：窄屏让位给右上角的派发卡（否则两块会叠在一起）。 */}
+        <div class="pointer-events-none absolute top-4 left-4 z-10 hidden items-center gap-2 min-[861px]:flex">
           <span class="rounded-full border border-line bg-surface/90 px-2.5 py-1 text-badge font-semibold text-ink shadow-card">
             {t()('floorLabel')}
           </span>
@@ -364,7 +365,8 @@ export function StageEntry() {
             t={t()}
           />
 
-          <div class="pointer-events-auto absolute top-4 left-1/2 z-10 -translate-x-1/2">
+          {/* 镜头预设是桌面控件：≤860px 下它会与派发卡撑在一起，而手机上镜头本来就框住了全景。 */}
+          <div class="pointer-events-auto absolute top-4 left-1/2 z-10 mx-auto hidden w-fit -translate-x-1/2 min-[861px]:block">
             <div class="flex gap-1 rounded-panel border border-line bg-surface/90 p-1 shadow-card">
               <span class="self-center px-1.5 font-mono text-badge text-ink-3">
                 {t()('camera')}
@@ -407,6 +409,10 @@ export function StageEntry() {
               >
                 {t()('emptyFloorLink')}
               </a>
+              <p class="mt-2 text-badge text-ink-3">{t()('emptyFloorCli')}</p>
+              <code class="mt-1 block overflow-x-auto rounded-control border border-line bg-subtle px-2 py-1 font-mono text-badge text-ink-2">
+                {t()('emptyFloorCommand')}
+              </code>
             </div>
           </Show>
         </div>

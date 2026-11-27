@@ -3,7 +3,6 @@ import { dynamic, type JSX } from '@solidjs/web'
 import { createEffect, createSignal, For, onFlush, onSettled, Show } from 'solid-js'
 import type { CommandPaletteProps, PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
-import { IconButton } from '../components/ui/IconButton'
 import { ConnectionDot } from '../components/ui/StatusBadge'
 import { Toaster } from '../components/ui/Toaster'
 import { InboxPanel } from '../features/inbox/InboxPanel'
@@ -53,20 +52,18 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
   const isChat = (): boolean => path() === '/' || path().startsWith('/chat')
   const isTasks = (): boolean => path().startsWith('/tasks')
+  /* Agent 是一个目的地、两个分段（现场 / 接入）：分段控件在页面里（AgentsPage），
+     顶栏只按深链页的规矩显示页名。 */
+  const isAgentsSection = (): boolean =>
+    path().startsWith('/agents') || path().startsWith('/registry')
 
   const title = (): string => {
-    /* `/agents` 与 `/registry` 是同一个目的地的两个分段（现场 / 接入）：
-       导航上合成一个“Agent”，页名与分段控件负责区分。 */
-    if (path().startsWith('/registry')) return app.t('registry')
-    if (path().startsWith('/agents')) return app.t('agents')
+    if (isAgentsSection()) return app.t('agents')
     if (path().startsWith('/approvals')) return app.t('approvals')
     if (path().startsWith('/settings')) return app.t('settings')
     if (isChat()) return app.t('chat')
     return app.t('tasks')
   }
-
-  const isAgentsSection = (): boolean =>
-    path().startsWith('/agents') || path().startsWith('/registry')
 
   const isActive = (prefix: string): boolean =>
     prefix === '/tasks'
@@ -222,44 +219,14 @@ export function AppLayout(props: { children?: JSX.Element }) {
           </For>
         </nav>
 
-        {/* 深链页（任务/审批/接入/设置）没有自己的页内标题，
-            所以页面名放在 app bar 上；对话页的标题在线程头，Agent 页是全屏舞台。 */}
+        {/* 深链页（任务/审批/设置）没有页内标题，所以页面名放在 app bar 上。
+            Agent 页例外：目的地页签已经写着“Agent”，再排一个同名页名会被读成两个页签；
+            现场/接入 由页面内的分段控件表达（AgentsPage）。 */}
         <Show
           when={!isChat() && !isAgentsSection()}
           fallback={<h1 class="visually-hidden">{title()}</h1>}
         >
           <h1 class="min-w-0 truncate text-meta font-semibold text-ink">{title()}</h1>
-        </Show>
-        {/* Agent 是一个目的地、两个分段：现场（3D 工位）/ 接入（catalog 扫描与授权）。
-            窄屏收起分段——320px 下 app bar 装不下三段文字，接入仍可从现场的空态链接进入。 */}
-        <Show when={isAgentsSection()}>
-          <nav
-            class="flex h-7 items-center gap-0.5 rounded-control bg-subtle p-0.5 max-[560px]:hidden"
-            aria-label={app.t('agents')}
-          >
-            <a
-              href="/agents"
-              class={`inline-flex h-6 items-center rounded-[4px] px-2 text-badge transition-colors ${
-                path().startsWith('/agents')
-                  ? 'bg-surface font-medium text-ink'
-                  : 'text-ink-3 hover:text-ink'
-              }`}
-              aria-current={path().startsWith('/agents') ? 'page' : undefined}
-            >
-              {app.t('sectionStage')}
-            </a>
-            <a
-              href="/registry"
-              class={`inline-flex h-6 items-center rounded-[4px] px-2 text-badge transition-colors ${
-                path().startsWith('/registry')
-                  ? 'bg-surface font-medium text-ink'
-                  : 'text-ink-3 hover:text-ink'
-              }`}
-              aria-current={path().startsWith('/registry') ? 'page' : undefined}
-            >
-              {app.t('sectionAccess')}
-            </a>
-          </nav>
         </Show>
         <span class="flex-1" />
 
@@ -344,7 +311,9 @@ export function AppLayout(props: { children?: JSX.Element }) {
           </div>
         </Show>
 
-        <div class={isChat() || isTasks() ? bodyPane : bodyScroll}>{props.children}</div>
+        <div class={isChat() || isTasks() || isAgentsSection() ? bodyPane : bodyScroll}>
+          {props.children}
+        </div>
       </main>
 
       {/* ≤860px：带文字标签的底部条。注意力控件留在 app bar，所以这里只有目的地。 */}

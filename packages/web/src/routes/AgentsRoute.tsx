@@ -1,6 +1,6 @@
-import { StageEntry } from '../features/agents/office/stage-entry'
+import { AgentsPage } from '../features/agents/AgentsPage'
 
-/** `/agents` 只保留 3D 舞台；旧的表格在 A6 删除（PLAN-AGENT-OFFICE §1.1）。 */
+/** `/agents`：Agent 目的地的「现场」分段（3D Dispatch Floor）。 */
 export function AgentsRoute() {
-  return <StageEntry />
+  return <AgentsPage section="stage" />
 }

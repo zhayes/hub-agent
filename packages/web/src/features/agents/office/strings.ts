@@ -15,10 +15,10 @@ const en = {
   waitingDispatch: 'Waiting for dispatch',
   noSubtask: 'no subtask yet',
   callSheet: 'Call sheet',
-  ignoreEmpty: 'No agents registered yet.',
   emptyFloor: 'No agents on the floor yet.',
   emptyFloorLink: 'Connect an agent',
-  emptyFloorCommand: 'hubagent agent add <name> --cmd <cmd>',
+  emptyFloorCommand: 'hubagent agent add --name <name> --cmd <command>',
+  emptyFloorCli: 'Register one on this machine with the CLI:',
   attentionOne: '{name} is waiting on you',
   attentionMany: '{count} agents are waiting on you',
   jumpHint: 'N — next',
@@ -69,6 +69,18 @@ const en = {
   execution: 'runs',
   verification: 'checks',
   retry: 'Retry',
+  unsupportedTitle: 'The 3D floor cannot start',
+  unsupportedWhyForced: 'Opened with ?unsupported=1 to review the blocked state.',
+  unsupportedWhyNoWebgl2:
+    'canvas.getContext("webgl2") is unavailable here, so the floor cannot be drawn.',
+  unsupportedWhyContextError: 'Creating a WebGL2 context threw an error.',
+  unsupportedWhyThreeLoad: 'The 3D engine chunk failed to load.',
+  unsupportedWhyInitFailed: 'The 3D engine loaded but the scene could not be built.',
+  unsupportedWhyContextLost: 'The GPU context was lost while the floor was running.',
+  unsupportedNoFallback:
+    'No 2D fallback: the floor is 3D-only, and there is no list view to switch to.',
+  unsupportedDiagnostics: 'Diagnostics',
+  unsupportedCli: 'Use the CLI on this machine:',
 } as const
 
 export type OfficeKey = keyof typeof en
@@ -84,10 +96,10 @@ const zh: Record<OfficeKey, string> = {
   waitingDispatch: '等待派发',
   noSubtask: '暂无子任务',
   callSheet: '名单',
-  ignoreEmpty: '还没有注册 Agent。',
   emptyFloor: '现场还没有 Agent。',
   emptyFloorLink: '去接入一个',
-  emptyFloorCommand: 'hubagent agent add <name> --cmd <cmd>',
+  emptyFloorCommand: 'hubagent agent add --name <name> --cmd <command>',
+  emptyFloorCli: '在这台机器上用 CLI 注册：',
   attentionOne: '{name} 在等你',
   attentionMany: '{count} 个 Agent 在等你',
   jumpHint: 'N — 下一个',
@@ -138,6 +150,16 @@ const zh: Record<OfficeKey, string> = {
   execution: '执行',
   verification: '验收',
   retry: '重试',
+  unsupportedTitle: '3D 舞台无法启动',
+  unsupportedWhyForced: '带 ?unsupported=1 打开，用来检查阻断态本身。',
+  unsupportedWhyNoWebgl2: '这里拿不到 WebGL2 画布（canvas.getContext("webgl2")），舞台画不出来。',
+  unsupportedWhyContextError: '创建 WebGL2 上下文时抛错。',
+  unsupportedWhyThreeLoad: '3D 引擎的分块加载失败。',
+  unsupportedWhyInitFailed: '3D 引擎起来了，但场景没能建出来。',
+  unsupportedWhyContextLost: '舞台运行途中 GPU 上下文丢失。',
+  unsupportedNoFallback: '没有 2D 回退：现场只有 3D，也没有可切换的列表视图。',
+  unsupportedDiagnostics: '诊断信息',
+  unsupportedCli: '在这台机器上用 CLI：',
 }
 
 const dictionaries: Record<Locale, Record<OfficeKey, string>> = {

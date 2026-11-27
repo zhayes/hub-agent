@@ -1,6 +1,6 @@
 import { Button } from '../../../components/ui/Button'
 import type { PreflightFailure } from './preflight'
-import type { OfficeTranslate } from './strings'
+import type { OfficeKey, OfficeTranslate } from './strings'
 
 export interface UnsupportedProps {
   reason: PreflightFailure
@@ -9,22 +9,13 @@ export interface UnsupportedProps {
   t: OfficeTranslate
 }
 
-const TITLES: Record<PreflightFailure, string> = {
-  forced: 'Blocked state (QA)',
-  'no-webgl2': 'This floor needs WebGL2',
-  'context-error': 'WebGL2 could not start',
-  'three-load': 'The 3D engine could not load',
-  'init-failed': 'The floor could not start',
-  'context-lost': 'The GPU context was lost',
-}
-
-const WHY: Record<PreflightFailure, string> = {
-  forced: 'Opened with ?unsupported=1 to review the blocked state.',
-  'no-webgl2': 'canvas.getContext("webgl2") is unavailable, so the floor cannot be drawn.',
-  'context-error': 'Creating a WebGL2 context threw an error.',
-  'three-load': 'The 3D engine chunk failed to load.',
-  'init-failed': 'The 3D engine started but the scene could not be built.',
-  'context-lost': 'The GPU context was lost while the floor was running.',
+const WHY: Record<PreflightFailure, OfficeKey> = {
+  forced: 'unsupportedWhyForced',
+  'no-webgl2': 'unsupportedWhyNoWebgl2',
+  'context-error': 'unsupportedWhyContextError',
+  'three-load': 'unsupportedWhyThreeLoad',
+  'init-failed': 'unsupportedWhyInitFailed',
+  'context-lost': 'unsupportedWhyContextLost',
 }
 
 /**
@@ -35,7 +26,13 @@ export function Unsupported(props: UnsupportedProps) {
   const diagnostics = (): string =>
     [
       `reason      ${props.reason}`,
-      `webgl2      ${props.reason === 'no-webgl2' ? 'missing' : 'probe failed'}`,
+      `webgl2      ${
+        props.reason === 'no-webgl2'
+          ? 'missing'
+          : props.reason === 'forced'
+            ? 'skipped (?unsupported=1)'
+            : 'probe failed'
+      }`,
       `detail      ${props.detail ?? 'n/a'}`,
       `renderer    ${props.renderer ?? 'not available'}`,
       `platform    ${navigator.platform || 'unknown'}`,
@@ -50,19 +47,22 @@ export function Unsupported(props: UnsupportedProps) {
     >
       <div class="w-full max-w-lg rounded-panel border border-line-strong bg-surface p-6 shadow-dialog">
         <div class="mb-3 h-1 rounded bg-warning" aria-hidden="true" />
-        <h2 class="text-title text-ink">{TITLES[props.reason]}</h2>
-        <p class="mt-1.5 text-meta text-ink-2">{WHY[props.reason]}</p>
+        <h2 class="text-title text-ink">{props.t('unsupportedTitle')}</h2>
+        <p class="mt-1.5 text-meta text-ink-2">{props.t(WHY[props.reason])}</p>
 
         <p class="mt-3 rounded-control border border-danger bg-danger-soft px-2.5 py-2 text-badge text-danger">
-          <strong>No 2D fallback.</strong> The Agents page is 3D-only; there is no list or table
-          view to switch to.
+          {props.t('unsupportedNoFallback')}
         </p>
 
-        <pre class="mt-3 overflow-x-auto rounded-control bg-canvas px-3 py-2 font-mono text-badge text-ink-2">
-          {diagnostics()}
-        </pre>
+        <div class="mt-3">
+          <p class="text-badge font-semibold text-ink-3">{props.t('unsupportedDiagnostics')}</p>
+          <pre class="mt-1 overflow-x-auto rounded-control border border-line bg-subtle px-3 py-2 font-mono text-badge text-ink-2">
+            {diagnostics()}
+          </pre>
+        </div>
 
-        <div class="mt-3 flex items-center gap-2 rounded-control bg-ink px-3 py-2 font-mono text-badge text-canvas">
+        <p class="mt-3 text-badge text-ink-3">{props.t('unsupportedCli')}</p>
+        <div class="mt-1 flex items-center gap-2 rounded-control bg-ink px-3 py-2 font-mono text-badge text-canvas">
           <span class="opacity-60">CLI</span>
           <span>hubagent agents</span>
         </div>
