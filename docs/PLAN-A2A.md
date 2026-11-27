@@ -492,6 +492,15 @@ ADR 0026 要求“启用 Relay 之前必须补上 mTLS”。这一步已完成�
 
 仍差：P0 未实现“**把产物应用到宿主 worktree 并跑命令检查**”，所以代码类交付物只能走人工验收；`manual_required` 之后的“人类接受”入口（Clarification → 状态收敛）也仍是既有缺口。
 
+### 远端交付物的应用与验收（2026-11-27，接上一节）
+
+- **B 侧产出交付物**：`InboundOutcome.completed` 可带 `artifacts`；`createA2aExecutor` 在**终态之前**发布 `artifactUpdate`（TaskStore 按 `artifactId` 合并）。`createInboundTaskRunner` 从本地执行证据里取 diff：**完整 diff** 才作为 `patch` 交付；`diffTruncated` 时**不发**（不可应用的产物不得算成功）。
+- **A 侧应用 + 验收**：`runtime/remote-verify.ts` 的 `applyAndVerify` —— 写 patch → `git apply --reverse --check` 识别已应用（幂等）→ `git apply --check` 不通过则 `rejected`（基线不一致，判 fail）→ 应用 → 在本地 worktree 跑确定性检查。所有命令经 `AgentHost`（因此经 `SandboxProvider`）。
+- **持久化验收规格**：brain-run 把 `verification: { worktree, checks, network* }` 写进远程派发 payload，所以重启后也能重建验收上下文；`createRemoteVerifier` 用 `findDispatchByIdempotencyKey` 取回它。
+- **对账集成**：`reconcileRemoteTasks` 新增 `verify?` 钩子。因为验收有 I/O，顺序是「观测落库 → **事务外**验收 → 一个事务内 写验收+关单+决策点」；崩在中间时关联仍是打开的，下轮重做（验收幂等）。
+
+验证：`test/unit/remote-verify.test.ts`（7 条，真实 git 仓库）——干净应用→pass、应用后不通过→fail、重复应用→`already-applied`、基线不一致→`rejected`+fail、无 patch 无检查→`manual_required`、规格解析；`test/unit/remote-execution.test.ts` 新增 1 条验证 `verify` 钩子贯通（钩子收到交付物、pass → Execution succeeded）。
+
 ### A5 核心验收场景
 
 1. A 本机 Brain 规划并行任务：一个本地 ACP，一个远程 HubAgent；结果汇合后由 A 本地验收。

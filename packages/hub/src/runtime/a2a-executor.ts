@@ -8,9 +8,23 @@ import {
 import { newId } from '../shared/id'
 
 export type InboundOutcome =
-  | { state: 'completed'; summary?: string }
+  | { state: 'completed'; summary?: string; artifacts?: readonly InboundArtifact[] }
   | { state: 'failed'; error: string }
   | { state: 'input_required'; question: string }
+
+/**
+ * 入站任务产出的交付物（PRD §7.7）。
+ *
+ * 只支持内联文本（patch 内容）；文件型/外链型等真正需要传输的形态另开一步。
+ */
+export interface InboundArtifact {
+  artifactId: string
+  /** `patch` = 可应用的 diff；`analysis` = 只读结论。 */
+  form: 'patch' | 'analysis'
+  mediaType?: string
+  name?: string
+  content: string
+}
 
 export interface InboundTaskRunner {
   /**
@@ -88,6 +102,37 @@ export function createA2aExecutor(runner: InboundTaskRunner): AgentExecutor {
           : outcome.state === 'failed'
             ? outcome.error
             : outcome.question
+
+      /* 交付物必须在终态之前发布：TaskStore 按 artifactId 合并，终态后再发就晚了。 */
+      if (outcome.state === 'completed') {
+        for (const artifact of outcome.artifacts ?? []) {
+          bus.publish(
+            AgentEvent.artifactUpdate({
+              taskId,
+              contextId,
+              artifact: {
+                artifactId: artifact.artifactId,
+                name: artifact.name ?? `${artifact.artifactId}.txt`,
+                description: artifact.form === 'patch' ? '可应用的 diff' : '只读结论',
+                parts: [
+                  {
+                    content: { $case: 'text', value: artifact.content },
+                    metadata: undefined,
+                    filename: artifact.name ?? `${artifact.artifactId}.txt`,
+                    mediaType: artifact.mediaType ?? 'text/plain',
+                  },
+                ],
+                /* 契约声明：让接收方知道该怎么验收，而不靠猜内容。 */
+                metadata: { form: artifact.form },
+                extensions: [],
+              },
+              append: false,
+              lastChunk: true,
+              metadata: {},
+            }),
+          )
+        }
+      }
 
       bus.publish(
         AgentEvent.statusUpdate({

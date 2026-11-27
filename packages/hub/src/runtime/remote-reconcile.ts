@@ -2,12 +2,17 @@ import type { RemoteAgentClient } from '../adapters/a2a/client'
 import { connectRemoteAgent } from '../adapters/a2a/client'
 import { isTaskNotFound } from '../adapters/a2a/errors'
 import { fromTaskState } from '../adapters/a2a/mapping'
-import { isTerminalRemoteState } from '../domain/status'
+import { isTerminalRemoteState, type RemoteObservedState } from '../domain/status'
 import type { Db } from '../storage/db'
 import { enqueueDecisionPoint } from './decision-queue'
 import type { RemoteArtifactForm } from './remote-artifact'
 import type { ConnectRemote, ResolvePeerEndpoint } from './remote-dispatch'
-import { type RemoteSettlementArtifact, settleRemoteExecution } from './remote-execution'
+import {
+  ensureRemoteExecution,
+  type RemoteSettlementArtifact,
+  type RemoteVerifyResult,
+  settleRemoteExecution,
+} from './remote-execution'
 import {
   closeRemoteTask,
   listRemoteTasksNeedingPoll,
@@ -26,6 +31,16 @@ export interface ReconcileRemotesOptions {
   now?: Date
   limit?: number
   staleAfterMs?: number
+  /**
+   * 本地验收钩子（会做 I/O：应用 patch、跑命令），因此**在事务外**执行。
+   * 不传 → 远端完成一律 `manual_required`（fail-closed）。
+   */
+  verify?: (input: {
+    ref: RemoteTaskRef
+    executionId: string
+    observed: RemoteObservedState
+    artifacts: readonly RemoteSettlementArtifact[]
+  }) => Promise<RemoteVerifyResult | undefined>
 }
 
 export interface ReconcileReport {
@@ -114,20 +129,34 @@ export async function reconcileRemoteTasks(
 
     if (isTerminalRemoteState(observed)) {
       try {
-        options.db.transaction(() => {
-          observeRemoteTask(options.db, {
-            id: ref.id,
-            observedState: observed,
-            ...(cursor === undefined ? {} : { eventCursor: cursor }),
-            now,
+        /* 先把观测值落库：即使验收失败/抛错，也不会每轮重复打对端。 */
+        observeRemoteTask(options.db, {
+          id: ref.id,
+          observedState: observed,
+          ...(cursor === undefined ? {} : { eventCursor: cursor }),
+          now,
+        })
+
+        /* 本地验收有 I/O（应用 patch、跑命令），必须在事务外；
+           结果确定后再用**同一个事务**写“验收 + 关单 + 决策点”。 */
+        let precomputed: RemoteVerifyResult | undefined
+        if (observed === 'completed' && options.verify !== undefined) {
+          const execution = ensureRemoteExecution(options.db, ref)
+          precomputed = await options.verify({
+            ref,
+            executionId: execution.executionId,
+            observed,
+            artifacts,
           })
-          /* 先落本地 Execution（含交付物与验收），再关单。全在同一个事务里：
-             崩在中间整体回滚，不会出现“远端终态但本地没结果”的半状态。 */
+        }
+
+        options.db.transaction(() => {
           settleRemoteExecution(options.db, {
             ref,
             observed,
             artifacts,
             now,
+            ...(precomputed === undefined ? {} : { verify: () => precomputed }),
           })
           closeRemoteTask(options.db, { id: ref.id, now })
           enqueueDecisionPoint(options.db, {

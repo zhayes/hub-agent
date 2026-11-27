@@ -271,6 +271,62 @@ describe('远端完成：不采信自述，先本地验收', () => {
   })
 })
 
+describe('对账钩子：本地验收结果决定是否成功', () => {
+  it('verify 钩子返回 pass → Execution succeeded；钩子收到交付物', async () => {
+    const database = db()
+    const goalId = await submittedGoal(database)
+    const ref = listRemoteTasks(database, goalId)[0]
+    if (ref === undefined) throw new Error('缺少关联')
+
+    const seen: string[] = []
+    const report = await reconcileRemoteTasks({
+      db: database,
+      resolvePeer: () => peerEndpoint,
+      connect: async () => ({
+        card: async () => {
+          throw new Error('unused')
+        },
+        send: async () => {
+          throw new Error('对账不得重发')
+        },
+        get: async () =>
+          taskWith(TaskState.TASK_STATE_COMPLETED, [
+            {
+              artifactId: 'changes',
+              parts: [{ content: { $case: 'text', value: 'diff --git a/x b/x' } }],
+              metadata: { form: 'patch' },
+            },
+          ]),
+        cancel: async () => {
+          throw new Error('unused')
+        },
+      }),
+      staleAfterMs: 0,
+      verify: async ({ artifacts }) => {
+        seen.push(...artifacts.map((artifact) => `${artifact.artifactId}:${artifact.form}`))
+        return {
+          verdict: 'pass',
+          checks: [
+            {
+              checkId: 'check-1',
+              kind: 'command',
+              passed: true,
+              command: 'true',
+              exitCode: 0,
+              outputRef: '/tmp/check-1.log',
+              durationMs: 1,
+            },
+          ],
+        }
+      },
+    })
+
+    expect(report.terminal).toEqual([ref.id])
+    expect(seen).toEqual(['changes:patch'])
+    expect(executionOf(database, ref.localExecutionId)?.status).toBe('succeeded')
+  })
+})
+
 describe('远端运行中：只推进状态，不产生验收', () => {
   it('working 保持 running，且不写 verification', async () => {
     const database = db()

@@ -278,3 +278,14 @@ export function listDispatches(db: Db, goalId: string): DispatchIntent[] {
     .all(goalId) as DispatchRow[]
   return rows.map(toIntent)
 }
+
+/** 按幂等键取意图（远端验收要根据它 payload 里的规格重建执行上下文）。 */
+export function findDispatchByIdempotencyKey(
+  db: Db,
+  idempotencyKey: string,
+): DispatchIntent | undefined {
+  const row = db
+    .prepare('SELECT * FROM dispatch_queue WHERE idempotency_key = ?')
+    .get(idempotencyKey) as DispatchRow | undefined
+  return row === undefined ? undefined : toIntent(row)
+}

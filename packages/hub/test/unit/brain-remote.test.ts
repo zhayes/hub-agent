@@ -214,7 +214,10 @@ describe('Brain 选远程目标：runtime 只提交不阻塞', () => {
     expect(intents).toHaveLength(1)
     expect(intents[0]?.target).toBe('remote-a2a')
     expect(intents[0]?.status).toBe('done')
-    expect(intents[0]?.payload).toEqual({ peerId: 'peer-b' })
+    expect(intents[0]?.payload).toMatchObject({
+      peerId: 'peer-b',
+      verification: { worktree: '/tmp' },
+    })
 
     const refs = listRemoteTasks(database, result.goalId)
     expect(refs).toHaveLength(1)

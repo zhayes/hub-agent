@@ -435,7 +435,23 @@ export async function runGoalWithBrain(
           target: 'remote-a2a',
           objective: subtask.description,
           idempotencyKey: remoteKey,
-          payload: { peerId },
+          /* 验收规格随意图落库：对账（可能在重启后）要靠它重建本地验收上下文。 */
+          payload: {
+            peerId,
+            verification: {
+              worktree: taskOptions.worktree,
+              ...(taskOptions.checks === undefined ? {} : { checks: taskOptions.checks }),
+              ...(taskOptions.networkMode === undefined
+                ? {}
+                : { networkMode: taskOptions.networkMode }),
+              ...(taskOptions.allowedDomains === undefined
+                ? {}
+                : { allowedDomains: [...taskOptions.allowedDomains] }),
+              ...(taskOptions.allowedWrite === undefined
+                ? {}
+                : { allowedWrite: [...taskOptions.allowedWrite] }),
+            },
+          },
         })
         const drained = await drainDispatches(options.db, {
           goalId,

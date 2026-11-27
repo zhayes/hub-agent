@@ -1802,6 +1802,13 @@ A2A 负责双方的任务通信，内部 Task Graph 不要求暴露给远程 Age
 - patch 无法在指定基线干净应用时，不得把远端 `COMPLETED` 转成本地成功；按失败处理或升级人工。
 - 只读分析类结论可以只校验完整性与来源，但仍需本地记录“接受了什么、依据什么”。
 
+**实现口径（2026-11-27）**：
+
+- 产出侧（B）：执行证据里的 diff 作为 `form: patch` 的 Artifact 发布（`artifactUpdate`，终态之前）；**diff 被截断时不发**——不可应用的产物不允许伪装成可验收交付物。
+- 接收侧（A）：`runtime/remote-verify.ts` 写 patch → `git apply --reverse --check` 识别已应用（幂等）→ `git apply --check` 失败即 `rejected` 并判 `fail` → 应用 → `runVerification` 跑本地 checks。所有命令经 `AgentHost`（`SandboxProvider`）。
+- 验收器**未注入时**一律 `manual_required`（fail-closed）；`pass` 必须带至少一条通过的可执行检查（Domain 会拒绝空 `pass`）。
+- 验收规格（worktree / checks）随派发意图落库，重启后仍可重建；验收在事务外执行，验收结果与关单、决策点同事务提交。
+
 ---
 
 # 8. Relay 网络需求

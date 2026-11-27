@@ -3,7 +3,7 @@ import type { BrainBudget, OrchestratorBrain } from '../brain/types'
 import type { VerificationCheck } from '../domain/entities'
 import type { SandboxProvider } from '../sandbox/types'
 import type { Db } from '../storage/db'
-import type { InboundTaskRunner } from './a2a-executor'
+import type { InboundArtifact, InboundTaskRunner } from './a2a-executor'
 import { type AgentRecord, resolveAgent } from './agent-registry'
 import { runGoalWithBrain } from './brain-run'
 import { cancelTask } from './recovery/cancel'
@@ -55,6 +55,7 @@ export function createInboundTaskRunner(deps: InboundRunnerDeps): InboundTaskRun
           ? {
               state: 'completed' as const,
               ...(result.reply === undefined ? {} : { summary: result.reply }),
+              ...artifactsOf(result),
             }
           : { state: 'failed' as const, error: result.stopReason }
       } finally {
@@ -69,5 +70,31 @@ export function createInboundTaskRunner(deps: InboundRunnerDeps): InboundTaskRun
       }
       return { contextId: entry?.contextId ?? '' }
     },
+  }
+}
+
+/**
+ * 从本地执行证据里派生交付物。
+ *
+ * 只把**完整**的 diff 当作 `patch` 交付；被截断的 diff 交付出去也无法应用，
+ * 宁可不发，让对方走人工验收（PRD §7.7：不可应用的产物不得算成功）。
+ */
+function artifactsOf(result: { evidence?: { diff?: string; diffTruncated?: boolean } }): {
+  artifacts?: readonly InboundArtifact[]
+} {
+  const diff = result.evidence?.diff
+  if (diff === undefined || diff.trim() === '' || result.evidence?.diffTruncated === true) {
+    return {}
+  }
+  return {
+    artifacts: [
+      {
+        artifactId: 'changes',
+        form: 'patch',
+        mediaType: 'text/x-diff',
+        name: 'changes.patch',
+        content: diff,
+      },
+    ],
   }
 }
