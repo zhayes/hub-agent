@@ -7,12 +7,14 @@ import { fieldControl } from '../../components/ui/Field'
 import { Icon, type IconName } from '../../components/ui/Icon'
 import { IconButton } from '../../components/ui/IconButton'
 import { LoadingState } from '../../components/ui/LoadingState'
+import { ProcessTrace } from '../../components/ui/ProcessTrace'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { ThinkingTrace } from '../../components/ui/ThinkingTrace'
 import { toast } from '../../components/ui/Toaster'
 import { type ToolChip, ToolChips } from '../../components/ui/ToolChips'
 import {
   type AgentRow,
+  type ApprovalRow,
   type AuthMethodView,
   api,
   type ChatMessage,
@@ -26,8 +28,10 @@ import {
   type TaskRow,
   type TaskView,
 } from '../../shared/api'
+import { deriveAttention } from '../../shared/attention'
 import { relativeTime, shortenId } from '../../shared/format'
 import { type Locale, type MessageKey, statusKey, type Translator } from '../../shared/i18n'
+import { type DockAgent, RunDock, type RunPhase } from './RunDock'
 import {
   forgetThread,
   readCachedSummaries,
@@ -49,6 +53,8 @@ export interface ChatViewProps {
   t: Translator
   events: string[]
   tasks: TaskRow[]
+  /** 待批的审批（来自全局 store）；dock 要能就地拍板，不能只给个链接。 */
+  approvals: ApprovalRow[]
   onOpenThread: (id: string) => void
   onOpenTask: (id: string) => void
   /** 当前 thread 被删除/归档后回到空态。 */
@@ -57,10 +63,6 @@ export interface ChatViewProps {
 
 /* Pane widths live in state so they can be dragged; mobile stays a single
    column through the max-width utility below. */
-const MOBILE_ONLY = 'hidden max-[860px]:grid'
-
-const LEFT_MIN = 220
-const LEFT_MAX = 460
 const RIGHT_MIN = 220
 const RIGHT_MAX = 460
 
@@ -74,8 +76,6 @@ function storedWidth(key: string, fallback: number, min: number, max: number): n
   return Number.isFinite(parsed) ? clampWidth(parsed, min, max) : fallback
 }
 
-const threadRow =
-  'flex w-full min-w-0 flex-col gap-[3px] rounded-panel px-2.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 /* Empty states lean on a glyph instead of a paragraph: the shape says "nothing
    here yet" without reading like a manual. */
 const emptyGlyph = 'grid size-11 shrink-0 place-items-center rounded-full bg-subtle text-ink-3'
@@ -108,15 +108,19 @@ export function ChatView(props: ChatViewProps) {
   const [hasMore, setHasMore] = createSignal(false)
   const [thinkingMs, setThinkingMs] = createSignal(0)
   const [menuIndex, setMenuIndex] = createSignal(0)
-  const [leftCollapsed, setLeftCollapsed] = createSignal(
-    localStorage.getItem('hubagent.chat.left') === 'collapsed',
+  /* 会话历史是抽屉（E 稿）：不占正文列，需要时才从左侧伸出来。 */
+  const [drawerOpen, setDrawerOpen] = createSignal(false)
+  let searchEl: HTMLInputElement | undefined
+  /* 抽屉打开时把焦点送进搜索框：不然 Esc 收不到、键盘用户也出不去。 */
+  createEffect(
+    () => drawerOpen(),
+    (open) => {
+      if (open) queueMicrotask(() => searchEl?.focus())
+    },
   )
   /* 右侧是“状态/关联任务”的补充信息，默认收起，需要时再开。 */
   const [rightCollapsed, setRightCollapsed] = createSignal(
     localStorage.getItem('hubagent.chat.right') !== 'open',
-  )
-  const [leftWidth, setLeftWidth] = createSignal(
-    storedWidth('hubagent.chat.leftWidth', 300, LEFT_MIN, LEFT_MAX),
   )
   const [rightWidth, setRightWidth] = createSignal(
     storedWidth('hubagent.chat.rightWidth', 300, RIGHT_MIN, RIGHT_MAX),
@@ -127,10 +131,11 @@ export function ChatView(props: ChatViewProps) {
   /* The context pane is CSS-hidden below 1100px (`max-[1100px]:hidden`), so the
      grid must not reserve a column for it there — otherwise the transcript gets
      squeezed by an invisible 300px gutter. */
-  const [wideContext, setWideContext] = createSignal(
+  const [contextWide, setWideContext] = createSignal(
     typeof window === 'undefined' ? false : window.matchMedia('(min-width: 1100px)').matches,
   )
-  const [mobileThreads, setMobileThreads] = createSignal(false)
+  /* 上下文栏只在“有可看的东西”时占位：没有关联任务时不白占一列。 */
+  const wideContext = (): boolean => contextWide() && thread()?.taskId !== undefined
   const [menuFor, setMenuFor] = createSignal<string>()
   const [menuPos, setMenuPos] = createSignal({ left: 0, top: 0 })
   const [renamingId, setRenamingId] = createSignal<string>()
@@ -340,7 +345,7 @@ export function ChatView(props: ChatViewProps) {
         ...(permissionMode() === 'workspace-write' ? {} : { permissionMode: permissionMode() }),
       })
       await loadThreads()
-      setMobileThreads(false)
+      setDrawerOpen(false)
       props.onOpenThread(created.thread.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -566,10 +571,10 @@ export function ChatView(props: ChatViewProps) {
     stopWatching()
   })
 
-  const setPane = (side: 'left' | 'right', value: boolean): void => {
-    if (side === 'left') setLeftCollapsed(value)
-    else setRightCollapsed(value)
-    localStorage.setItem(`hubagent.chat.${side}`, value ? 'collapsed' : 'open')
+  /* 右侧上下文栏的开关：只改可视状态，不改变栅格列的存在与否。 */
+  const setPane = (value: boolean): void => {
+    setRightCollapsed(value)
+    localStorage.setItem('hubagent.chat.right', value ? 'collapsed' : 'open')
   }
 
   /* 新建 thread 的占位标题由后端写成 'New thread'（它靠这个字面量决定何时改名），
@@ -579,6 +584,40 @@ export function ChatView(props: ChatViewProps) {
 
   const displayTitle = (title: string): string =>
     title === 'New thread' ? props.t('newThread') : title
+
+  /* 状态词：`active` 直译成“active/进行中”读不出“在跑”，统一叫 Running。 */
+  const statusLabel = (status: string): string =>
+    status === 'active' ? props.t('chatTurnRunning') : props.t(statusKey(status))
+
+  /* 用户目录缩成 `~`：路径是给人看的，不是给 shell 看的。 */
+  const shortPath = (path: string): string => path.replace(/^\/Users\/[^/]+/, '~')
+
+  /* 权限档 → 文案：头部副行与输入框下方的 chip 共用。 */
+  const permissionKey = (
+    mode: PermissionMode,
+  ): 'permissionReadOnly' | 'permissionWorkspaceWrite' | 'permissionFull' =>
+    mode === 'read-only'
+      ? 'permissionReadOnly'
+      : mode === 'full'
+        ? 'permissionFull'
+        : 'permissionWorkspaceWrite'
+
+  /* 会话行的状态点：在跑是中性（不是“轮到你”），完成绿、失败红。 */
+  const threadDot = (status: string): string => {
+    if (status === 'failed' || status === 'error') return 'bg-danger'
+    if (status === 'completed') return 'bg-success'
+    if (status === 'waiting_approval' || status === 'waiting_input' || status === 'waiting') {
+      return 'bg-warning'
+    }
+    return 'bg-ink-3'
+  }
+
+  const threadWaiting = (item: ChatThreadSummary): number =>
+    item.taskId === undefined
+      ? 0
+      : props.approvals.filter(
+          (approval) => approval.status === 'pending' && approval.taskId === item.taskId,
+        ).length
 
   const filteredThreads = (): ChatThreadSummary[] => {
     const needle = query().toLowerCase()
@@ -730,7 +769,7 @@ export function ChatView(props: ChatViewProps) {
     }
     setText('')
     if (item.id === 'new') void newThread()
-    else if (item.id === 'context') setPane('right', !rightCollapsed())
+    else if (item.id === 'context') setPane(!rightCollapsed())
   }
 
   const submitOnEnter = (event: KeyboardEvent): void => {
@@ -803,45 +842,32 @@ export function ChatView(props: ChatViewProps) {
     () => startElapsedClock(),
   )
 
-  /* Each pane is pinned to its own column. A collapsed pane renders with
-     `display: none`, which takes it out of the grid — and then auto-placement
-     pulls the remaining panes one column left: the transcript would get 0px and
-     the context pane would swallow the middle. Pinning makes collapse purely
-     visual. */
+  /* 两栅格：正文 + 可选上下文栏。会话抽屉是浮层，不占列。 */
   const gridStyle = (): JSX.CSSProperties | undefined => {
     if (!wide()) return undefined
-    const left = leftCollapsed() ? 0 : leftWidth()
-    /* Below 1100px the context pane is not on screen at all. Collapsed means
-       gone, not a 48px rail: the toggle in the chat header is the only control
-       for it, so nothing needs to stay visible inside the pane. */
     const right = wideContext() && !rightCollapsed() ? rightWidth() : 0
-    return { 'grid-template-columns': `${left}px minmax(0,1fr) ${right}px` }
+    return { 'grid-template-columns': `minmax(0,1fr) ${right}px` }
   }
 
-  const columnStyle = (index: 1 | 2 | 3): JSX.CSSProperties | undefined =>
+  const columnStyle = (index: 1 | 2): JSX.CSSProperties | undefined =>
     wide() ? { 'grid-column': String(index) } : undefined
 
-  const startDrag = (side: 'left' | 'right', event: PointerEvent): void => {
+  const startDrag = (event: PointerEvent): void => {
     if (!wide()) return
     event.preventDefault()
     const startX = event.clientX
-    const startWidth = side === 'left' ? leftWidth() : rightWidth()
+    const startWidth = rightWidth()
     const target = event.currentTarget as HTMLElement
     target.setPointerCapture(event.pointerId)
     const move = (moveEvent: PointerEvent): void => {
       const delta = moveEvent.clientX - startX
-      if (side === 'left') {
-        setLeftWidth(clampWidth(startWidth + delta, LEFT_MIN, LEFT_MAX))
-      } else {
-        setRightWidth(clampWidth(startWidth - delta, RIGHT_MIN, RIGHT_MAX))
-      }
+      setRightWidth(clampWidth(startWidth - delta, RIGHT_MIN, RIGHT_MAX))
     }
     const stop = (): void => {
       target.releasePointerCapture?.(event.pointerId)
       target.removeEventListener('pointermove', move)
       target.removeEventListener('pointerup', stop)
       target.removeEventListener('pointercancel', stop)
-      localStorage.setItem('hubagent.chat.leftWidth', String(leftWidth()))
       localStorage.setItem('hubagent.chat.rightWidth', String(rightWidth()))
     }
     target.addEventListener('pointermove', move)
@@ -849,16 +875,12 @@ export function ChatView(props: ChatViewProps) {
     target.addEventListener('pointercancel', stop)
   }
 
-  const nudge = (side: 'left' | 'right', event: KeyboardEvent): void => {
+  const nudge = (event: KeyboardEvent): void => {
     const step = event.shiftKey ? 48 : 16
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     event.preventDefault()
-    const grow = event.key === (side === 'left' ? 'ArrowRight' : 'ArrowLeft')
-    if (side === 'left') {
-      setLeftWidth(clampWidth(leftWidth() + (grow ? step : -step), LEFT_MIN, LEFT_MAX))
-    } else {
-      setRightWidth(clampWidth(rightWidth() + (grow ? step : -step), RIGHT_MIN, RIGHT_MAX))
-    }
+    const grow = event.key === 'ArrowLeft'
+    setRightWidth(clampWidth(rightWidth() + (grow ? step : -step), RIGHT_MIN, RIGHT_MAX))
   }
 
   type TurnView = {
@@ -907,6 +929,69 @@ export function ChatView(props: ChatViewProps) {
     return Math.max(1_000, (Number.isFinite(end) ? end : Date.now()) - start)
   }
 
+  /* ---- dock：「现在怎么了」 ---- */
+  /* 默认按状态：在跑/等你展开，跑完收起。用户手动改过就记住（按 thread）。 */
+  const [dockOverride, setDockOverride] = createSignal<'open' | 'closed' | undefined>()
+  const [dockThread, setDockThread] = createSignal<string | undefined>()
+
+  const dockApprovals = (): ReturnType<typeof deriveAttention> => {
+    const taskId = thread()?.taskId
+    if (taskId === undefined) return []
+    return deriveAttention({ approvals: props.approvals, tasks: props.tasks }).filter(
+      (item) => item.taskId === taskId,
+    )
+  }
+
+  const dockPhase = (): RunPhase => {
+    if (dockApprovals().length > 0) return 'waiting'
+    if (active()) return 'running'
+    const status = threadStatus()
+    if (status === 'failed' || status === 'error') return 'failed'
+    if (status === 'waiting_approval' || status === 'waiting_input' || status === 'waiting') {
+      return 'waiting'
+    }
+    return 'done'
+  }
+
+  /* 一个 Agent 一行：只认带 agentName 的过程步；派单句里的子任务标题作为“在做什么”。 */
+  const dockAgents = (): DockAgent[] => {
+    const turn = turns().at(-1)
+    if (turn === undefined) return []
+    const byAgent = new Map<string, DockAgent>()
+    for (const step of turn.steps) {
+      const name = step.agentName
+      if (name === undefined || name === '') continue
+      const previous = byAgent.get(name)
+      const fromDispatch =
+        step.stage === 'dispatching' || step.stage === 'retrying'
+          ? (step.content.split('：').at(-1) ?? '')
+          : undefined
+      const status =
+        step.stage === 'completed' ? 'done' : step.stage === 'failed' ? 'failed' : 'running'
+      byAgent.set(name, {
+        name,
+        label: fromDispatch ?? previous?.label ?? '',
+        status,
+      })
+    }
+    return [...byAgent.values()]
+  }
+
+  const dockVisible = (): boolean =>
+    thread() !== undefined && (turns().length > 0 || dockApprovals().length > 0)
+
+  const dockOpen = (): boolean => {
+    const override = dockOverride()
+    if (override !== undefined && dockThread() === thread()?.id) return override === 'open'
+    const phase = dockPhase()
+    return phase === 'running' || phase === 'waiting'
+  }
+
+  const toggleDock = (): void => {
+    setDockThread(thread()?.id)
+    setDockOverride(dockOpen() ? 'closed' : 'open')
+  }
+
   const handleAuthRetried = (result: { thread: ChatThread; messages: ChatMessage[] }): void => {
     setThread(result.thread)
     setMessages(result.messages)
@@ -939,214 +1024,228 @@ export function ChatView(props: ChatViewProps) {
 
   return (
     <div class="grid min-h-0 flex-1 max-[860px]:grid-cols-1" style={gridStyle()}>
-      <aside
-        class={`relative min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-canvas max-[860px]:border-r-0 ${
-          leftCollapsed() ? 'hidden' : 'flex'
-        } ${mobileThreads() ? 'max-[860px]:flex' : 'max-[860px]:hidden'}`}
-        aria-label={props.t('threads')}
-        style={columnStyle(1)}
-      >
-        <div class="flex flex-none items-center gap-1.5 px-3 pt-3 pb-2">
-          <IconButton
-            icon="chevronLeft"
-            label={props.t('chat')}
-            class={MOBILE_ONLY}
-            onClick={() => setMobileThreads(false)}
-          />
+      {/* 会话历史是抽屉（E 稿）：280px 面板从左侧伸出，遮罩可点关闭。 */}
+      <Show when={drawerOpen()}>
+        <div
+          class="fixed inset-0 z-40 bg-ink/20"
+          aria-hidden="true"
+          onClick={() => setDrawerOpen(false)}
+        />
+        <div
+          class="hx-drawer fixed inset-y-0 left-0 z-50 flex w-[280px] max-w-[88vw] flex-col border-r border-line bg-canvas"
+          role="dialog"
+          aria-label={props.t('openThreads')}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setDrawerOpen(false)
+          }}
+        >
+          <div class="flex flex-none items-center gap-2 px-3 pt-3 pb-2">
+            <h2 class="flex-1 text-meta font-semibold text-ink">{props.t('openThreads')}</h2>
+            <IconButton
+              icon="x"
+              label={props.t('closeDrawer')}
+              onClick={() => setDrawerOpen(false)}
+            />
+          </div>
           <input
-            class="h-8 min-w-0 flex-1 rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+            ref={(el) => {
+              searchEl = el
+            }}
+            class="mx-3 mb-2 h-8 rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
             type="search"
             aria-label={props.t('searchThreads')}
             placeholder={props.t('searchThreads')}
             value={query()}
             onInput={(event) => setQuery(event.currentTarget.value)}
           />
-          <IconButton icon="plus" label={props.t('newThread')} onClick={() => void newThread()} />
-        </div>
-        <div
-          class="min-h-0 flex-1 overflow-y-auto px-2 pb-4"
-          onScroll={() => {
-            if (menuFor() !== undefined) setMenuFor(undefined)
-          }}
-        >
-          <For each={filteredThreads()}>
-            {(item, index) => (
-              <div
-                class={`group relative rounded-panel ${
-                  thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'
-                }`}
-              >
-                <Show
-                  when={renamingId() === item.id}
-                  fallback={
+          <div
+            class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2"
+            onScroll={() => {
+              if (menuFor() !== undefined) setMenuFor(undefined)
+            }}
+          >
+            <For each={filteredThreads()}>
+              {(item) => (
+                <div
+                  class={`group relative rounded-panel ${
+                    thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'
+                  }`}
+                >
+                  <Show
+                    when={renamingId() === item.id}
+                    fallback={
+                      <button
+                        type="button"
+                        class="flex w-full min-w-0 flex-col gap-[3px] px-2.5 py-2 pr-9 text-left"
+                        onClick={() => {
+                          setDrawerOpen(false)
+                          props.onOpenThread(item.id)
+                        }}
+                        title={item.title}
+                      >
+                        <span
+                          class={`truncate text-meta text-ink ${
+                            thread()?.id === item.id ? 'font-semibold' : 'font-medium'
+                          }`}
+                        >
+                          {displayTitle(item.title)}
+                        </span>
+                        <span class="flex min-w-0 items-center gap-1.5 text-badge text-ink-3">
+                          <span
+                            class={`inline-block size-1.5 flex-none rounded-full ${threadDot(item.status)}`}
+                            aria-hidden="true"
+                          />
+                          <span class="shrink-0 capitalize">{statusLabel(item.status)}</span>
+                          <Show when={threadWaiting(item) > 0}>
+                            <span aria-hidden="true">·</span>
+                            <span class="shrink-0 font-semibold text-warning">
+                              {props.t('threadNeedYou', { count: threadWaiting(item) })}
+                            </span>
+                          </Show>
+                          <span aria-hidden="true">·</span>
+                          <span class="truncate">{relativeTime(props.locale, item.updatedAt)}</span>
+                        </span>
+                      </button>
+                    }
+                  >
+                    <div class="px-2.5 py-2.5">
+                      <input
+                        class="h-7 w-full rounded-control border border-line bg-surface px-2 text-meta text-ink focus-visible:border-transparent focus-visible:outline-2 focus-visible:outline-ring"
+                        value={renameDraft()}
+                        aria-label={props.t('rename')}
+                        ref={(element) =>
+                          queueMicrotask(() => {
+                            element.focus()
+                            element.select()
+                          })
+                        }
+                        onInput={(event) => setRenameDraft(event.currentTarget.value)}
+                        onBlur={() => void commitRename(item.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            void commitRename(item.id)
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault()
+                            setRenamingId(undefined)
+                          }
+                        }}
+                      />
+                    </div>
+                  </Show>
+
+                  <Show when={renamingId() !== item.id}>
                     <button
                       type="button"
-                      class={`${threadRow} pr-9`}
-                      onClick={() => {
-                        setMobileThreads(false)
-                        props.onOpenThread(item.id)
-                      }}
-                      title={item.title}
-                    >
-                      <span
-                        class={`truncate text-meta ${
-                          thread()?.id === item.id
-                            ? 'font-semibold text-ink'
-                            : 'font-medium text-ink'
-                        }`}
-                      >
-                        {displayTitle(item.title)}
-                      </span>
-                      <span class="line-clamp-2 text-badge leading-snug text-ink-2">
-                        {item.lastMessage ??
-                          (item.messageCount === 0
-                            ? props.t('chatEmptyPreview')
-                            : displayTitle(item.title))}
-                      </span>
-                      <span class="mt-0.5 flex flex-wrap gap-2 text-badge text-ink-3">
-                        <span>
-                          {item.messageCount} {props.t('messages')}
-                        </span>
-                        <span>{relativeTime(props.locale, item.updatedAt)}</span>
-                      </span>
-                    </button>
-                  }
-                >
-                  <div class="px-2.5 py-2.5">
-                    <input
-                      class="h-7 w-full rounded-control border border-line bg-surface px-2 text-meta text-ink focus-visible:border-transparent focus-visible:outline-2 focus-visible:outline-ring"
-                      value={renameDraft()}
-                      aria-label={props.t('rename')}
-                      ref={(element) =>
-                        queueMicrotask(() => {
-                          element.focus()
-                          element.select()
-                        })
-                      }
-                      onInput={(event) => setRenameDraft(event.currentTarget.value)}
-                      onBlur={() => void commitRename(item.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          void commitRename(item.id)
-                        } else if (event.key === 'Escape') {
-                          event.preventDefault()
-                          setRenamingId(undefined)
+                      class={`absolute top-1 right-1 grid size-7 place-items-center rounded-control text-ink-3 transition-opacity hover:bg-subtle hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring ${
+                        menuFor() === item.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                      aria-label={props.t('threadActions')}
+                      title={props.t('threadActions')}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (menuFor() === item.id) {
+                          setMenuFor(undefined)
+                          return
                         }
+                        const rect = event.currentTarget.getBoundingClientRect()
+                        const width = 128
+                        const height = 108
+                        const top =
+                          rect.bottom + 4 + height > window.innerHeight
+                            ? Math.max(8, rect.top - height - 4)
+                            : rect.bottom + 4
+                        setMenuPos({ left: Math.max(8, rect.right - width), top })
+                        setMenuFor(item.id)
                       }}
-                    />
-                  </div>
-                </Show>
-
-                <Show when={renamingId() !== item.id}>
-                  <button
-                    type="button"
-                    class={`absolute top-1.5 right-1.5 grid size-7 place-items-center rounded-control text-ink-3 transition-opacity hover:bg-subtle hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring ${
-                      menuFor() === item.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                    aria-label={props.t('threadActions')}
-                    title={props.t('threadActions')}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      if (menuFor() === item.id) {
-                        setMenuFor(undefined)
-                        return
-                      }
-                      const rect = event.currentTarget.getBoundingClientRect()
-                      const width = 128
-                      const height = 108
-                      const top =
-                        rect.bottom + 4 + height > window.innerHeight
-                          ? Math.max(8, rect.top - height - 4)
-                          : rect.bottom + 4
-                      setMenuPos({ left: Math.max(8, rect.right - width), top })
-                      setMenuFor(item.id)
-                    }}
-                  >
-                    <Icon name="more" size={15} />
-                  </button>
-                </Show>
-              </div>
-            )}
-          </For>
-          <Show when={filteredThreads().length === 0}>
-            <div class={emptyBlock}>
-              <span class={emptyGlyph}>
-                <Icon name="message" size={18} />
-              </span>
-              <span>{props.t('noThreads')}</span>
-            </div>
-          </Show>
-        </div>
-        <Show when={wide() && !leftCollapsed()}>
-          {/* biome-ignore lint/a11y/useSemanticElements: no native element resizes a pane; role=separator is the ARIA pattern for it */}
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={props.t('threads')}
-            aria-valuenow={leftWidth()}
-            aria-valuemin={LEFT_MIN}
-            aria-valuemax={LEFT_MAX}
-            tabindex="0"
-            class="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none"
-            onPointerDown={(event) => startDrag('left', event)}
-            onKeyDown={(event) => nudge('left', event)}
-          />
-        </Show>
-      </aside>
-
-      <section
-        class={`min-h-0 min-w-0 flex-col bg-surface ${mobileThreads() ? 'max-[860px]:hidden' : 'flex max-[860px]:flex'}`}
-        aria-label={props.t('chat')}
-        style={columnStyle(2)}
-      >
-        <header class="flex flex-none items-center gap-2 border-b border-line px-2.5 py-2">
-          {/* The pane toggle sits where a title would be: the screen already says
-              "Chat", so a second title here was pure repetition. */}
-          <IconButton
-            icon="panelLeft"
-            label={
-              wide()
-                ? leftCollapsed()
-                  ? props.t('expandThreads')
-                  : props.t('collapseThreads')
-                : props.t('threads')
-            }
-            pressed={wide() ? !leftCollapsed() : mobileThreads()}
-            onClick={() => {
-              if (wide()) setPane('left', !leftCollapsed())
-              else setMobileThreads(true)
-            }}
-          />
-          <div class="flex min-w-0 flex-1 items-center gap-2">
-            <Show when={thread() !== undefined}>
-              <span class="truncate text-section font-semibold text-ink">
-                {displayTitle(thread()?.title ?? '')}
-              </span>
-              <StatusBadge status={threadStatus()} label={props.t(statusKey(threadStatus()))} />
-              <Show when={thread()?.taskId}>
-                <span class="shrink-0 font-mono text-badge text-ink-3" title={thread()?.taskId}>
-                  {shortenId(thread()?.taskId ?? '')}
+                    >
+                      <Icon name="more" size={15} />
+                    </button>
+                  </Show>
+                </div>
+              )}
+            </For>
+            <Show when={filteredThreads().length === 0}>
+              <div class={emptyBlock}>
+                <span class={emptyGlyph}>
+                  <Icon name="message" size={18} />
                 </span>
-              </Show>
+                <span>{props.t('noThreads')}</span>
+              </div>
             </Show>
           </div>
-          <div class="flex flex-none items-center gap-0.5">
-            <Show when={wideContext()}>
-              <IconButton
-                icon="panelRight"
-                label={rightCollapsed() ? props.t('expandContext') : props.t('collapseContext')}
-                pressed={!rightCollapsed()}
-                onClick={() => setPane('right', !rightCollapsed())}
-              />
-            </Show>
-            <Show when={thread()?.taskId}>
-              <IconButton
-                icon="external"
-                label={props.t('openTask')}
-                onClick={() => props.onOpenTask(thread()?.taskId ?? '')}
-              />
-            </Show>
+          <div class="flex-none px-3 pt-2 pb-3">
+            <button
+              type="button"
+              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-control border border-dashed border-control text-meta font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              onClick={() => {
+                setDrawerOpen(false)
+                void newThread()
+              }}
+            >
+              <Icon name="plus" size={14} />
+              {props.t('newThread')}
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <section
+        class="flex min-h-0 min-w-0 flex-col bg-surface"
+        aria-label={props.t('chat')}
+        style={columnStyle(1)}
+      >
+        {/* 头部（v9）：标题 + chevron 是抽屉入口；副行只说“在哪个工作区 · 什么权限”。
+            右侧只有一个“⋯”文本菜单——v9 的头部不放图标按钮。 */}
+        <header class="flex-none px-5 pt-[18px] pb-3.5">
+          <div class="mx-auto flex w-full max-w-[720px] items-start gap-2.5">
+            <div class="min-w-0 flex-1">
+              <button
+                type="button"
+                class="-ml-0.5 inline-flex max-w-full items-center gap-[7px] rounded-control border border-transparent py-px pr-1.5 pl-0.5 text-left text-[17px] leading-[1.35] font-semibold text-ink transition-colors hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                aria-haspopup="dialog"
+                aria-expanded={drawerOpen() ? 'true' : 'false'}
+                aria-label={props.t('openThreads')}
+                onClick={() => setDrawerOpen(true)}
+              >
+                <span class="truncate">
+                  {thread() === undefined ? props.t('chat') : displayTitle(thread()?.title ?? '')}
+                </span>
+                <Icon name="chevronDown" size={14} class="shrink-0 text-ink-3" />
+              </button>
+              <div class="mt-[5px] flex min-w-0 items-center gap-2 text-badge text-ink-3">
+                <Show when={currentWorkspace() !== ''}>
+                  <span class="truncate font-mono" title={currentWorkspace()}>
+                    {shortPath(currentWorkspace())}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                </Show>
+                <span class="shrink-0">
+                  {props.t(permissionKey(thread()?.permissionMode ?? permissionMode()))}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 rounded-control px-1.5 py-1 text-meta leading-none text-ink-3 transition-colors hover:bg-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              aria-label={props.t('threadActions')}
+              aria-haspopup="menu"
+              onClick={(event) => {
+                const item = thread()
+                if (item === undefined) return
+                const rect = event.currentTarget.getBoundingClientRect()
+                const width = 128
+                const height = 108
+                const top =
+                  rect.bottom + 4 + height > window.innerHeight
+                    ? Math.max(8, rect.top - height - 4)
+                    : rect.bottom + 4
+                setMenuPos({ left: Math.max(8, rect.right - width), top })
+                setMenuFor(menuFor() === item.id ? undefined : item.id)
+              }}
+            >
+              ⋯
+            </button>
           </div>
         </header>
 
@@ -1157,7 +1256,7 @@ export function ChatView(props: ChatViewProps) {
         </Show>
 
         <div
-          class="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 max-[860px]:px-4 max-[860px]:pt-4 max-[860px]:pb-1"
+          class="hx-fade-bottom flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-1 pb-7"
           role="log"
           aria-live="polite"
           ref={(el) => {
@@ -1171,9 +1270,9 @@ export function ChatView(props: ChatViewProps) {
             }
           }}
         >
-          {/* Reading measure, matching MessageRow's 74ch so the transcript and
+          {/* Reading measure, matching MessageRow's width so the transcript and
               the composer line up instead of the composer running full-bleed. */}
-          <div class="mx-auto flex w-full max-w-[74ch] flex-1 flex-col gap-4">
+          <div class="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-[22px]">
             <Show
               when={thread() !== undefined && messages().length > 0}
               fallback={
@@ -1251,13 +1350,17 @@ export function ChatView(props: ChatViewProps) {
                         t={props.t}
                         locale={props.locale}
                         phase={
-                          active() && lastTurnKey() === turn.key
-                            ? 'running'
-                            : threadStatus() === 'failed'
-                              ? 'failed'
-                              : threadStatus() === 'waiting'
-                                ? 'waiting'
-                                : 'done'
+                          /* 有审批在等 → 这个回合不是“在跑”，是“等你”：
+                             过程流随之收起，不让它把判断现场顶下去。 */
+                          lastTurnKey() === turn.key && dockApprovals().length > 0
+                            ? 'waiting'
+                            : active() && lastTurnKey() === turn.key
+                              ? 'running'
+                              : threadStatus() === 'failed'
+                                ? 'failed'
+                                : threadStatus() === 'waiting'
+                                  ? 'waiting'
+                                  : 'done'
                         }
                         elapsedMs={turnElapsed(turn)}
                         streaming={active() && lastTurnKey() === turn.key}
@@ -1284,16 +1387,31 @@ export function ChatView(props: ChatViewProps) {
 
         {/* No top border: the transcript and the composer read as one surface
             instead of two stacked panels. */}
+        {/* dock 回答“现在怎么了”：谁在跑、卡在哪；对话回答“发生过什么”。 */}
+        <Show when={dockVisible()}>
+          <div class="flex-none px-5 pt-3 pb-2">
+            <RunDock
+              phase={dockPhase()}
+              agents={dockAgents()}
+              approvals={dockApprovals()}
+              elapsedMs={thinkingMs()}
+              open={dockOpen()}
+              onToggle={toggleDock}
+              onApprove={(id) => void decideApproval(id, 'approve')}
+              onReject={(id) => void decideApproval(id, 'reject')}
+              t={props.t}
+            />
+          </div>
+        </Show>
         <form
-          class="flex-none bg-surface px-4 pt-1 pb-4"
+          class="flex-none px-5 pb-[18px]"
           onSubmit={(event) => {
             event.preventDefault()
             void send()
           }}
         >
-          {/* Same measure as the transcript, so the composer sits under the text
-              instead of stretching across the whole pane. */}
-          <div class="mx-auto flex w-full max-w-[74ch] flex-col">
+          {/* 与正文同一量度（v9：720px），输入面不会横跨整个面板。 */}
+          <div class="mx-auto flex w-full max-w-[720px] flex-col">
             <label class="visually-hidden" for="chat-composer">
               {props.t('chatPlaceholder')}
             </label>
@@ -1329,25 +1447,21 @@ export function ChatView(props: ChatViewProps) {
                 </For>
               </div>
             </Show>
-            {/* 工作区 + 权限档：新建会话必须先选文件夹；执行中不允许切换。 */}
-            <div class="mb-1.5 flex flex-wrap items-center gap-2 text-meta">
-              <button
-                type="button"
-                class="inline-flex min-w-0 max-w-[46ch] items-center gap-1.5 rounded-control border border-line bg-surface px-2 py-1 text-meta text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
-                title={
-                  currentWorkspace() === '' ? props.t('workspaceRequired') : currentWorkspace()
-                }
-                disabled={picking() || active()}
-                onClick={() => {
-                  void chooseWorkspace()
-                }}
-              >
-                <Icon name="file" size={14} />
-                <span class="truncate">
-                  {currentWorkspace() === '' ? props.t('chooseFolder') : currentWorkspace()}
-                </span>
-              </button>
-              <Show when={currentWorkspace() === '' && readRecentWorkspaces().length > 0}>
+            {/* 工作区只在“还没有工作区”时出现：已选过就归入线程头那一行（E 稿）。 */}
+            <Show when={currentWorkspace() === ''}>
+              <div class="mb-2 flex flex-wrap items-center gap-2 text-meta">
+                <button
+                  type="button"
+                  class="inline-flex h-[30px] min-w-0 max-w-[46ch] items-center gap-1.5 rounded-control border border-line bg-surface px-2.5 text-meta text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
+                  title={props.t('workspaceRequired')}
+                  disabled={picking() || active()}
+                  onClick={() => {
+                    void chooseWorkspace()
+                  }}
+                >
+                  <Icon name="file" size={14} />
+                  <span class="truncate">{props.t('chooseFolder')}</span>
+                </button>
                 <For each={readRecentWorkspaces()}>
                   {(path) => (
                     <button
@@ -1363,68 +1477,94 @@ export function ChatView(props: ChatViewProps) {
                     </button>
                   )}
                 </For>
-              </Show>
-              <span class="flex-1" />
-              <label class="sr-only" for="chat-permission">
-                {props.t('workspace')}
-              </label>
-              <select
-                id="chat-permission"
-                class="rounded-control border border-line bg-surface px-2 py-1 text-meta text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-                value={thread()?.permissionMode ?? permissionMode()}
-                disabled={active()}
-                onChange={(event) => {
-                  const next = event.currentTarget.value as PermissionMode
-                  setPermissionMode(next)
-                  writePermissionMode(next)
-                  const current = thread()
-                  if (current !== undefined) {
-                    void chatApi
-                      .setPermission(current.id, next)
-                      .then(() => loadThreads())
-                      .catch((cause: unknown) =>
-                        setError(cause instanceof Error ? cause.message : String(cause)),
-                      )
-                  }
+              </div>
+            </Show>
+            {/* 一个输入壳（v9）：textarea + 控件行同属一块，不再分成三行。 */}
+            <div class="rounded-[16px] border border-line-strong bg-surface px-3 pt-3 pb-[9px] shadow-[0_1px_2px_rgb(18_21_26/5%),0_12px_28px_-14px_rgb(18_21_26/18%)] transition-[border-color,box-shadow] focus-within:border-[color-mix(in_oklab,var(--hx-accent)_45%,var(--hx-line-default))]">
+              <textarea
+                id="chat-composer"
+                rows="2"
+                ref={(el) => {
+                  composerEl = el
                 }}
-              >
-                <option value="read-only">{props.t('permissionReadOnly')}</option>
-                <option value="workspace-write">{props.t('permissionWorkspaceWrite')}</option>
-                <option value="full">{props.t('permissionFull')}</option>
-              </select>
-            </div>
-            <textarea
-              id="chat-composer"
-              rows="2"
-              ref={(el) => {
-                composerEl = el
-              }}
-              class="block max-h-[200px] min-h-[68px] w-full resize-none rounded-panel border border-line bg-canvas px-3.5 py-3 text-body text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
-              value={text()}
-              placeholder={props.t('chatPlaceholder')}
-              onInput={(event) => {
-                const value = event.currentTarget.value
-                setText(value)
-                const current = thread()
-                if (current === undefined) writeUnsavedDraft(value)
-                else writeCachedThread(current.id, { draft: value })
-              }}
-              onKeyDown={submitOnEnter}
-            />
-            <div class="mt-2 flex items-center gap-2.5">
-              <span class="hidden text-badge text-ink-3 min-[560px]:inline">
-                {props.t('chatHint')}
-              </span>
-              <span class="flex-1" />
-              <button
-                type="submit"
-                class="grid size-9 flex-none place-items-center rounded-full bg-ink text-canvas transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:bg-subtle disabled:text-ink-3 disabled:hover:opacity-100"
-                aria-label={props.t('send')}
-                title={props.t('send')}
-                disabled={busy() || active() || text().trim() === '' || picking()}
-              >
-                <Icon name="arrowUp" size={16} />
-              </button>
+                class="block max-h-[200px] min-h-12 w-full resize-none border-0 bg-transparent px-1 py-0.5 text-body leading-[1.5] text-ink placeholder:text-ink-3 focus-visible:outline-none"
+                value={text()}
+                placeholder={props.t('chatPlaceholder')}
+                onInput={(event) => {
+                  const value = event.currentTarget.value
+                  setText(value)
+                  const current = thread()
+                  if (current === undefined) writeUnsavedDraft(value)
+                  else writeCachedThread(current.id, { draft: value })
+                }}
+                onKeyDown={submitOnEnter}
+              />
+              <div class="flex items-center gap-1.5 pt-2">
+                <button
+                  type="button"
+                  class="inline-flex h-6 min-w-0 max-w-[22ch] items-center gap-[5px] rounded-control border border-line-strong px-2 text-badge font-medium text-ink-3 transition-colors hover:border-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
+                  title={
+                    currentWorkspace() === '' ? props.t('workspaceRequired') : currentWorkspace()
+                  }
+                  disabled={picking() || active()}
+                  onClick={() => {
+                    void chooseWorkspace()
+                  }}
+                >
+                  <Icon name="file" size={12} class="shrink-0" />
+                  <span class="truncate">
+                    {currentWorkspace() === ''
+                      ? props.t('chooseFolder')
+                      : shortPath(currentWorkspace())}
+                  </span>
+                </button>
+                <label
+                  class="inline-flex h-6 items-center gap-[5px] rounded-control border border-line-strong px-2 text-badge font-medium text-ink-3 transition-colors hover:border-ink-3 hover:text-ink focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-ring"
+                  title={props.t('workspace')}
+                >
+                  <Icon name="shield" size={12} class="shrink-0" />
+                  <select
+                    id="chat-permission"
+                    class="cursor-pointer appearance-none border-0 bg-transparent text-badge font-medium text-ink-3 focus:outline-none"
+                    value={thread()?.permissionMode ?? permissionMode()}
+                    disabled={active()}
+                    onChange={(event) => {
+                      const next = event.currentTarget.value as PermissionMode
+                      setPermissionMode(next)
+                      writePermissionMode(next)
+                      const current = thread()
+                      if (current !== undefined) {
+                        void chatApi
+                          .setPermission(current.id, next)
+                          .then(() => loadThreads())
+                          .catch((cause: unknown) =>
+                            setError(cause instanceof Error ? cause.message : String(cause)),
+                          )
+                      }
+                    }}
+                  >
+                    <option value="read-only">{props.t('permissionReadOnly')}</option>
+                    <option value="workspace-write">{props.t('permissionWorkspaceWrite')}</option>
+                    <option value="full">{props.t('permissionFull')}</option>
+                  </select>
+                </label>
+                <span class="flex-1" />
+                <span class="hidden items-center gap-[5px] text-badge text-ink-3 min-[560px]:inline-flex">
+                  <kbd class="rounded border border-line px-1 text-[10px] leading-4">⏎</kbd>
+                  {props.t('sendHint')}
+                  <kbd class="ml-1 rounded border border-line px-1 text-[10px] leading-4">⇧⏎</kbd>
+                  {props.t('newlineHint')}
+                </span>
+                <button
+                  type="submit"
+                  class="grid size-[30px] flex-none place-items-center rounded-full bg-ink text-canvas transition-transform duration-160 ease-[var(--ease-out)] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.94] disabled:bg-line-strong disabled:text-ink-3 disabled:hover:opacity-100"
+                  aria-label={props.t('send')}
+                  title={props.t('send')}
+                  disabled={busy() || active() || text().trim() === '' || picking()}
+                >
+                  <Icon name="arrowUp" size={15} />
+                </button>
+              </div>
             </div>
           </div>
         </form>
@@ -1435,7 +1575,7 @@ export function ChatView(props: ChatViewProps) {
           rightCollapsed() ? 'hidden' : 'flex'
         }`}
         aria-label={props.t('threadContext')}
-        style={columnStyle(3)}
+        style={columnStyle(2)}
       >
         <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
           <div class="mb-3 flex flex-col gap-1">
@@ -1594,8 +1734,8 @@ export function ChatView(props: ChatViewProps) {
             aria-valuemax={RIGHT_MAX}
             tabindex="0"
             class="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none"
-            onPointerDown={(event) => startDrag('right', event)}
-            onKeyDown={(event) => nudge('right', event)}
+            onPointerDown={(event) => startDrag(event)}
+            onKeyDown={(event) => nudge(event)}
           />
         </Show>
       </aside>
@@ -1675,13 +1815,14 @@ export function ChatView(props: ChatViewProps) {
   )
 }
 
-function formatDuration(ms: number): string {
+/* 时长文案必须跟着语言走：英文界面里出现“1秒”是漏翻（曾经真实发生过）。 */
+function formatDuration(ms: number, t: Translator): string {
   const total = Math.max(0, Math.round(ms / 1000))
-  if (total < 60) return `${total}秒`
   const minutes = Math.floor(total / 60)
   const seconds = total % 60
-  if (minutes < 60) return `${minutes}分${seconds}秒`
-  return `${Math.floor(minutes / 60)}小时${minutes % 60}分`
+  if (total < 60) return t('durationSeconds', { seconds: total })
+  if (minutes < 60) return t('durationMinutes', { minutes, seconds })
+  return t('durationHours', { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
 }
 
 function TurnBlock(props: {
@@ -1701,27 +1842,12 @@ function TurnBlock(props: {
   onAnswer: (id: string, answer: string) => void
   onAuthRetried: (result: { thread: ChatThread; messages: ChatMessage[] }) => void
 }) {
-  const title = (): string =>
-    props.phase === 'running'
-      ? props.t('chatTurnRunning')
-      : props.phase === 'failed'
-        ? props.t('chatTurnFailed')
-        : props.phase === 'waiting'
-          ? props.t('chatTurnWaiting')
-          : props.t('chatTurnDone')
-
-  const summary = (): string => {
-    const progress = props.turn.steps.filter((step) => step.kind === 'progress').at(-1)
-    return progress?.content ?? props.turn.final?.content ?? ''
-  }
+  /* 状态字样只在 dock；过程头只说“这一段是什么”。
+     但授权/澄清是判断现场，不能被折叠藏住（v7 决定 O）。 */
   const open = (): boolean =>
     props.phase === 'running' ||
     props.phase === 'failed' ||
-    props.phase === 'waiting' ||
-    props.turn.final === undefined ||
-    props.turn.steps.some(
-      (step) => step.kind === 'auth' || step.kind === 'approval' || step.kind === 'clarification',
-    )
+    props.turn.steps.some((step) => step.kind === 'auth' || step.kind === 'clarification')
 
   const startedAt = (): string =>
     props.turn.user?.createdAt ?? props.turn.steps[0]?.createdAt ?? new Date().toISOString()
@@ -1740,15 +1866,14 @@ function TurnBlock(props: {
           <time>{relativeTime(props.locale, startedAt())}</time>
         </div>
 
-        <ThinkingTrace
-          title={`${title()} · ${props.t('chatTurnElapsed', {
-            duration: formatDuration(props.elapsedMs),
+        <ProcessTrace
+          title={props.t('chatProcess')}
+          meta={`${props.turn.steps.length} ${props.t('chatSteps')} · ${props.t('chatTurnElapsed', {
+            duration: formatDuration(props.elapsedMs, props.t),
           })}`}
-          meta={`${props.turn.steps.length} ${props.t('chatSteps')}`}
-          summary={summary()}
           open={open()}
         >
-          <ol class="flex list-none flex-col gap-2.5 p-0">
+          <ol class="flex list-none flex-col gap-1.5 p-0">
             <For each={props.turn.steps}>
               {(step) => (
                 <TurnStep
@@ -1765,7 +1890,7 @@ function TurnBlock(props: {
               )}
             </For>
           </ol>
-        </ThinkingTrace>
+        </ProcessTrace>
 
         <Show when={props.turn.final}>
           {(final) => (
@@ -1863,22 +1988,33 @@ function TurnStep(props: {
           when={step.detail !== undefined}
           fallback={
             <div class="flex items-start gap-2">
-              <Icon name="tool" size={12} class="mt-[3px] shrink-0 text-ink-3" />
+              <span class="mt-[2px] grid size-[18px] shrink-0 place-items-center text-ink-3">
+                <Icon name="tool" size={12} />
+              </span>
               <span class="min-w-0 break-words text-ink">{step.content}</span>
             </div>
           }
         >
           <details class="group/tool">
-            <summary class="flex cursor-pointer list-none items-center gap-2 text-ink [&::-webkit-details-marker]:hidden">
-              <Icon name="tool" size={12} class="shrink-0 text-ink-3" />
-              <span class="min-w-0 flex-1 truncate font-mono text-badge">{step.content}</span>
-              <Icon
-                name="chevronRight"
-                size={11}
-                class="shrink-0 text-ink-3 transition-transform group-open/tool:rotate-90"
-              />
+            {/* 悬停时同一 18px 槽位里图标交叉淡入为箭头；展开后箭头转 90°（v8）。 */}
+            <summary class="flex cursor-pointer list-none items-start gap-2 text-ink [&::-webkit-details-marker]:hidden">
+              <span class="relative mt-[2px] grid size-[18px] shrink-0 place-items-center text-ink-3">
+                <Icon
+                  name="tool"
+                  size={12}
+                  class="transition-opacity group-hover/tool:opacity-0 group-open/tool:opacity-0"
+                />
+                <Icon
+                  name="chevronRight"
+                  size={11}
+                  class="absolute opacity-0 transition-all group-hover/tool:opacity-100 group-open/tool:rotate-90 group-open/tool:opacity-100"
+                />
+              </span>
+              <span class="min-w-0 flex-1 truncate font-mono text-badge text-ink">
+                {step.content}
+              </span>
             </summary>
-            <div class="mt-1.5 flex flex-col gap-1.5 rounded-panel border border-line bg-surface p-2">
+            <div class="mt-1.5 ml-[26px] flex flex-col gap-1.5 rounded-control bg-subtle p-2">
               <Show when={detail()?.command}>
                 {(command) => (
                   <pre class="overflow-x-auto font-mono text-badge text-ink-2">$ {command()}</pre>
@@ -1902,19 +2038,25 @@ function TurnStep(props: {
   }
 
   if (step.kind === 'progress') {
+    /* 行内不再追加“完成/失败”：后端文案本身已经说了（`执行完成（验收 通过）`），
+       状态由图标颜色承载，重复一遍反而像缺格的表格（v8 反馈）。 */
     return (
       <li class="flex items-start gap-2">
-        <Icon
-          name={stepIcon(step.stage)}
-          size={12}
-          class={`mt-[3px] shrink-0 ${
-            step.stage === 'failed'
-              ? 'text-danger'
-              : step.stage === 'completed'
-                ? 'text-success'
-                : 'text-ink-3'
-          }`}
-        />
+        <span class="mt-[2px] grid size-[18px] shrink-0 place-items-center">
+          <Icon
+            name={stepIcon(step.stage)}
+            size={12}
+            class={
+              step.stage === 'failed'
+                ? 'text-danger'
+                : step.stage === 'completed'
+                  ? 'text-success'
+                  : step.stage === 'waiting'
+                    ? 'text-warning'
+                    : 'text-ink-3'
+            }
+          />
+        </span>
         <div class="min-w-0 break-words text-ink">
           <Show
             when={step.stage === 'thought' || step.stage === 'output'}
@@ -1943,21 +2085,15 @@ function TurnStep(props: {
     )
   }
 
-  if (step.kind === 'approval' && step.approvalId !== undefined) {
+  if (step.kind === 'approval') {
+    /* 审批是判断现场，但体积属于 dock（v9 §3.7.2）：对话里只留一条记录，
+       不再同一件事说两遍。 */
     return (
-      <li class="rounded-panel border border-line bg-canvas p-3">
-        <div class="flex items-center gap-2 text-meta font-medium text-warning">
-          <Icon name="alert" size={14} />
-          <span>{step.content}</span>
-        </div>
-        <div class="mt-2.5 flex items-center gap-2">
-          <Button onClick={() => props.onApprove(step.approvalId ?? '')}>
-            {props.t('approve')}
-          </Button>
-          <Button variant="ghost" onClick={() => props.onReject(step.approvalId ?? '')}>
-            {props.t('reject')}
-          </Button>
-        </div>
+      <li class="flex items-start gap-2 text-ink-2">
+        <span class="mt-[2px] grid size-[18px] shrink-0 place-items-center">
+          <Icon name="shield" size={12} class="text-warning" />
+        </span>
+        <span class="min-w-0 whitespace-pre-wrap">{step.content}</span>
       </li>
     )
   }
@@ -2173,7 +2309,7 @@ function MessageRow(props: {
   if (props.message.role === 'user') {
     return (
       <article class="flex flex-col items-end">
-        <div class="max-w-[min(100%,68ch)] rounded-[16px] rounded-br-[4px] bg-accent-soft px-3.5 py-2.5 text-body text-ink">
+        <div class="max-w-[min(100%,68ch)] rounded-[16px] rounded-br-[4px] bg-subtle px-3.5 py-2.5 text-body text-ink">
           <RichText text={props.message.content} copyLabel={props.t('copy')} />
         </div>
         <span class="mt-1 pr-1 text-badge text-ink-3">{time()}</span>

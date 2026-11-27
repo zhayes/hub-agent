@@ -24,6 +24,7 @@ import { createClarification } from './clarify'
 import { createAcpDispatchExecutor } from './dispatch/acp-executor'
 import { enqueueDispatch, listDispatches } from './dispatch/queue'
 import { drainDispatches } from './dispatch/runner'
+import { verdictLabel } from './labels'
 import { cancelTask } from './recovery/cancel'
 import { failGoal } from './recovery/fail'
 import { deriveIdempotencyKey } from './recovery/idempotency'
@@ -597,12 +598,12 @@ export async function runGoalWithBrain(
         result.ok
           ? {
               stage: 'completed',
-              text: `${chosen.name} 执行完成（验收 ${result.verdict}）`,
+              text: `${chosen.name} 执行完成（验收 ${verdictLabel(result.verdict)}）`,
               agent: chosen.name,
             }
           : {
               stage: 'failed',
-              text: `${chosen.name} 执行未通过（${result.stopReason}）`,
+              text: `${chosen.name} 执行未通过（验收 ${verdictLabel(result.verdict)}）`,
               agent: chosen.name,
             },
       )

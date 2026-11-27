@@ -36,10 +36,15 @@
   --text-badge--font-weight: 500;
 
   --radius-control: 6px;
-  --radius-panel: 10px;
+  --radius-panel: 12px;
+  /* 输入壳：composer / dock 用，比卡片大一档，读作“一个输入面”。 */
+  --radius-shell: 16px;
 
-  --shadow-popover: 0 8px 24px rgb(0 0 0 / 8%);
-  --shadow-dialog: 0 24px 64px rgb(0 0 0 / 18%);
+  --shadow-popover: 0 8px 24px rgb(11 12 14 / 10%);
+  --shadow-dialog: 0 24px 64px rgb(11 12 14 / 20%);
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @theme inline {

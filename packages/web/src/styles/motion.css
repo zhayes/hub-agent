@@ -75,6 +75,42 @@
   contain-intrinsic-size: auto 40px;
 }
 
+/* 内容在输入面之前淡出，而不是被一条横线切断（v9/v2 的做法）。 */
+.hx-fade-bottom {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
+
+/* 队列换条：入场从右侧 16px 滑入（与左滑出方向相反，读作“下一条”）。 */
+@keyframes hx-slide-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+.hx-slide-in {
+  animation: hx-slide-in var(--hx-dur-fast) var(--hx-ease-out);
+}
+
+/* 抽屉：从左侧 16px 处滑入（E 稿），退出比入场快。 */
+@keyframes hx-drawer-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0;
+  }
+}
+
+.hx-drawer {
+  animation: hx-drawer-in var(--hx-dur-enter) var(--hx-ease-drawer);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hx-slide-in,
+  .hx-drawer {
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hx-loading-grid i {
     animation: none;

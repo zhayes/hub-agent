@@ -17,3 +17,6 @@ playwright-report/
 
 # 视觉回归基线：本地工具，不入库（VISUAL_SNAPSHOTS=1 时生成）
 tests/visual/**/*-snapshots/
+
+# 设计工作区：现状基线、comps、tells 结果。本地记录，不入库（ADR 0029 / PLAN-CONSOLE-INTERACTION P0）
+docs/design/

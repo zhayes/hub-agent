@@ -1,39 +1,56 @@
-/* HubAgent UI v2 tokens (B · Warm Ink).
-   Prefixed with --hx- so they can live beside the pre-migration variables
-   until P3 removes the legacy stylesheet. Contrast measured 2026-11-25. */
+/* HubAgent UI tokens · Graphite (ADR 0030, PLAN-CONSOLE-INTERACTION §3.3).
+ *
+ * 主张：chrome 全灰阶；颜色只出现在两处——产品有判决的地方（pass / fail）
+ * 与「需要你」（signal 琥珀）。暖色每次出现都意味着“这件事轮到你了”。
+ *
+ * 所有前景色经 contrast.py 实测（括号内为 对比度：暗底 / 亮底），全部 ≥ 4.5。
+ * 换色板是 ADR 级变更（ADR 0019 白名单不变，令牌语义不变），不要当微调改。 */
 
 :root {
-  --hx-bg-canvas: light-dark(#faf9f6, #0c0b0a);
-  --hx-bg-surface: light-dark(#ffffff, #141311);
-  --hx-bg-subtle: light-dark(#f3f1ec, #1b1917);
-  --hx-bg-hover: light-dark(#efece6, #201d1a);
-  --hx-bg-active: light-dark(#e9e5de, #26221e);
+  /* Surfaces. Canvas 比 surface 略深，靠明度差分层，不靠投影。 */
+  --hx-bg-canvas: light-dark(#f6f7f9, #0b0c0e);
+  --hx-bg-surface: light-dark(#ffffff, #111316);
+  /* Highlighted block inside a surface (evidence, code, dock body). */
+  --hx-bg-subtle: light-dark(#f1f3f6, #171a1e);
+  --hx-bg-hover: light-dark(#eceff3, #1c2025);
+  --hx-bg-active: light-dark(#e5e9ee, #22272d);
 
-  --hx-fg-default: light-dark(#16181b, #f2efea);
-  --hx-fg-muted: light-dark(#575e68, #a8a29a);
-  --hx-fg-subtle: light-dark(#5f6672, #8f8a82);
+  /* Text. fg 15.9/17.1 · fg-2 8.75/6.40 · fg-3 5.17/5.02 */
+  --hx-fg-default: light-dark(#12151a, #e6e8eb);
+  --hx-fg-muted: light-dark(#545b65, #a8aeb6);
+  --hx-fg-subtle: light-dark(#636b78, #7c848e);
 
-  --hx-line-subtle: light-dark(#e6e3dc, #262320);
-  --hx-line-default: light-dark(#dad5cb, #33302b);
-  --hx-line-control: light-dark(#8a8175, #6b645b);
+  --hx-line-subtle: light-dark(#e4e7eb, #22262b);
+  --hx-line-default: light-dark(#cfd5dc, #2e343b);
+  --hx-line-control: light-dark(#b3bac3, #3a424a);
 
-  /* Elevation. Dark mode carries the depth with a top highlight instead of a
-     drop shadow, otherwise a black shadow on a near-black surface reads flat. */
+  /* Elevation. 暗色用顶部高光代替投影，否则近黑底上的黑影读起来是平的。 */
   --hx-shadow-card:
-    0 1px 2px light-dark(rgb(22 24 27 / 6%), rgb(0 0 0 / 50%)),
-    0 6px 16px -8px light-dark(rgb(22 24 27 / 14%), rgb(0 0 0 / 60%)),
+    0 1px 2px light-dark(rgb(11 12 14 / 6%), rgb(0 0 0 / 50%)),
+    0 6px 16px -8px light-dark(rgb(11 12 14 / 14%), rgb(0 0 0 / 60%)),
     inset 0 1px 0 light-dark(rgb(255 255 255 / 0%), rgb(255 255 255 / 5%));
 
-  --hx-accent: light-dark(#c2410c, #ff9468);
-  --hx-accent-hover: light-dark(#9a3412, #ffb08c);
-  --hx-accent-soft: light-dark(#fbede4, #3a2318);
+  /* 「需要你」= signal，9.59/5.53 */
+  --hx-accent: light-dark(#8a5a00, #f5a524);
+  --hx-accent-hover: light-dark(#6d4700, #ffbe4d);
+  --hx-accent-soft: light-dark(#fdf3e0, #2a2010);
 
-  --hx-success: light-dark(#166534, #5fd39a);
-  --hx-success-soft: light-dark(#e4f3e9, #163024);
-  --hx-warning: light-dark(#92400e, #f2c26b);
-  --hx-warning-soft: light-dark(#fdf3e2, #332916);
-  --hx-danger: light-dark(#b42318, #ff9aa5);
-  --hx-danger-soft: light-dark(#fdecea, #351d22);
+  /* 判决：pass 绿 / fail 红。除这两处与 signal 之外不出现彩色。 */
+  --hx-success: light-dark(#1a7f37, #3fb950);
+  --hx-success-soft: light-dark(#e8f3ec, #10221a);
+  --hx-warning: light-dark(#8a5a00, #f5a524);
+  --hx-warning-soft: light-dark(#fdf3e0, #2a2010);
+  --hx-danger: light-dark(#b3261e, #f85149);
+  --hx-danger-soft: light-dark(#fbeceb, #2a1414);
 
-  --hx-ring: light-dark(#c2410c, #ff9468);
+  --hx-ring: light-dark(#8a5a00, #f5a524);
+
+  /* Motion（emil-design-eng）：内置 ease 太软，撑不起“有意为之”。 */
+  --hx-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --hx-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --hx-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --hx-dur-fast: 160ms;
+  --hx-dur-base: 200ms;
+  --hx-dur-enter: 240ms;
+  --hx-dur-exit: 180ms;
 }

@@ -113,17 +113,19 @@ test('composer slash menu and pane resize are keyboard reachable', async ({ page
   await composer.click()
   await page.keyboard.type('/')
   await expect(page.getByRole('listbox')).toBeVisible()
-  await expect(page.getByRole('option', { name: /New thread/ })).toBeVisible()
+  await expect(page.getByRole('option', { name: /New conversation/ })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('listbox')).toBeHidden()
 
   const leftSplitter = page.getByRole('separator', { name: 'Threads' })
-  await expect(leftSplitter).toBeVisible()
-  const before = Number(await leftSplitter.getAttribute('aria-valuenow'))
-  await leftSplitter.focus()
-  await page.keyboard.press('ArrowRight')
-  const after = Number(await leftSplitter.getAttribute('aria-valuenow'))
-  expect(after).toBeGreaterThan(before)
+  /* 会话历史是抽屉（E 稿）：不占正文列，所以没有列分隔条。 */
+  await expect(leftSplitter).toHaveCount(0)
+  await page.getByRole('button', { name: 'Conversations' }).first().click()
+  const drawer = page.getByRole('dialog', { name: 'Conversations' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByRole('button', { name: /Fix login redirect loop/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeHidden()
 })
 
 test('approving from the approvals page confirms with a toast', async ({ page }) => {
@@ -179,12 +181,16 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
   await expect(page.getByText('Fix the login redirect loop')).toBeVisible()
   await expect(page.getByText('Task completed: task1')).toBeVisible()
 
-  await page.getByRole('link', { name: 'Tasks' }).click()
+  /* 任务不再是导航目的地：它是对象，从 ⌘K 或任务链接进入（ADR 0029 §2.2）。 */
+  await expect(page.getByRole('link', { name: 'Tasks' })).toHaveCount(0)
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.type('task')
+  await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/tasks$/)
   await expect(page.getByRole('heading', { name: 'Tasks' })).toBeVisible()
 
-  /* Theme and language live in Settings only: the rail is a list of places,
-     not a control panel. */
+  /* Theme and language live in Settings only. */
   await expect(page.getByRole('button', { name: /^Theme:/ })).toHaveCount(0)
   await page.getByRole('link', { name: 'Settings' }).click()
   await expect(page).toHaveURL(/\/settings$/)
@@ -197,25 +203,111 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
   await page.getByRole('button', { name: '中文' }).click()
   // The locale switch renames the controls; the shell must stay mounted and usable.
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
-  await expect(page.getByRole('link', { name: '任务' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '对话' })).toBeVisible()
 })
 
-test('context pane collapses and reopens from the chat header', async ({ page }) => {
+test('attention control opens the decision queue and resolves in place', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const pending = {
+    id: 'ap1',
+    taskId: 'task1',
+    executionId: 'exe1',
+    reason: 'Push the fix to origin',
+    resource: 'git push origin fix/auth-redirect-loop',
+    status: 'pending',
+    riskLevel: 'high',
+  }
+  const second = {
+    ...pending,
+    id: 'ap2',
+    reason: 'Run the acceptance suite',
+    resource: 'pnpm test:e2e',
+  }
+  const decided: string[] = []
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/approvals') {
+      const left = decided.length === 0 ? [pending, second] : decided[0] === 'ap1' ? [second] : []
+      return route.fulfill({ json: { ok: true, approvals: left } })
+    }
+    if (path.includes('/approve') || path.includes('/reject')) {
+      decided.push(path.split('/')[4] ?? '')
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/chat/threads')
+      return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 2 }] } })
+    if (path === '/api/v1/chat/threads/t1')
+      return route.fulfill({ json: { ok: true, thread, messages } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.goto('/chat/t1')
+  await expect(page.getByRole('button', { name: '2 waiting on you' })).toBeVisible()
+  await page.getByRole('button', { name: '2 waiting on you' }).click()
+
+  const sheet = page.getByRole('dialog', { name: 'Waiting on you' })
+  await expect(sheet).toBeVisible()
+  /* 五个问题里的四问（是什么/在哪/为什么/后果）都要在卡上。 */
+  await expect(sheet.getByRole('heading', { name: 'Push the fix to origin' })).toBeVisible()
+  await expect(sheet.getByText('git push origin fix/auth-redirect-loop')).toBeVisible()
+  await expect(sheet.getByText(/Approving resumes the same execution/)).toBeVisible()
+  await expect(sheet.getByText('1 more')).toBeVisible()
+
+  await sheet.getByRole('button', { name: 'Approve' }).click()
+  await expect.poll(() => decided).toEqual(['ap1'])
+  /* 处理完一条，下一条接上，剩余数不再显示。 */
+  await expect(sheet.getByRole('heading', { name: 'Run the acceptance suite' })).toBeVisible()
+  await expect(sheet.getByText('1 more')).toHaveCount(0)
+})
+
+test('task evidence opens in the side viewer, not in the header', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const withStep = [
+    messages[0],
+    {
+      id: 'm-step',
+      threadId: 't1',
+      role: 'assistant',
+      kind: 'progress',
+      stage: 'thought',
+      content: 'Reproduce first.',
+      createdAt: new Date().toISOString(),
+    },
+    messages[1],
+  ]
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/approvals') return route.fulfill({ json: { ok: true, approvals: [] } })
+    if (path === '/api/v1/chat/threads')
+      return route.fulfill({ json: { ok: true, threads: [{ ...thread, messageCount: 3 }] } })
+    if (path === '/api/v1/chat/threads/t1')
+      return route.fulfill({ json: { ok: true, thread, messages: withStep } })
+    if (path === '/api/v1/tasks/task1')
+      return route.fulfill({
+        json: { ok: true, task, subtasks: [], executions: [], verifications: [], approvals: [] },
+      })
+    if (path === '/api/v1/tasks/task1/decisions')
+      return route.fulfill({ json: { ok: true, decisions: [] } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
   await page.goto('/chat/t1')
   const context = page.getByRole('complementary', { name: 'Thread context' })
-  /* 右侧只放状态与关联任务，默认收起，避免抢占对话正文。 */
+  /* 右侧只在要看证据时出现（v9 头部没有图标按钮）。 */
   await expect(context).toBeHidden()
 
-  await page.getByRole('button', { name: 'Expand context' }).click()
+  const chat = page.getByRole('region', { name: 'Chat' })
+  await chat.getByRole('button', { name: /Fix login redirect loop/ }).first().click()
   await expect(context).toBeVisible()
+  await expect(context.getByRole('button', { name: 'Back' })).toBeVisible()
 
-  /* One toggle in the chat header owns the pane: collapsing removes it entirely
-     (no 48px rail carrying its own expand button). */
-  await page.getByRole('button', { name: 'Collapse context' }).click()
-  await expect(context).toBeHidden()
-
-  await page.getByRole('button', { name: 'Expand context' }).click()
-  await expect(context).toBeVisible()
+  await context.getByRole('button', { name: 'Back' }).click()
   await expect(
     page.getByRole('textbox', { name: 'Ask anything, or describe the work…' }),
   ).toBeVisible()
@@ -327,22 +419,21 @@ test('deleting a provider asks first, then removes it', async ({ page }) => {
   await expect(page.getByText('Beta', { exact: true })).toBeVisible()
 })
 
-test('collapsing the threads pane keeps the transcript column wide', async ({ page }) => {
+test('the conversation drawer leaves the transcript full width', async ({ page }) => {
   await page.setViewportSize({ width: 1456, height: 900 })
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
-  /* 右侧默认收起；先展开，才能验证“折叠左侧不会把上下文栏挤到中间”。 */
-  await page.getByRole('button', { name: 'Expand context' }).click()
-  await page.getByRole('button', { name: 'Collapse threads' }).first().click()
-
-  /* Regression: a collapsed pane is display:none, so the grid's auto-placement
-     used to pull the remaining panes a column left — transcript 0px wide and the
-     context pane swallowing the middle. */
+  /* 抽屉是浮层：正文宽度不受它影响，关掉之后也回到同一宽度。 */
   const transcript = await page.getByRole('region', { name: 'Chat' }).boundingBox()
-  const context = await page.getByRole('complementary', { name: 'Thread context' }).boundingBox()
-  expect(transcript?.width ?? 0).toBeGreaterThan(600)
-  expect(context?.width ?? 0).toBeLessThan(400)
+  await page.getByRole('button', { name: 'Conversations' }).first().click()
+  const drawer = page.getByRole('dialog', { name: 'Conversations' })
+  await expect(drawer).toBeVisible()
+  const behind = await page.getByRole('region', { name: 'Chat' }).boundingBox()
+  expect(Math.abs((behind?.width ?? 0) - (transcript?.width ?? 0))).toBeLessThan(2)
+
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeHidden()
   await expect(page.getByRole('textbox', { name: /Ask anything/ })).toBeVisible()
 })
 
@@ -373,9 +464,11 @@ test('transcript and composer keep a readable measure on wide screens', async ({
   // The pane is wide, but the text column is capped so lines stay scannable...
   expect(transcript?.width ?? 0).toBeGreaterThan(900)
   expect(composer?.width ?? 0).toBeLessThanOrEqual(700)
-  // ...and the composer shares that measure, so both edges line up.
-  expect(Math.abs((composer?.x ?? 0) - (message?.x ?? 0))).toBeLessThan(2)
-  expect(Math.abs((composer?.width ?? 0) - (message?.width ?? 0))).toBeLessThan(2)
+  // ...and the composer is centred on the same measure as the transcript.
+  // （textarea 在输入壳内缩进了 12px，所以比中心而不是比左边缘。）
+  const messageCenter = (message?.x ?? 0) + (message?.width ?? 0) / 2
+  const composerCenter = (composer?.x ?? 0) + (composer?.width ?? 0) / 2
+  expect(Math.abs(composerCenter - messageCenter)).toBeLessThan(2)
 })
 
 test('without a token chat shows one blocked card instead of empty panes', async ({ page }) => {
@@ -505,7 +598,11 @@ test('registry scans the built-in catalog and adopts an agent', async ({ page })
   })
 
   await page.goto('/registry')
-  await expect(page.getByRole('heading', { name: 'Connect' })).toBeVisible()
+  /* Agent 是一个目的地、两个分段：页名由分段控件承担，不再重复一个“接入”标题。 */
+  await expect(page.getByRole('link', { name: 'Connect', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
   await expect(page.getByText('DSH')).toBeVisible()
   await expect(page.getByText(/Missing: codex-acp/)).toBeVisible()
 
@@ -523,9 +620,80 @@ test('registry scans the built-in catalog and adopts an agent', async ({ page })
 test('registry does not overflow at 320px', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 })
   await page.goto('/registry')
-  await expect(page.getByRole('heading', { name: 'Connect' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Connect' })).toBeVisible()
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   expect(overflow).toBeLessThanOrEqual(1)
+})
+
+test('dock reports who is running and takes the decision in place', async ({ page }) => {
+  await page.unroute('**/api/v1/**')
+  const activeThread = { ...thread, status: 'active' }
+  const pending = {
+    id: 'ap1',
+    taskId: 'task1',
+    executionId: 'exe1',
+    reason: 'Push the fix to origin',
+    resource: 'git push origin fix/auth-redirect-loop',
+    status: 'pending',
+    riskLevel: 'high',
+  }
+  const steps = [
+    {
+      id: 'm3',
+      threadId: 't1',
+      role: 'assistant',
+      kind: 'progress',
+      stage: 'dispatching',
+      agentName: 'Claude Code',
+      content: 'Dispatch to Claude Code: fix cookie write order',
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'm4',
+      threadId: 't1',
+      role: 'assistant',
+      kind: 'progress',
+      stage: 'waiting',
+      content: 'Waiting for your approval',
+      createdAt: new Date().toISOString(),
+    },
+  ]
+  const approved: string[] = []
+  await page.route('**/api/v1/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/events/stream') return route.abort()
+    if (path === '/api/v1/approvals')
+      return route.fulfill({
+        json: { ok: true, approvals: approved.length === 0 ? [pending] : [] },
+      })
+    if (path.includes('/approve') || path.includes('/reject')) {
+      approved.push(path.split('/')[4] ?? '')
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (path === '/api/v1/tasks') return route.fulfill({ json: { ok: true, tasks: [task] } })
+    if (path === '/api/v1/agents') return route.fulfill({ json: { ok: true, agents: [] } })
+    if (path === '/api/v1/chat/threads')
+      return route.fulfill({ json: { ok: true, threads: [{ ...activeThread, messageCount: 3 }] } })
+    if (path === '/api/v1/chat/threads/t1')
+      return route.fulfill({
+        json: { ok: true, thread: activeThread, messages: [messages[0], ...steps] },
+      })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } })
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat/t1')
+
+  /* dock 回答“现在怎么了”：状态在头，Agent 行在体，审批就地拍板。 */
+  const dock = page.getByRole('region', { name: 'Run status' })
+  await expect(dock).toBeVisible()
+  await expect(dock.getByText('Waiting for you')).toBeVisible()
+  await expect(dock.getByText('1 approval')).toBeVisible()
+  await expect(dock.getByText('Push the fix to origin')).toBeVisible()
+  await expect(dock.getByText('git push origin fix/auth-redirect-loop')).toBeVisible()
+
+  await dock.getByRole('button', { name: 'Approve' }).click()
+  await expect.poll(() => approved).toEqual(['ap1'])
 })

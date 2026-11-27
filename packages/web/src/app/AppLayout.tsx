@@ -1,11 +1,14 @@
 import { useLocation, useNavigate } from '@solidjs/router'
 import { dynamic, type JSX } from '@solidjs/web'
-import { createSignal, For, onFlush, onSettled, Show } from 'solid-js'
+import { createEffect, createSignal, For, onFlush, onSettled, Show } from 'solid-js'
 import type { CommandPaletteProps, PaletteGroup } from '../components/ui/CommandPalette'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { IconButton } from '../components/ui/IconButton'
 import { ConnectionDot } from '../components/ui/StatusBadge'
 import { Toaster } from '../components/ui/Toaster'
+import { InboxPanel } from '../features/inbox/InboxPanel'
+import { deriveAttention } from '../shared/attention'
+import { formatRelativeTime } from '../shared/i18n'
 import { useApp } from './store'
 
 /* The palette drags the SDK's command + dialog + popup foundation (~180 kB) into
@@ -14,27 +17,23 @@ const LazyCommandPalette = dynamic(() =>
   import('../components/ui/CommandPalette').then((module) => module.CommandPalette),
 ) as unknown as (props: CommandPaletteProps) => JSX.Element
 
-const NAV: ReadonlyArray<{
-  href: string
-  key: 'navChat' | 'navTasks' | 'navAgents' | 'navRegistry' | 'navApprovals'
-  icon: IconName
-}> = [
+/* 两个目的地 + 设置（ADR 0029 §2.2）。任务与审批仍是对象/深链，不占导航位：
+   它们是“某个东西”，不是“某个地方”。 */
+const NAV: ReadonlyArray<{ href: string; key: 'navChat' | 'navAgents'; icon: IconName }> = [
   { href: '/chat', key: 'navChat', icon: 'message' },
-  { href: '/tasks', key: 'navTasks', icon: 'tasks' },
   { href: '/agents', key: 'navAgents', icon: 'agents' },
-  { href: '/registry', key: 'navRegistry', icon: 'plug' },
-  { href: '/approvals', key: 'navApprovals', icon: 'approvals' },
 ]
 
-/* Shell chrome on tokens. The body wrapper is plain utilities now: chat and
-   tasks pin a full-height flex column, everything else scrolls. */
-const railButton =
-  'relative grid size-10 place-items-center rounded-panel transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:border forced-colors:border-CanvasText'
+const navTab =
+  'inline-flex h-8 items-center gap-1.5 rounded-control px-2.5 text-meta font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+const navTabIdle = 'text-ink-2 hover:bg-hover hover:text-ink'
+const navTabActive = 'bg-active text-ink'
+
+const bottomTab =
+  'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-badge transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
 
 const bodyPane = 'flex min-h-0 flex-1 flex-col overflow-hidden'
 const bodyScroll = 'min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-7 max-[1100px]:px-4'
-const railButtonIdle = 'text-ink-2 hover:bg-hover hover:text-ink'
-const railButtonActive = 'bg-active text-ink'
 
 export function AppLayout(props: { children?: JSX.Element }) {
   const app = useApp()
@@ -43,52 +42,35 @@ export function AppLayout(props: { children?: JSX.Element }) {
   const path = () => location.pathname
   const [paletteOpen, setPaletteOpen] = createSignal(false)
   const [paletteLoaded, setPaletteLoaded] = createSignal(false)
+  const [inboxOpen, setInboxOpen] = createSignal(false)
 
   const isChat = (): boolean => path() === '/' || path().startsWith('/chat')
   const isTasks = (): boolean => path().startsWith('/tasks')
 
   const title = (): string => {
-    if (path().startsWith('/agents')) return app.t('agents')
+    /* `/agents` 与 `/registry` 是同一个目的地的两个分段（现场 / 接入）：
+       导航上合成一个“Agent”，页名与分段控件负责区分。 */
     if (path().startsWith('/registry')) return app.t('registry')
+    if (path().startsWith('/agents')) return app.t('agents')
     if (path().startsWith('/approvals')) return app.t('approvals')
     if (path().startsWith('/settings')) return app.t('settings')
     if (isChat()) return app.t('chat')
     return app.t('tasks')
   }
 
+  const isAgentsSection = (): boolean =>
+    path().startsWith('/agents') || path().startsWith('/registry')
+
   const isActive = (prefix: string): boolean =>
     prefix === '/tasks'
       ? path() === '/tasks' || path().startsWith('/tasks/')
-      : path().startsWith(prefix)
+      : prefix === '/agents'
+        ? isAgentsSection()
+        : path().startsWith(prefix)
 
-  const pendingApprovals = (): number =>
-    app.approvals().filter((approval) => approval.status === 'pending').length
-  const runningTasks = (): number => app.tasks().filter((task) => task.status === 'running').length
-  const failedTasks = (): number => app.tasks().filter((task) => task.status === 'failed').length
-
-  const note = (): string => {
-    if (path().startsWith('/settings')) return ''
-    if (path().startsWith('/registry')) return ''
-    if (path().startsWith('/agents')) {
-      if (app.agents().length === 0) return ''
-      const noNetwork = app.agents().filter((agent) => agent.networkMode === 'deny').length
-      const parts = [app.t('screenRegistered', { count: app.agents().length })]
-      if (noNetwork > 0) parts.push(app.t('screenNoNetwork', { count: noNetwork }))
-      return parts.join(' · ')
-    }
-    if (path().startsWith('/approvals')) {
-      return pendingApprovals() === 0
-        ? ''
-        : app.t('screenWaitingOnYou', { count: pendingApprovals() })
-    }
-    const parts: string[] = []
-    if (pendingApprovals() > 0) parts.push(app.t('screenApprovals', { count: pendingApprovals() }))
-    if (runningTasks() > 0) parts.push(app.t('screenRunning', { count: runningTasks() }))
-    if (failedTasks() > 0) parts.push(app.t('screenFailed', { count: failedTasks() }))
-    /* No "nothing needs you" filler: an empty subtitle is quieter than a
-       sentence that says nothing. */
-    return parts.join(' · ')
-  }
+  /* 注意力只有一个口径：审批 + 等你输入的任务，由 shared/attention 派生。 */
+  const attentionItems = () => deriveAttention({ approvals: app.approvals(), tasks: app.tasks() })
+  const attentionCount = (): number => attentionItems().length
 
   const connectionLabel = (): string => {
     const value = app.connection()
@@ -96,6 +78,24 @@ export function AppLayout(props: { children?: JSX.Element }) {
     if (value === 'connecting') return app.t('reconnecting')
     return app.t('offline')
   }
+
+  /* 离线时必须诚实：数据是旧的，就说清楚有多旧。 */
+  const connectionTitle = (): string => {
+    const synced = app.lastSyncedAt()
+    if (synced === undefined) return `${connectionLabel()} · ${app.t('never')}`
+    const when = formatRelativeTime(app.locale(), synced)
+    return `${connectionLabel()} · ${app.t('lastSynced', { time: when })}`
+  }
+
+  /* 浮层挂在 layout 上，路由不会把它卸载：跳转时必须自己关掉，
+     否则点「所在任务」会后弹窗仍在任务页上方。 */
+  createEffect(
+    () => path(),
+    () => {
+      setInboxOpen(false)
+      setPaletteOpen(false)
+    },
+  )
 
   /* Cmd/Ctrl+K anywhere in the console; the dialog owns Escape and focus return. */
   onSettled(() => {
@@ -115,8 +115,8 @@ export function AppLayout(props: { children?: JSX.Element }) {
       label: app.t('primaryNavigation'),
       items: [
         { value: 'nav:/chat', label: app.t('navChat') },
-        { value: 'nav:/tasks', label: app.t('navTasks') },
         { value: 'nav:/agents', label: app.t('navAgents') },
+        { value: 'nav:/tasks', label: app.t('navTasks'), hint: app.t('navTasks') },
         { value: 'nav:/approvals', label: app.t('navApprovals') },
         { value: 'nav:/settings', label: app.t('navSettings') },
       ],
@@ -148,7 +148,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
   }
 
   return (
-    <div class="grid h-dvh min-h-0 grid-cols-[56px_minmax(0,1fr)] max-[860px]:grid-cols-1">
+    <div class="flex h-dvh min-h-0 flex-col">
       <Toaster />
       <Show when={paletteLoaded()}>
         <LazyCommandPalette
@@ -161,19 +161,26 @@ export function AppLayout(props: { children?: JSX.Element }) {
           onRun={runPalette}
         />
       </Show>
-      <aside
-        class="flex min-h-0 flex-col items-center gap-1 border-r border-line bg-canvas pt-2.5 pb-3.5 max-[860px]:fixed max-[860px]:inset-x-0 max-[860px]:bottom-0 max-[860px]:z-20 max-[860px]:h-[calc(52px+env(safe-area-inset-bottom))] max-[860px]:flex-row max-[860px]:items-center max-[860px]:justify-between max-[860px]:border-r-0 max-[860px]:border-t max-[860px]:px-2.5 max-[860px]:pt-0 max-[860px]:pb-[env(safe-area-inset-bottom)]"
-        aria-label={app.t('appName')}
-      >
+
+      <InboxPanel
+        open={inboxOpen()}
+        items={attentionItems()}
+        onClose={() => setInboxOpen(false)}
+        onApprove={(id) => void app.decide(id, 'approve')}
+        onReject={(id) => void app.decide(id, 'reject')}
+        t={app.t}
+      />
+
+      <header class="flex h-12 flex-none items-center gap-3 border-b border-line bg-canvas px-4 max-[860px]:px-3">
         <a
-          class="mb-2 grid size-[38px] place-items-center rounded-panel text-accent transition-colors hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[860px]:hidden"
+          class="grid size-8 shrink-0 place-items-center rounded-control text-accent transition-colors hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           href="/chat"
           title={app.t('appName')}
         >
           <svg
             viewBox="0 0 24 24"
-            width="22"
-            height="22"
+            width="20"
+            height="20"
             fill="none"
             stroke="currentColor"
             stroke-width="1.7"
@@ -188,130 +195,177 @@ export function AppLayout(props: { children?: JSX.Element }) {
           </svg>
           <span class="visually-hidden">{app.t('appName')}</span>
         </a>
+
+        {/* ≥861px：文本页签。≤860px 让位给底部条——只装两个目的地时，顶部页签是多余的。 */}
         <nav
-          class="flex flex-col items-center gap-0.5 max-[860px]:flex-row"
+          class="flex items-center gap-0.5 max-[860px]:hidden"
           aria-label={app.t('primaryNavigation')}
         >
           <For each={NAV}>
             {(item) => (
               <a
                 href={item.href}
-                class={`${railButton} ${isActive(item.href) ? railButtonActive : railButtonIdle}`}
+                class={`${navTab} ${isActive(item.href) ? navTabActive : navTabIdle}`}
                 aria-current={isActive(item.href) ? 'page' : undefined}
-                aria-label={
-                  item.href === '/approvals' && pendingApprovals() > 0
-                    ? `${app.t('navApprovals')} · ${app.t('pendingCount', { count: pendingApprovals() })}`
-                    : app.t(item.key)
-                }
-                title={
-                  item.href === '/approvals' && pendingApprovals() > 0
-                    ? `${app.t('navApprovals')} · ${app.t('pendingCount', { count: pendingApprovals() })}`
-                    : app.t(item.key)
-                }
               >
-                <Icon name={item.icon} size={18} />
-                <Show when={item.href === '/approvals' && pendingApprovals() > 0}>
-                  <span
-                    class="absolute top-px right-px grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-badge font-semibold tabular-nums text-canvas"
-                    aria-hidden="true"
-                  >
-                    {pendingApprovals()}
-                  </span>
-                </Show>
+                <Icon name={item.icon} size={14} />
+                {app.t(item.key)}
               </a>
             )}
           </For>
         </nav>
-        {/* One entry point. Theme and language live in Settings, which already
-            owns them; the rail stays a list of places, not a control panel. */}
-        <div class="mt-auto flex w-10 flex-col items-center max-[860px]:mt-0 max-[860px]:w-auto max-[860px]:flex-row">
-          <a
-            href="/settings"
-            class={`${railButton} ${isActive('/settings') ? railButtonActive : railButtonIdle}`}
-            aria-current={isActive('/settings') ? 'page' : undefined}
-            aria-label={app.t('navSettings')}
-            title={app.t('navSettings')}
+
+        {/* 深链页（任务/审批/接入/设置）没有自己的页内标题，
+            所以页面名放在 app bar 上；对话页的标题在线程头，Agent 页是全屏舞台。 */}
+        <Show
+          when={!isChat() && !isAgentsSection()}
+          fallback={<h1 class="visually-hidden">{title()}</h1>}
+        >
+          <h1 class="min-w-0 truncate text-meta font-semibold text-ink">{title()}</h1>
+        </Show>
+        {/* Agent 是一个目的地、两个分段：现场（3D 工位）/ 接入（catalog 扫描与授权）。
+            窄屏收起分段——320px 下 app bar 装不下三段文字，接入仍可从现场的空态链接进入。 */}
+        <Show when={isAgentsSection()}>
+          <nav
+            class="flex h-7 items-center gap-0.5 rounded-control bg-subtle p-0.5 max-[560px]:hidden"
+            aria-label={app.t('agents')}
           >
-            <Icon name="settings" size={18} />
-          </a>
-        </div>
-      </aside>
-
-      <main class="flex min-h-0 min-w-0 flex-col max-[860px]:pb-[calc(52px+env(safe-area-inset-bottom))]">
-        <header class="flex h-12 flex-none items-center justify-between gap-4 border-b border-line px-6 max-[1100px]:px-4">
-          {/* The app bar carries the page's identity and status: a breadcrumb
-              instead of a hero title on its own row, so the page content starts
-              right under the bar. */}
-          <div class="flex min-w-0 items-baseline gap-2">
             <a
-              href="/chat"
-              class="shrink-0 rounded-control text-meta font-semibold text-ink-3 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              href="/agents"
+              class={`inline-flex h-6 items-center rounded-[4px] px-2 text-badge transition-colors ${
+                path().startsWith('/agents')
+                  ? 'bg-surface font-medium text-ink'
+                  : 'text-ink-3 hover:text-ink'
+              }`}
+              aria-current={path().startsWith('/agents') ? 'page' : undefined}
             >
-              {app.t('appName')}
+              {app.t('sectionStage')}
             </a>
-            <span class="shrink-0 text-meta text-ink-3" aria-hidden="true">
-              /
-            </span>
-            <h1 class="min-w-0 truncate text-body font-semibold text-ink">{title()}</h1>
-            <Show when={note() !== ''}>
-              <span class="min-w-0 truncate text-badge text-ink-3 max-[860px]:hidden">
-                {'· '}
-                {note()}
-              </span>
-            </Show>
-          </div>
-          <div class="flex items-center gap-1.5">
+            <a
+              href="/registry"
+              class={`inline-flex h-6 items-center rounded-[4px] px-2 text-badge transition-colors ${
+                path().startsWith('/registry')
+                  ? 'bg-surface font-medium text-ink'
+                  : 'text-ink-3 hover:text-ink'
+              }`}
+              aria-current={path().startsWith('/registry') ? 'page' : undefined}
+            >
+              {app.t('sectionAccess')}
+            </a>
+          </nav>
+        </Show>
+        <span class="flex-1" />
+
+        {/* 注意力控件：只报数，点开才给判断材料。
+            没有待办时它**不出现**——挂着一颗灰点写“需要你处理”是假信号。 */}
+        <Show when={attentionCount() > 0}>
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1.5 rounded-full border border-warning/45 bg-warning-soft px-2.5 text-badge font-medium text-warning transition-colors hover:border-warning focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            aria-label={app.t('attentionCount', { count: attentionCount() })}
+            aria-haspopup="dialog"
+            aria-expanded={inboxOpen() ? 'true' : 'false'}
+            title={app.t('attentionHint')}
+            onClick={() => setInboxOpen(true)}
+          >
             <span
-              class="inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 text-badge text-ink-2"
-              title={app.t('eventsCount', { count: app.events().length })}
-            >
-              <ConnectionDot state={app.connection()} />
-              <span>{connectionLabel()}</span>
-            </span>
-            <IconButton
-              icon="refresh"
-              label={app.t('refresh')}
-              onClick={() => void app.refresh()}
+              class="inline-block size-1.5 flex-none rounded-full bg-warning"
+              aria-hidden="true"
             />
+            <span class="tabular-nums max-[560px]:hidden">
+              {app.t('attentionCount', { count: attentionCount() })}
+            </span>
+            <span class="tabular-nums min-[561px]:hidden">{attentionCount()}</span>
+          </button>
+        </Show>
+
+        <span
+          class="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 text-badge text-ink-2 max-[560px]:px-2"
+          title={connectionTitle()}
+        >
+          <ConnectionDot state={app.connection()} />
+          <span class="max-[560px]:hidden">{connectionLabel()}</span>
+        </span>
+
+        <IconButton icon="refresh" label={app.t('refresh')} onClick={() => void app.refresh()} />
+
+        <a
+          href="/settings"
+          class={`grid size-8 place-items-center rounded-control transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[860px]:hidden ${
+            isActive('/settings') ? navTabActive : navTabIdle
+          }`}
+          aria-current={isActive('/settings') ? 'page' : undefined}
+          aria-label={app.t('navSettings')}
+          title={app.t('navSettings')}
+        >
+          <Icon name="settings" size={16} />
+        </a>
+      </header>
+
+      <main class="flex min-h-0 min-w-0 flex-1 flex-col max-[860px]:pb-[calc(52px+env(safe-area-inset-bottom))]">
+        <Show when={app.error() !== ''}>
+          <div
+            class="mx-4 mb-3 flex flex-none items-center justify-between gap-3 rounded-panel bg-danger-soft px-3 py-2.5 text-meta text-danger"
+            role="alert"
+          >
+            <span class="flex items-center gap-2">
+              <span class="shrink-0">
+                <Icon name="alert" size={15} />
+              </span>
+              <span>
+                {app.t('errorPrefix')}: {app.error()}
+              </span>
+            </span>
           </div>
-        </header>
+        </Show>
 
-        <div class="flex min-h-0 flex-1 flex-col">
-          <Show when={app.error() !== ''}>
-            <div
-              class="mx-6 mb-3 flex flex-none items-center justify-between gap-3 rounded-panel bg-danger-soft px-3 py-2.5 text-meta text-danger max-[1100px]:mx-4"
-              role="alert"
-            >
-              <span class="flex items-center gap-2">
-                <span class="shrink-0">
-                  <Icon name="alert" size={15} />
-                </span>
-                <span>
-                  {app.t('errorPrefix')}: {app.error()}
-                </span>
-              </span>
-            </div>
-          </Show>
+        {/* 页面没有拿到注入的 token，说明它不是 daemon 托管的：给出唯一可执行的动作，
+            不提供手动填 token 的入口（token 由 daemon 注入，用户不该经手）。 */}
+        <Show when={app.token() === '' && !isChat()}>
+          <div
+            class="mx-4 mb-3 flex flex-none items-center gap-3 rounded-panel border border-line bg-surface px-3 py-2"
+            role="status"
+          >
+            <Icon name="key" size={16} class="shrink-0 text-ink-3" />
+            <span class="min-w-0 flex-1 truncate text-meta text-ink-2">
+              <strong class="font-semibold text-ink">{app.t('daemonOfflineTitle')}</strong>
+              {' — '}
+              {app.t('daemonOfflineHint')}
+            </span>
+          </div>
+        </Show>
 
-          {/* 页面没有拿到注入的 token，说明它不是 daemon 托管的：给出唯一可执行的动作，
-              不提供手动填 token 的入口（token 由 daemon 注入，用户不该经手）。 */}
-          <Show when={app.token() === '' && !isChat()}>
-            <div
-              class="mx-6 mb-3 flex flex-none items-center gap-3 rounded-panel border border-line bg-surface px-3 py-2 max-[1100px]:mx-4"
-              role="status"
-            >
-              <Icon name="key" size={16} class="shrink-0 text-ink-3" />
-              <span class="min-w-0 flex-1 truncate text-meta text-ink-2">
-                <strong class="font-semibold text-ink">{app.t('daemonOfflineTitle')}</strong>
-                {' — '}
-                {app.t('daemonOfflineHint')}
-              </span>
-            </div>
-          </Show>
-
-          <div class={isChat() || isTasks() ? bodyPane : bodyScroll}>{props.children}</div>
-        </div>
+        <div class={isChat() || isTasks() ? bodyPane : bodyScroll}>{props.children}</div>
       </main>
+
+      {/* ≤860px：带文字标签的底部条。注意力控件留在 app bar，所以这里只有目的地。 */}
+      <nav
+        class="fixed inset-x-0 bottom-0 z-20 hidden h-[calc(52px+env(safe-area-inset-bottom))] items-stretch border-t border-line bg-canvas px-2 pb-[env(safe-area-inset-bottom)] max-[860px]:flex"
+        aria-label={app.t('primaryNavigation')}
+      >
+        <For each={NAV}>
+          {(item) => (
+            <a
+              href={item.href}
+              class={`${bottomTab} ${
+                isActive(item.href) ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
+              }`}
+              aria-current={isActive(item.href) ? 'page' : undefined}
+            >
+              <Icon name={item.icon} size={18} />
+              {app.t(item.key)}
+            </a>
+          )}
+        </For>
+        <a
+          href="/settings"
+          class={`${bottomTab} ${isActive('/settings') ? 'text-ink' : 'text-ink-3 hover:text-ink-2'}`}
+          aria-current={isActive('/settings') ? 'page' : undefined}
+        >
+          <Icon name="settings" size={18} />
+          {app.t('navSettings')}
+        </a>
+      </nav>
     </div>
   )
 }

@@ -33,6 +33,8 @@ export interface AppStore {
   token: Accessor<string>
   locale: Accessor<Locale>
   connection: Accessor<Connection>
+  /** 最后一次成功同步的时间；离线时要诚实地说数据有多旧。 */
+  lastSyncedAt: Accessor<string | undefined>
   theme: ThemeController
   t: Translator
   refresh: () => Promise<void>
@@ -65,8 +67,12 @@ export function AppProvider(props: { children: JSX.Element }) {
   const [token] = createSignal(getToken())
   const [locale, setLocaleSignal] = createSignal<Locale>(readLocale())
   const [connection, setConnection] = createSignal<Connection>('offline')
+  const [lastSyncedAt, setLastSyncedAt] = createSignal<string>()
   const theme = createTheme()
   let source: EventSource | undefined
+  let refreshTimer: number | undefined
+  let refreshing: Promise<void> | undefined
+  let refreshAgain = false
 
   const t: Translator = (key, params) => translate(locale(), key, params)
 
@@ -91,7 +97,7 @@ export function AppProvider(props: { children: JSX.Element }) {
     }
   }
 
-  const refresh = async (): Promise<void> => {
+  const loadSnapshot = async (): Promise<void> => {
     if (getToken() === '') return
     try {
       setError('')
@@ -103,13 +109,42 @@ export function AppProvider(props: { children: JSX.Element }) {
       setTasks(taskResult.tasks)
       setAgents(agentResult.agents)
       setApprovals(approvalResult.approvals)
+      setLastSyncedAt(new Date().toISOString())
+      /* 只刷新已经打开的那张详情：不再“列表一变就自动选中第一条”。
+         自动选中会把“看一下任务页”变成“改了当前上下文”，是隐藏副作用。 */
       const current = selected()
-      const first = taskResult.tasks[0]
       if (current !== undefined) await openTask(current.task.id, false)
-      else if (first !== undefined) await openTask(first.id, false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
+  }
+
+  /* 单飞：事件来一串只跑一次；跑的过程中又来事件，就在结束后补跑一次。
+     以前一条 SSE 事件触发一次全量重取，10 事件/秒就是 10 次风暴。 */
+  const refresh = async (): Promise<void> => {
+    if (refreshing !== undefined) {
+      refreshAgain = true
+      return refreshing
+    }
+    refreshing = loadSnapshot()
+    try {
+      await refreshing
+    } finally {
+      refreshing = undefined
+      if (refreshAgain) {
+        refreshAgain = false
+        await refresh()
+      }
+    }
+  }
+
+  /* 尾随去抖：一串事件只在停下 350ms 后同步一次。 */
+  const scheduleRefresh = (): void => {
+    if (refreshTimer !== undefined) return
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = undefined
+      void refresh()
+    }, 350)
   }
 
   const decide = async (id: string, action: 'approve' | 'reject'): Promise<void> => {
@@ -137,6 +172,7 @@ export function AppProvider(props: { children: JSX.Element }) {
     source.addEventListener('open', () => setConnection('live'))
     source.addEventListener('hubagent', (event) => {
       setEvents((previous) => [event.data, ...previous].slice(0, 30))
+      scheduleRefresh()
     })
     source.addEventListener('error', () => setConnection('connecting'))
   }
@@ -148,7 +184,10 @@ export function AppProvider(props: { children: JSX.Element }) {
       connectEvents()
     }
   })
-  onCleanup(() => source?.close())
+  onCleanup(() => {
+    source?.close()
+    if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+  })
 
   const value: AppStore = {
     tasks,
@@ -161,6 +200,7 @@ export function AppProvider(props: { children: JSX.Element }) {
     token,
     locale,
     connection,
+    lastSyncedAt,
     theme,
     t,
     refresh,

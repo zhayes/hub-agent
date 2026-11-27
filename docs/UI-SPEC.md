@@ -22,30 +22,35 @@
 
 > 代码中的 CSS 变量带 `--hx-` 前缀（如 `--hx-bg-canvas`），用于与迁移前的 legacy 变量共存；Tailwind 语义名不带前缀（`bg-canvas`）。P3 删除 legacy 后统一。
 
-### 2.1 语义角色（B · Warm Ink）
+### 2.1 语义角色（B · Graphite，ADR 0030）
+
+> 主张：**chrome 全灰阶；颜色只出现在两处——产品有判决的地方（pass / fail）与「需要你」（signal 琥珀）。**
+> 因此 `--accent` 不再用于主操作或“运行中”，它只表示“这件事轮到你了”。主按钮用 `--fg-default` 实底墨色。
 
 | token | Light | Dark | 用途 | 实测对比 |
 |---|---|---|---|---|
-| `--bg-canvas` | `#FAF9F6` | `#0C0B0A` | 页面底 | — |
-| `--bg-surface` | `#FFFFFF` | `#141311` | 面板、对话区 | — |
-| `--bg-subtle` | `#F3F1EC` | `#1B1917` | 次级面板、代码块 | — |
-| `--bg-hover` | `#EFECE6` | `#201D1A` | hover 填充 | — |
-| `--bg-active` | `#E9E5DE` | `#26221E` | 选中填充 | — |
-| `--fg-default` | `#16181B` | `#F2EFEA` | 正文、标题 | 16.89 / 17.15 |
-| `--fg-muted` | `#575E68` | `#A8A29A` | 次级文字 | 6.22 / 7.77 |
-| `--fg-subtle` | `#5F6672` | `#8F8A82` | 元信息（最低档） | **5.35 / 4.60** |
-| `--line-subtle` | `#E6E3DC` | `#262320` | 面板边界、表格行线 | 1.22 / 1.26 |
-| `--line-default` | `#DAD5CB` | `#33302B` | 分组线 | ≈1.4 |
-| `--line-control` | `#8A8175` | `#6B645B` | 输入框/控件边界 | **3.83 / 3.18** |
-| `--accent` | `#C2410C` | `#FF9468` | 主操作、运行中 | 5.18 / 8.57 |
-| `--accent-hover` | `#9A3412` | `#FFB08C` | 主操作 hover | — |
-| `--accent-soft` | `#FBEDE4` | `#3A2318` | 状态浅底 | 4.52 / 6.76 |
-| `--success` / `--success-soft` | `#166534` / `#E4F3E9` | `#5FD39A` / `#163024` | 通过、完成 | 6.21 / 7.60 |
-| `--warning` / `--warning-soft` | `#92400E` / `#FDF3E2` | `#F2C26B` / `#332916` | 待你处理 | 6.45 / 8.65 |
-| `--danger` / `--danger-soft` | `#B42318` / `#FDECEA` | `#FF9AA5` / `#351D22` | 失败、拒绝 | 5.75 / 7.72 |
-| `--ring` | `#C2410C` | `#FF9468` | 焦点环 | ≥3:1 |
+| `--bg-canvas` | `#F6F7F9` | `#0B0C0E` | 页面底 | — |
+| `--bg-surface` | `#FFFFFF` | `#111316` | 面板、对话区、dock 卡片 | — |
+| `--bg-subtle` | `#F1F3F6` | `#171A1E` | 证据块、代码、命令 | — |
+| `--bg-hover` | `#ECEFF3` | `#1C2025` | hover 填充 | — |
+| `--bg-active` | `#E5E9EE` | `#22272D` | 选中填充 | — |
+| `--fg-default` | `#12151A` | `#E6E8EB` | 正文、标题 | 17.1 / 15.9 |
+| `--fg-muted` | `#545B65` | `#A8AEB6` | 次级文字 | 6.40 / 8.75 |
+| `--fg-subtle` | `#636B78` | `#7C848E` | 元信息（最低档） | 5.02 / 5.17 |
+| `--line-subtle` | `#E4E7EB` | `#22262B` | 面板边界、表格行线 | ≈1.2 |
+| `--line-default` | `#CFD5DC` | `#2E343B` | 分组线 | ≈1.4 |
+| `--line-control` | `#B3BAC3` | `#3A424A` | 输入框/控件边界 | ≥3:1 |
+| `--accent`（signal） | `#8A5A00` | `#F5A524` | **只表示「需要你」** | 5.53 / 9.59 |
+| `--accent-hover` | `#6D4700` | `#FFBE4D` | signal hover | — |
+| `--accent-soft` | `#FDF3E0` | `#2A2010` | 「等你」容器浅底 | — |
+| `--success` / `--success-soft` | `#1A7F37` / `#E8F3EC` | `#3FB950` / `#10221A` | **判决通过**、完成 | ≥4.5 |
+| `--warning` / `--warning-soft` | `#8A5A00` / `#FDF3E0` | `#F5A524` / `#2A2010` | 待你处理（= signal） | 5.53 / 9.59 |
+| `--danger` / `--danger-soft` | `#B3261E` / `#FBECEB` | `#F85149` / `#2A1414` | **判决未通过**、拒绝 | ≥4.5 |
+| `--ring` | `#8A5A00` | `#F5A524` | 焦点环（与 signal 同源） | ≥3:1 |
 
-对比度为 2026-11-25 用 WCAG 公式实测；P1 需落成单测（见 §9）。
+对比度为 2026-11-27 用 WCAG 公式实测（`contrast.py`，见 PLAN-CONSOLE-INTERACTION §3.3）。
+
+**令牌不只颜色：动效也进令牌层**（`--hx-ease-out: cubic-bezier(.23,1,.32,1)`、`--hx-ease-drawer`、`--hx-dur-{fast,base,enter,exit}`）。内置 `ease` 太软，撑不起“有意为之”的观感。
 
 ### 2.2 使用规则
 
@@ -62,8 +67,8 @@
 
 | 业务状态 | tone | 展示 |
 |---|---|---|
-| `running` / `queued` / `active` | accent | 点 + 文案；胶囊仅详情/标题 |
-| `waiting_approval` / `pending` / `paused` | warning | 点 + 文案；审批卡片用浅底 |
+| `running` / `queued` / `active` | neutral（`fg-2` / `fg-3`） | 点 + 文案；**不用琥珀**——在跑不是“轮到你” |
+| `waiting_approval` / `waiting_input` / `pending` / `paused` | signal（琥珀） | 点 + 文案；审批容器用 `accent-soft` 浅底 |
 | `completed` / `pass` / `approved` | success | 点 + 文案 |
 | `failed` / `error` / `rejected` / `blocked` | danger | 点 + 文案 |
 | `idle` / `offline` / 未知 | neutral | 灰点 + 文案 |

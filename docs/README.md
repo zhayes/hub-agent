@@ -24,6 +24,7 @@
 | [PLAN-CHAT-UX.md](PLAN-CHAT-UX.md) | **对话页体验**：状态保持、消息层级、执行过程、授权卡片 | 对话页交互/数据源变化时 |
 | [PLAN-CHAT-TURNS.md](PLAN-CHAT-TURNS.md) | 对话回合视图、右侧资源阅读器、流式与精确续跑 | 回合布局/资源预览/续跑语义变化时 |
 | [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md) | 控制台前端的分阶段实施 | 控制台范围变化时 |
+| [PLAN-CONSOLE-INTERACTION.md](PLAN-CONSOLE-INTERACTION.md) | **控制台交互重构**：信息架构、注意力模型、运行详情、分阶段门禁 | 控制台导航/交互口径变化时 |
 | [UI-SPEC.md](UI-SPEC.md) | 视觉令牌、布局、组件与可访问性规范 | 设计系统或页面规范变化时 |
 | [REAL-HARNESS-BENCH.md](REAL-HARNESS-BENCH.md) | 真实 harness 的实测记录与命令 | 新增/复核真实 harness 时 |
 | [BRAIN-PI.md](BRAIN-PI.md) | Brain 与 Pi SDK 的接入方式 | Brain 契约或 Pi 升级时 |

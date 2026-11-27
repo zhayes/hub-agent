@@ -64,11 +64,14 @@ pnpm ha agent login workbuddy --method oauth    # 完成登录
 
 ## 跑一个任务
 
+**任务只能在控制台里发**（ADR 0029）：打开 `pnpm ha web` 的地址，在对话里说你要干什么，Brain 决定直接回答还是拆计划交付本机 Agent 执行。CLI 不提供任务创建。
+
 ```bash
-pnpm ha run "在 utils.ts 里把日期格式化改成 UTC，并跑测试" --agent hermes --worktree /path/to/repo --json
+pnpm ha web
+# 浏览器打开打印出的地址，在对话里描述目标
 ```
 
-任务在独立 worktree 里执行，结束时产出 `branch / commitSha / diffstat / changedFiles` 与 transcript；验收由 Runtime 执行，不采信 Agent 自述。
+判定由 Runtime 执行，不采信 Agent 自述；运行结束后在控制台看 `branch / commitSha / diffstat / changedFiles` 与验收结果。
 
 ## 常用命令
 
@@ -77,8 +80,8 @@ pnpm ha run "在 utils.ts 里把日期格式化改成 UTC，并跑测试" --agen
 | `pnpm ha web` | 启动 daemon + 控制台，打印地址 |
 | `pnpm ha doctor` | 检查 Node / 目录 / 数据库 / 沙箱 / git |
 | `pnpm ha agent scan \| adopt \| verify \| login \| add \| list \| show` | Agent 接入与注册表 |
-| `pnpm ha run <goal>` | 执行任务（支持 `--agent`、`--agents`、`--worktree`） |
-| `pnpm ha task …` / `pnpm ha approval …` | 任务与审批 |
+| `pnpm ha run <goal>` | **诊断入口**：默认拒绝，需 `--allow-task-create`（ADR 0029） |
+| `pnpm ha task …` / `pnpm ha approval …` | 任务查看与恢复、审批（不创建任务） |
 | `pnpm ha config \| logs \| gc \| maintenance` | 运行目录、日志、清理、投影重建 |
 
 所有命令都支持 `--json`。

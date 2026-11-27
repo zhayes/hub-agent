@@ -1,6 +1,6 @@
 # HubAgent Console Web 实施计划
 
-- 状态：计划（尚未实施）
+- 状态：已被 `PLAN-CONSOLE-INTERACTION.md` 取代（2026-11-27）。本文件仅作历史记录：导航与页面结构以 ADR 0029 + 新计划为准。
 - 日期：2026-11-24
 - 范围：M11 Web Console 收口 + Chat 入口
 - 预览：`preview/web-chat.html`、`preview/web-console.html`

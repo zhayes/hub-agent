@@ -9,6 +9,7 @@ import {
 } from './acp-run'
 import type { AgentRecord } from './agent-registry'
 import { recordDecision } from './decision-record'
+import { stopReasonLabel } from './labels'
 import { failGoal, failTask } from './recovery/fail'
 import { decideEscalation } from './recovery/failure'
 import { selectAgent } from './selection/select'
@@ -80,7 +81,7 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
         recordDecision(options.db, {
           goalId: options.goalId,
           type: 'abort',
-          rationale: `工具授权被拒（${result.stopReason}），确定性失败，不重试`,
+          rationale: `工具授权被拒（${stopReasonLabel(result.stopReason)}），确定性失败，不重试`,
           inputs: {
             attempt,
             executionId: result.executionId,

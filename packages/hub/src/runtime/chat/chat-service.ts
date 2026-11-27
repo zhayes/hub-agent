@@ -34,6 +34,7 @@ import { listAgents, resolveAgent, setAgentStatus } from '../agent-registry'
 import type { RunGoalWithBrainOptions } from '../brain-run'
 import { runGoalWithBrain } from '../brain-run'
 import { answerClarification } from '../clarify'
+import { verdictLabel } from '../labels'
 import { failTask } from '../recovery/fail'
 import { resumeExecution } from '../resume-execution'
 import { completeTaskAfterDelivery } from '../workspace/finalize'
@@ -449,7 +450,7 @@ export class ChatService {
         kind: result.ok ? 'result' : 'error',
         content: result.ok
           ? '继续执行完成（沿用同一 task，未重新计划）。'
-          : `继续执行没有通过（${result.stopReason}），任务停在失败。`,
+          : `继续执行没有通过（验收 ${verdictLabel(result.verdict)}），任务停在失败。`,
         taskId,
         goalId,
       })
@@ -544,7 +545,7 @@ export class ChatService {
         kind: outcome.ok ? 'result' : 'error',
         content: outcome.ok
           ? '验收通过，任务已完成（沿用同一 execution）。'
-          : `验收仍未通过（${outcome.verdict}），任务停在失败；可以重新执行。`,
+          : `验收仍未通过（${verdictLabel(outcome.verdict)}），任务停在失败；可以重新执行。`,
         taskId: outcome.taskId,
         goalId: outcome.goalId,
       })
@@ -1091,7 +1092,7 @@ export class ChatService {
           kind: result.ok ? 'result' : 'error',
           content: result.ok
             ? `任务已完成（验收通过）。详情见任务 ${result.taskId ?? ''}`
-            : `任务没有完成（${result.stopReason}）${result.taskId === undefined ? '' : `，任务 ${result.taskId} 还留着现场`}。`,
+            : `任务没有完成（验收 ${verdictLabel(result.verdict)}）${result.taskId === undefined ? '' : `，任务 ${result.taskId} 还留着现场`}。`,
           ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
           ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
         })

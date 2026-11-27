@@ -52,11 +52,16 @@ pnpm typecheck && pnpm lint && pnpm test:unit
 | M6 | Brain 决策层 | `OrchestratorBrain`、决策点队列、快照渲染 | 5–7 | 同快照重复 step 语义等价；重启能续跑 |
 | M7 | 并行与工作区 | worktree 租约、allowedPaths、合并/回滚 | 4–6 | 两 Agent 并行改不同目录并合并成功 |
 | M8 | 失败恢复 | 升级路径、无进展检测、幂等 | 3–4 | TC-003 / TC-010 / TC-012 通过 |
-| M9 | CLI 完整面 | run/task/agent/approval/logs/doctor | 3–4 | 全部 V1.0 验收只用 CLI 完成 |
+| M9 | CLI 完整面 | task/agent/approval/logs/doctor（不含任务创建） | 3–4 | 全部 V1.0 验收与审批只用 CLI 完成 |
 | M10 | 回归基线与指标 | 20–30 个真实任务、指标采集 | 4–6 | §2.3 六个指标能出数 |
 | **合计** | | | **39–56（约 8–11 周）** | |
 
 M11（Web Console）、M12（Agent Office 3D 舞台，见 `docs/PLAN-AGENT-OFFICE.md`）、A2A 与 Relay 的详细实施顺序见 [`docs/PLAN-A2A.md`](PLAN-A2A.md)。跨机器 A2A 是项目必做能力；开工前必须先完成 Runtime 唤醒/租约/outbox（见该文档 §5.1 / §5.1.1），路径为“先直接 HTTPS，再 Relay 穿透”。
+
+**两条口径变更（ADR 0029，2026-11-27）：**
+
+1. **下表与各里程碑里出现的 `pnpm hubagent run "…"` 一律按诊断入口阅读**：它需要显式 `--allow-task-create`，默认拒绝。生产入口是控制台对话。历史记录不改写，只在本处统一说明。
+2. **原则 P3「UI 最后」改为「入口最后关闭」**：控制台仍不重做业务逻辑（只调用 Runtime/Brain 既有能力），但它现在是唯一的人类任务入口，所以 CLI 独有的五项能力（并行扇出 / 验收命令 / 交付策略 / 后台执行 / 预算上限）必须先由控制台接管，才允许关闭 CLI 创建（ADR 0029 §2.4）。
 
 ---
 
@@ -576,11 +581,12 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 
 ### M9 · CLI 完整面（3–4 人日）
 
-**目标：** 不打开浏览器也能完成全部验收。
+**目标：** 不打开浏览器也能完成全部**验收与审批**（但不创建任务，见 ADR 0029）。
 
 **交付**
 
-- `run / task list|show|events|evidence|decisions|pause|resume|cancel|clean|answer / agent list|show|add / approval list|approve|reject / config / logs / doctor / gc / maintenance`
+- `task list|show|events|evidence|decisions|pause|resume|cancel|clean|answer / agent list|show|add / approval list|approve|reject / config / logs / doctor / gc / maintenance`
+- `run` 降级为诊断入口：必须显式 `--allow-task-create`，默认拒绝真实派单
 - 全部支持 `--json`
 - 退出码约定：0 成功 / 2 参数 / 3 审批被拒 / 4 验收失败 / 5 运行异常
 
@@ -638,6 +644,8 @@ pnpm bench --suite fixtures/regression-tasks --out reports/baseline.json
 ### M11 · Web Console（P1 生产基础，不计入 V1.0 门禁）
 
 **完整 Console Web 实施计划：** [WEB-CONSOLE-PLAN.md](<WEB-CONSOLE-PLAN.md>)
+
+**交互重构计划：** [PLAN-CONSOLE-INTERACTION.md](<PLAN-CONSOLE-INTERACTION.md>) —— 信息架构改为注意力优先，导航收敛为 对话 / Agent / 设置。**P2（壳层 + Graphite 令牌）、P3（活数据）、P4（浮层队列）、P6（对话降噪）已落地（2026-11-27）**；P5/P7/P8/P9 待做。
 
 
 **交付**
