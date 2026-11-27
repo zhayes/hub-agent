@@ -29,6 +29,7 @@ import {
   type TaskId,
 } from '../domain/ids'
 import type { DomainState } from '../domain/machine'
+import type { PermissionMode } from '../domain/status'
 import type { SandboxNetworkMode, SandboxProvider } from '../sandbox/types'
 import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
@@ -37,6 +38,7 @@ import type { Db } from '../storage/db'
 import { saveExecutionResume } from '../storage/queries/execution-resume'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
+import { decidePermission, toPermissionResponse } from './acp-permission'
 import { type AgentRecord, markAgentSeen } from './agent-registry'
 import { createSandboxDeniedApproval } from './approval'
 import { deriveIdempotencyKey, reserveDelegation } from './recovery/idempotency'
@@ -85,6 +87,11 @@ export interface RunAcpTaskOptions {
   allowedDomains?: readonly string[]
   /** 传给沙箱的 per-command 写路径（harness 自身状态目录等） */
   allowedWrite?: readonly string[]
+  /**
+   * 会话权限档位：决定 Agent 的 `session/request_permission` 怎么答。
+   * 缺省为 `workspace-write`（沙箱兜底，不逐次确认）。
+   */
+  permissionMode?: PermissionMode
   clientVersion?: string
   agentTimeouts?: Partial<AgentTimeouts>
   initializeTimeoutMs?: number
@@ -107,6 +114,11 @@ export interface RunAcpTaskResult {
   sessionId: string
   agent: { id: string; name: string }
   stopReason: string
+  /**
+   * 本轮是否有工具调用被权限策略拒绝。
+   * 用于把“权限被拒”与普通失败分开：前者是确定性失败，不应同 Agent 重试。
+   */
+  permissionDenied?: boolean
   attempt: number
   verdict: VerificationVerdict | 'not_run'
   replanRequired?: boolean
@@ -155,6 +167,10 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
   let baseSha: string | undefined
   const events: AcpExecutionEvent[] = []
   const networkMode = options.networkMode ?? 'agent-managed'
+  /* 缺省与“工作区内修改”一致：沙箱兜底，不逐次弹确认。 */
+  const permissionMode: PermissionMode = options.permissionMode ?? 'workspace-write'
+  /** 本轮被拒的工具调用（用于把 cancelled 归因为权限问题）。 */
+  const deniedCalls: string[] = []
   const gitSandbox = {
     networkMode,
     ...(options.allowedDomains === undefined ? {} : { allowedDomains: options.allowedDomains }),
@@ -195,6 +211,16 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
       process: agentProcess,
       version: options.clientVersion ?? '0.0.0-m4',
       onEvent: recordEvent,
+      /*
+       * 工具授权：以前不传 handler → 客户端默认拒绝 → Agent 收到 reject 直接
+       * `stopReason: cancelled`，上层误以为“执行失败”（曾经把一条 `ls` 判成失败）。
+       * 现在按会话档位作答：只读工具放行，变更/网络看档位。
+       */
+      onPermissionRequest: (request) => {
+        const { allow, assessment } = decidePermission(permissionMode, request.toolCall)
+        if (!allow) deniedCalls.push(assessment.summary)
+        return toPermissionResponse(request, allow)
+      },
       ...(options.onStderr === undefined ? {} : { onStderr: options.onStderr }),
       ...(options.initializeTimeoutMs === undefined
         ? {}
@@ -434,6 +460,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         sessionId: session.sessionId,
         agent: { id: agent.id, name: agent.name },
         stopReason: promptResponse.stopReason,
+        ...(deniedCalls.length === 0 ? {} : { permissionDenied: true }),
         attempt,
         verdict: 'not_run',
         evidence,

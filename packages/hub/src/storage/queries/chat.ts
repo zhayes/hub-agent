@@ -8,6 +8,7 @@ import {
   type ChatMessageId,
   type ChatThreadId,
 } from '../../domain/ids'
+import { isPermissionMode, type PermissionMode } from '../../domain/status'
 import { newId } from '../../shared/id'
 import type { Db } from '../db'
 
@@ -17,6 +18,8 @@ interface ThreadRow {
   goal_id: string | null
   task_id: string | null
   status: string
+  worktree: string | null
+  permission_mode: string
   archived_at: string | null
   created_at: string
   updated_at: string
@@ -51,6 +54,8 @@ function toThread(row: ThreadRow): ChatThread {
     ...(row.goal_id === null ? {} : { goalId: asGoalId(row.goal_id) }),
     ...(row.task_id === null ? {} : { taskId: asTaskId(row.task_id) }),
     status: row.status as ChatThread['status'],
+    ...(row.worktree === null ? {} : { worktree: row.worktree }),
+    permissionMode: isPermissionMode(row.permission_mode) ? row.permission_mode : 'workspace-write',
     ...(row.archived_at === null ? {} : { archivedAt: asTimestamp(row.archived_at) }),
     createdAt: asTimestamp(row.created_at),
     updatedAt: asTimestamp(row.updated_at),
@@ -78,20 +83,38 @@ function toMessage(row: MessageRow): ChatMessage {
 
 export function createChatThread(
   db: Db,
-  input: { title: string; goalId?: string; taskId?: string },
+  input: {
+    title: string
+    goalId?: string
+    taskId?: string
+    worktree?: string
+    permissionMode?: PermissionMode
+  },
 ): ChatThread {
   const now = asTimestamp(new Date().toISOString())
   const id = asChatThreadId(newId())
+  const permissionMode: PermissionMode = input.permissionMode ?? 'workspace-write'
   db.prepare(
-    `INSERT INTO chat_threads (id, title, goal_id, task_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'idle', ?, ?)`,
-  ).run(id, input.title, input.goalId ?? null, input.taskId ?? null, now, now)
+    `INSERT INTO chat_threads (id, title, goal_id, task_id, status, worktree, permission_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'idle', ?, ?, ?, ?)`,
+  ).run(
+    id,
+    input.title,
+    input.goalId ?? null,
+    input.taskId ?? null,
+    input.worktree ?? null,
+    permissionMode,
+    now,
+    now,
+  )
   return {
     id,
     title: input.title,
     ...(input.goalId === undefined ? {} : { goalId: asGoalId(input.goalId) }),
     ...(input.taskId === undefined ? {} : { taskId: asTaskId(input.taskId) }),
     status: 'idle',
+    ...(input.worktree === undefined ? {} : { worktree: input.worktree }),
+    permissionMode,
     createdAt: now,
     updatedAt: now,
   }
@@ -105,6 +128,8 @@ export function updateChatThread(
     goalId?: string
     taskId?: string
     status?: ChatThread['status']
+    worktree?: string
+    permissionMode?: PermissionMode
     /** 传 null 表示取消归档。 */
     archivedAt?: string | null
   },
@@ -114,13 +139,15 @@ export function updateChatThread(
   const now = asTimestamp(new Date().toISOString())
   db.prepare(
     `UPDATE chat_threads
-     SET title = ?, goal_id = ?, task_id = ?, status = ?, archived_at = ?, updated_at = ?
+     SET title = ?, goal_id = ?, task_id = ?, status = ?, worktree = ?, permission_mode = ?, archived_at = ?, updated_at = ?
      WHERE id = ?`,
   ).run(
     patch.title ?? current.title,
     patch.goalId ?? current.goalId ?? null,
     patch.taskId ?? current.taskId ?? null,
     patch.status ?? current.status,
+    patch.worktree ?? current.worktree ?? null,
+    patch.permissionMode ?? current.permissionMode,
     patch.archivedAt === undefined ? (current.archivedAt ?? null) : patch.archivedAt,
     now,
     id,

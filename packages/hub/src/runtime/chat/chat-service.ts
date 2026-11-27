@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import type { AcpExecutionEvent } from '../../adapters/acp/event'
 import type { BrainDelta, ChatTurn, OrchestratorBrain } from '../../brain/types'
 import type { ChatMessage, ChatProgressStage, ChatThread } from '../../domain/chat'
@@ -10,6 +12,7 @@ import {
   asTimestamp,
   type ChatThreadId,
 } from '../../domain/ids'
+import type { PermissionMode } from '../../domain/status'
 import type { SandboxProvider } from '../../sandbox/types'
 import { HubError } from '../../shared/errors'
 import type { Db } from '../../storage/db'
@@ -46,8 +49,28 @@ export interface ChatServiceOptions {
   remote?: RunGoalWithBrainOptions['remote']
 }
 
+/** 工作区必须是绝对路径且已存在的目录。 */
+function assertWorkspace(worktree: string): string {
+  if (!isAbsolute(worktree)) {
+    throw new HubError('CONFIG_INVALID', `工作区必须是绝对路径：${worktree}`, { worktree })
+  }
+  let stats: ReturnType<typeof statSync>
+  try {
+    stats = statSync(worktree)
+  } catch {
+    throw new HubError('CONFIG_INVALID', `工作区不存在：${worktree}`, { worktree })
+  }
+  if (!stats.isDirectory()) {
+    throw new HubError('CONFIG_INVALID', `工作区不是目录：${worktree}`, { worktree })
+  }
+  return worktree
+}
+
 export interface CreateThreadInput {
   title?: string
+  /** 会话工作区（绝对路径，必须已存在）。**必填**：没有它会拒绝执行，绝不回落到 cwd。 */
+  worktree?: string
+  permissionMode?: PermissionMode
 }
 
 export interface PostMessageInput {
@@ -146,9 +169,30 @@ export class ChatService {
   constructor(private readonly options: ChatServiceOptions) {}
 
   createThread(input: CreateThreadInput = {}): ChatThread {
+    const raw = input.worktree?.trim()
+    /* 给了就必须是合法目录；没给则允许创建，但这样的会话**不能执行**（fail-closed）。 */
+    const worktree = raw === undefined || raw === '' ? undefined : assertWorkspace(raw)
+
     return createChatThread(this.options.db, {
       title: input.title?.trim().slice(0, 120) || 'New thread',
+      ...(worktree === undefined ? {} : { worktree }),
+      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
     })
+  }
+
+  /**
+   * 会话的工作区与权限档。
+   *
+   * 历史会话可能没有 worktree（迁移前的数据）——此时**拒绝执行**，
+   * 而不是默默用 `process.cwd()` 跑到 HubAgent 自己身上。
+   */
+  private workspaceOf(threadId: string): { worktree: string; permissionMode: PermissionMode } {
+    const thread = getChatThread(this.options.db, asChatThreadId(threadId))
+    const worktree = thread?.worktree
+    if (worktree === undefined || worktree === '') {
+      throw new HubError('CONFIG_INVALID', '该会话还没有工作区，请先选择文件夹再发送', {})
+    }
+    return { worktree, permissionMode: thread?.permissionMode ?? 'workspace-write' }
   }
 
   listThreads(limit = 50): ChatThreadSummary[] {
@@ -358,7 +402,7 @@ export class ChatService {
         objective: `${subtask?.description ?? ''}
 
 用户补充：${answer}`,
-        worktree: this.options.worktree ?? process.cwd(),
+        ...this.workspaceOf(threadId),
         checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
         clientVersion: this.options.clientVersion,
         onEvent: sink.onEvent,
@@ -869,7 +913,7 @@ export class ChatService {
         objective,
         conversation,
         onBrainDelta: brainStream.onDelta,
-        worktree: this.options.worktree ?? process.cwd(),
+        ...this.workspaceOf(threadId),
         checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
         clientVersion: this.options.clientVersion,
         completeOnSuccess: true,

@@ -84,6 +84,20 @@ export function isTerminalRemoteState(state: RemoteObservedState): boolean {
   return TERMINAL_REMOTE_STATES.includes(state)
 }
 
+/**
+ * 会话级权限档位（PRD §6.4.5 / 会话三档权限）。
+ *
+ * - `read-only`：能看不能改（只读工具放行，变更与网络拒绝）；
+ * - `workspace-write`：可在 workspace 内修改（沙箱兜底），不再逐次确认；
+ * - `full`：全部放行，不弹确认（仍不突破沙箱边界）。
+ */
+export const PERMISSION_MODES = ['read-only', 'workspace-write', 'full'] as const
+export type PermissionMode = (typeof PERMISSION_MODES)[number]
+
+export function isPermissionMode(value: unknown): value is PermissionMode {
+  return typeof value === 'string' && (PERMISSION_MODES as readonly string[]).includes(value)
+}
+
 export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'expired'] as const
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number]
 

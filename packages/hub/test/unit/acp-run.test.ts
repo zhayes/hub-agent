@@ -234,7 +234,7 @@ describe('runAcpTask：sandbox_denied -> Approval', () => {
 })
 
 describe('runAcpTask：失败与零写', () => {
-  it('prompt 被拒绝后 execution/task/subtask 收敛为 failed', async () => {
+  it('read-only 档：变更类工具被拒，execution/task/subtask 收敛为 failed', async () => {
     const db = database()
     const dir = repo()
     const provider = new MockProvider({
@@ -250,10 +250,13 @@ describe('runAcpTask：失败与零写', () => {
       objective: '需要权限的任务',
       worktree: dir,
       transcriptDir: join(dir, '.transcripts'),
+      permissionMode: 'read-only',
     })
 
     expect(result.ok).toBe(false)
+    /* Agent 自己的停止原因保真；权限被拒另用标记表达。 */
     expect(result.stopReason).toBe('refusal')
+    expect(result.permissionDenied).toBe(true)
     expect(existsSync(join(dir, 'mock-output.txt'))).toBe(false)
 
     const execution = db
@@ -264,6 +267,33 @@ describe('runAcpTask：失败与零写', () => {
       status: string
     }
     expect(task.status).toBe('failed')
+  })
+
+  it('workspace-write 档：Agent 请求权限时自动放行，任务正常完成', async () => {
+    const db = database()
+    const dir = repo()
+    const provider = new MockProvider({
+      ...process.env,
+      MOCK_ACP_DELAY_MS: '0',
+      MOCK_ACP_REQUEST_PERMISSION: '1',
+    })
+
+    const result = await runAcpTask({
+      db,
+      provider,
+      agent: resolveAgent(db, 'mock'),
+      objective: '写个文件',
+      worktree: dir,
+      transcriptDir: join(dir, '.transcripts'),
+      permissionMode: 'workspace-write',
+      checks: [{ kind: 'command', cmd: 'true', timeoutMs: 5_000, expect: { exitCode: 0 } }],
+    })
+
+    /* 关键回归：以前没接权限 handler → 一律拒绝 → 一条无害的写也被当成失败。 */
+    expect(result.ok).toBe(true)
+    expect(result.stopReason).toBe('end_turn')
+    expect(result.permissionDenied).toBeUndefined()
+    expect(existsSync(join(dir, 'mock-output.txt'))).toBe(true)
   })
 
   it('沙箱拒绝启动时零任务记录（fail-closed 语义边界）', async () => {

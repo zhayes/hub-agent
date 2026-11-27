@@ -1,4 +1,5 @@
 import type { ChatMessageId, ChatThreadId, GoalId, TaskId, Timestamp } from './ids'
+import type { PermissionMode } from './status'
 
 /** idle = 已创建但还没有回合；不能当成“运行中”，否则空对话会一直转圈。 */
 export type ChatThreadStatus = 'idle' | 'active' | 'waiting' | 'completed' | 'failed'
@@ -22,6 +23,12 @@ export interface ChatThread {
   goalId?: GoalId
   taskId?: TaskId
   status: ChatThreadStatus
+  /**
+   * 本会话的工作区（绝对路径）。缺省表示**不可执行**：不再回落到服务进程 cwd。
+   */
+  worktree?: string
+  /** 会话权限档：决定 Agent 的工具授权怎么答。 */
+  permissionMode: PermissionMode
   /** 归档时间；归档后不出现在侧栏，但历史消息仍保留。 */
   archivedAt?: Timestamp
   createdAt: Timestamp

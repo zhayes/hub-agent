@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type {
   BrainAction,
@@ -26,9 +29,21 @@ import {
 } from '../../src/storage/queries/chat'
 
 const dbs: Db[] = []
+const workspaces: string[] = []
+
+/** 每个会话都要有工作区；测试里给个临时目录即可。 */
+function ws(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'hubagent-chat-ws-'))
+  workspaces.push(dir)
+  return dir
+}
 
 afterEach(() => {
   while (dbs.length > 0) dbs.pop()?.close()
+  while (workspaces.length > 0) {
+    const dir = workspaces.pop()
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 function database(): Db {
@@ -101,7 +116,7 @@ function conversationOf(brain: RecordingBrain, index: number) {
 describe('chat storage', () => {
   it('creates threads, appends messages, updates status', () => {
     const db = database()
-    const thread = createChatThread(db, { title: 'Fix login' })
+    const thread = createChatThread(db, { worktree: ws(), title: 'Fix login' })
     expect(thread.status).toBe('idle')
     appendChatMessage(db, {
       threadId: thread.id,
@@ -122,7 +137,7 @@ describe('chat storage', () => {
 
   it('pages latest messages and loads older by timestamp', () => {
     const db = database()
-    const thread = createChatThread(db, { title: 'Paged' })
+    const thread = createChatThread(db, { worktree: ws(), title: 'Paged' })
     for (let index = 0; index < 25; index += 1) {
       appendChatMessage(db, {
         threadId: thread.id,
@@ -149,7 +164,7 @@ describe('chat storage', () => {
 
   it('lists only the messages strictly after a cursor', () => {
     const db = database()
-    const thread = createChatThread(db, { title: 'Cursor' })
+    const thread = createChatThread(db, { worktree: ws(), title: 'Cursor' })
     for (let index = 0; index < 5; index += 1) {
       appendChatMessage(db, {
         threadId: thread.id,
@@ -193,7 +208,7 @@ describe('chat storage', () => {
       { type: 'reply', text: `收到：${input.goal.intent}` },
     ])
     const chat = new ChatService({ db, provider, clientVersion: 'test', brain })
-    const thread = chat.createThread({})
+    const thread = chat.createThread({ worktree: ws() })
 
     await chat.postMessage(thread.id, { text: 'hi' })
     await waitFor(() => getChatThread(db, thread.id)?.status === 'completed')
@@ -238,7 +253,7 @@ describe('chat storage', () => {
       clientVersion: 'test',
       brain: new StreamingBrain(['你', '好', '，', '在的'], { type: 'reply', text: '你好，在的' }),
     })
-    const thread = chat.createThread({})
+    const thread = chat.createThread({ worktree: ws() })
     await chat.postMessage(thread.id, { text: 'hi' })
     await waitFor(() => getChatThread(db, thread.id)?.status === 'completed')
 
@@ -261,7 +276,7 @@ describe('chat storage', () => {
         options: ['继续', '停'],
       }),
     })
-    const thread = chat.createThread({})
+    const thread = chat.createThread({ worktree: ws() })
     await chat.postMessage(thread.id, { text: '做点事' })
     await waitFor(() => getChatThread(db, thread.id)?.status === 'waiting')
 
@@ -282,7 +297,7 @@ describe('chat storage', () => {
       clientVersion: 'test',
       brain: new StreamingBrain(['{"type":"reply","text":"hi"}'], { type: 'reply', text: 'hi' }),
     })
-    const thread = chat.createThread({})
+    const thread = chat.createThread({ worktree: ws() })
     await chat.postMessage(thread.id, { text: 'hi' })
     await waitFor(() => getChatThread(db, thread.id)?.status === 'completed')
 
@@ -294,8 +309,8 @@ describe('chat storage', () => {
   it('重命名/归档/删除：归档不出现在列表，删除清掉消息', async () => {
     const db = database()
     const chat = new ChatService({ db, provider, clientVersion: 'test' })
-    const kept = chat.createThread({ title: 'Kept' })
-    const archived = chat.createThread({ title: 'Archived' })
+    const kept = chat.createThread({ worktree: ws(), title: 'Kept' })
+    const archived = chat.createThread({ worktree: ws(), title: 'Archived' })
     appendChatMessage(db, { threadId: archived.id, role: 'user', kind: 'text', content: 'hi' })
 
     expect(chat.renameThread(kept.id, 'Renamed').title).toBe('Renamed')
@@ -326,7 +341,7 @@ describe('chat storage', () => {
         : [{ type: 'reply', text: `好的：${input.goal.intent}` }],
     )
     const chat = new ChatService({ db, provider, clientVersion: 'test', brain })
-    const thread = chat.createThread({})
+    const thread = chat.createThread({ worktree: ws() })
 
     await chat.postMessage(thread.id, { text: 'hi' })
     await waitFor(() => getChatThread(db, thread.id)?.status === 'waiting')
@@ -357,7 +372,7 @@ describe('chat storage', () => {
 describe('chat streaming', () => {
   it('progress 行原地更新，并按 updated_at 水位增量续传', () => {
     const db = database()
-    const thread = createChatThread(db, { title: 'Streaming' })
+    const thread = createChatThread(db, { worktree: ws(), title: 'Streaming' })
     const step = appendChatMessage(db, {
       threadId: thread.id,
       role: 'assistant',
@@ -385,7 +400,7 @@ describe('chat streaming', () => {
 describe('chat HTTP API', () => {
   it('streams messages after a cursor and reports terminal status', async () => {
     const db = database()
-    const thread = createChatThread(db, { title: 'Stream' })
+    const thread = createChatThread(db, { worktree: ws(), title: 'Stream' })
     const first = appendChatMessage(db, {
       threadId: thread.id,
       role: 'user',
@@ -424,7 +439,7 @@ describe('chat HTTP API', () => {
     const created = await app.request('/api/v1/chat/threads', {
       method: 'POST',
       headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 'Before' }),
+      body: JSON.stringify({ title: 'Before', worktree: ws() }),
     })
     const body = (await created.json()) as { thread: { id: string } }
 
@@ -463,7 +478,7 @@ describe('chat HTTP API', () => {
     const created = await app.request('/api/v1/chat/threads', {
       method: 'POST',
       headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 'Thread' }),
+      body: JSON.stringify({ title: 'Thread', worktree: ws() }),
     })
     expect(created.status).toBe(201)
     const body = (await created.json()) as { thread: { id: string } }

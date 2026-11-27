@@ -54,6 +54,25 @@ export async function runAcpWithRetry(options: RunAcpWithRetryOptions): Promise<
       if (result.ok) return result
       if (result.approval !== undefined || result.verdict === 'manual_required') return result
 
+      /*
+       * 权限被拒是**确定性失败**：同一 Agent 再跑一次也只会再被拒，
+       * 白白多烧一轮（之前就是这么浪费了 20 秒）。直接收敛，交 Brain 换 Agent / 重规划。
+       */
+      if (result.permissionDenied === true) {
+        recordDecision(options.db, {
+          goalId: options.goalId,
+          type: 'abort',
+          rationale: `工具授权被拒（${result.stopReason}），确定性失败，不重试`,
+          inputs: {
+            attempt,
+            executionId: result.executionId,
+            agentId: String(result.agent.id),
+            stopReason: result.stopReason,
+          },
+        })
+        return result
+      }
+
       const changedFiles = result.evidence.changedFiles ?? []
       const decision = decideEscalation({
         class: 'execution',

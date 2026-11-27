@@ -3,6 +3,7 @@ import { extname, join, normalize, resolve } from 'node:path'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { asChatThreadId } from '../../domain/ids'
+import { isPermissionMode } from '../../domain/status'
 import { acceptExecution, rejectExecution } from '../../runtime/acceptance'
 import { adoptAgent, loginAgent, verifyAgent } from '../../runtime/agent-adopt'
 import { scanAgents } from '../../runtime/agent-discovery/scan'
@@ -160,11 +161,32 @@ export function createHttpApp(options: HttpAppOptions): Hono {
 
   app.post('/api/v1/chat/threads', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
-    const body = await context.req.json<{ title?: string }>().catch((): { title?: string } => ({}))
-    const thread = options.chat.createThread({
-      ...(body.title === undefined ? {} : { title: body.title }),
-    })
-    return context.json({ ok: true, thread }, 201)
+    const body = await context.req
+      .json<{ title?: string; worktree?: string; permissionMode?: string }>()
+      .catch((): { title?: string; worktree?: string; permissionMode?: string } => ({}))
+    /* 产品规则：新建对话必须选工作区。不选就不给它一个“默认到 cwd”的机会。 */
+    if (body.worktree === undefined || body.worktree.trim() === '') {
+      return context.json(
+        { code: 'INVALID_INPUT', message: '新建对话必须选择工作区（worktree）' },
+        400,
+      )
+    }
+    try {
+      const thread = options.chat.createThread({
+        ...(body.title === undefined ? {} : { title: body.title }),
+        ...(body.worktree === undefined ? {} : { worktree: body.worktree }),
+        ...(isPermissionMode(body.permissionMode) ? { permissionMode: body.permissionMode } : {}),
+      })
+      return context.json({ ok: true, thread }, 201)
+    } catch (error) {
+      return context.json(
+        {
+          code: 'THREAD_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        400,
+      )
+    }
   })
 
   app.get('/api/v1/chat/threads', (context) => {
