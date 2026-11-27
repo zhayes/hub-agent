@@ -50,6 +50,7 @@
 @theme inline {
   --color-canvas: var(--hx-bg-canvas);
   --color-surface: var(--hx-bg-surface);
+  --color-raised: var(--hx-bg-raised);
   --color-subtle: var(--hx-bg-subtle);
   --color-hover: var(--hx-bg-hover);
   --color-active: var(--hx-bg-active);

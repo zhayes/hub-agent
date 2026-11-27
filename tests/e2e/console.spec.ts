@@ -691,7 +691,7 @@ test('dock reports who is running and takes the decision in place', async ({ pag
   await expect(dock).toBeVisible()
   await expect(dock.getByText('Waiting for you')).toBeVisible()
   await expect(dock.getByText('1 approval')).toBeVisible()
-  await expect(dock.getByText('Push the fix to origin')).toBeVisible()
+  await expect(dock.getByRole('heading', { name: 'Push the fix to origin' })).toBeVisible()
   await expect(dock.getByText('git push origin fix/auth-redirect-loop')).toBeVisible()
 
   await dock.getByRole('button', { name: 'Approve' }).click()

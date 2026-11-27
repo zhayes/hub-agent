@@ -19,15 +19,22 @@ const LazyCommandPalette = dynamic(() =>
 
 /* 两个目的地 + 设置（ADR 0029 §2.2）。任务与审批仍是对象/深链，不占导航位：
    它们是“某个东西”，不是“某个地方”。 */
-const NAV: ReadonlyArray<{ href: string; key: 'navChat' | 'navAgents'; icon: IconName }> = [
-  { href: '/chat', key: 'navChat', icon: 'message' },
-  { href: '/agents', key: 'navAgents', icon: 'agents' },
+const NAV: ReadonlyArray<{ href: string; key: 'navChat' | 'navAgents' }> = [
+  { href: '/chat', key: 'navChat' },
+  { href: '/agents', key: 'navAgents' },
 ]
 
+/* 页签是纯文字（v2 `.tab`）：图标在这两个目的地上是噪点。30px 高、13px。 */
 const navTab =
-  'inline-flex h-8 items-center gap-1.5 rounded-control px-2.5 text-meta font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
-const navTabIdle = 'text-ink-2 hover:bg-hover hover:text-ink'
-const navTabActive = 'bg-active text-ink'
+  'inline-flex h-[30px] items-center rounded-control px-2.5 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+const navTabIdle = 'font-medium text-ink-3 hover:text-ink'
+const navTabActive = 'bg-raised font-semibold text-ink'
+
+/* 移动端底部条带图标（顶部页签不带）：手机上图标是快速识别，文字是可用性。 */
+const BOTTOM_ICONS: Record<'navChat' | 'navAgents', IconName> = {
+  navChat: 'message',
+  navAgents: 'agents',
+}
 
 const bottomTab =
   'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-badge transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
@@ -171,7 +178,8 @@ export function AppLayout(props: { children?: JSX.Element }) {
         t={app.t}
       />
 
-      <header class="flex h-12 flex-none items-center gap-3 border-b border-line bg-canvas px-4 max-[860px]:px-3">
+      {/* 顶栏（v2 `.bar`）：50px 高、1px 下边线；页签是纯文字，右侧只留注意力 + 连接 + 设置。 */}
+      <header class="flex h-[50px] flex-none items-center gap-2.5 border-b border-line bg-canvas px-4 max-[860px]:h-12 max-[860px]:px-3">
         <a
           class="grid size-8 shrink-0 place-items-center rounded-control text-accent transition-colors hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           href="/chat"
@@ -198,7 +206,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
 
         {/* ≥861px：文本页签。≤860px 让位给底部条——只装两个目的地时，顶部页签是多余的。 */}
         <nav
-          class="flex items-center gap-0.5 max-[860px]:hidden"
+          class="flex items-center gap-[2px] max-[860px]:hidden"
           aria-label={app.t('primaryNavigation')}
         >
           <For each={NAV}>
@@ -208,7 +216,6 @@ export function AppLayout(props: { children?: JSX.Element }) {
                 class={`${navTab} ${isActive(item.href) ? navTabActive : navTabIdle}`}
                 aria-current={isActive(item.href) ? 'page' : undefined}
               >
-                <Icon name={item.icon} size={14} />
                 {app.t(item.key)}
               </a>
             )}
@@ -256,12 +263,12 @@ export function AppLayout(props: { children?: JSX.Element }) {
         </Show>
         <span class="flex-1" />
 
-        {/* 注意力控件：只报数，点开才给判断材料。
+        {/* 注意力（v2 `.attention`）：方块不是胶囊；“需要你”只在这里出现暖色。
             没有待办时它**不出现**——挂着一颗灰点写“需要你处理”是假信号。 */}
         <Show when={attentionCount() > 0}>
           <button
             type="button"
-            class="inline-flex h-8 items-center gap-1.5 rounded-full border border-warning/45 bg-warning-soft px-2.5 text-badge font-medium text-warning transition-colors hover:border-warning focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            class="inline-flex h-[30px] items-center gap-2 rounded-control border border-[color-mix(in_oklab,var(--hx-accent)_38%,transparent)] bg-accent-soft px-2.5 text-meta font-semibold text-accent transition-[background-color,transform] duration-150 ease-[var(--ease-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             aria-label={app.t('attentionCount', { count: attentionCount() })}
             aria-haspopup="dialog"
             aria-expanded={inboxOpen() ? 'true' : 'false'}
@@ -269,30 +276,32 @@ export function AppLayout(props: { children?: JSX.Element }) {
             onClick={() => setInboxOpen(true)}
           >
             <span
-              class="inline-block size-1.5 flex-none rounded-full bg-warning"
+              class="inline-block size-[7px] flex-none rounded-full bg-accent"
               aria-hidden="true"
             />
             <span class="tabular-nums max-[560px]:hidden">
               {app.t('attentionCount', { count: attentionCount() })}
             </span>
+            <span class="text-badge font-normal text-ink-2 max-[860px]:hidden">
+              {app.t('attentionDetail', { count: attentionCount() })}
+            </span>
             <span class="tabular-nums min-[561px]:hidden">{attentionCount()}</span>
           </button>
         </Show>
 
+        {/* 连接：点 + 文字（v2 `.conn`），不做胶囊——它不是控件，是状态。 */}
         <span
-          class="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 text-badge text-ink-2 max-[560px]:px-2"
+          class="inline-flex items-center gap-1.5 whitespace-nowrap text-badge text-ink-3"
           title={connectionTitle()}
         >
           <ConnectionDot state={app.connection()} />
-          <span class="max-[560px]:hidden">{connectionLabel()}</span>
+          <span class="max-[860px]:hidden">{connectionLabel()}</span>
         </span>
-
-        <IconButton icon="refresh" label={app.t('refresh')} onClick={() => void app.refresh()} />
 
         <a
           href="/settings"
-          class={`grid size-8 place-items-center rounded-control transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[860px]:hidden ${
-            isActive('/settings') ? navTabActive : navTabIdle
+          class={`grid size-[30px] place-items-center rounded-control transition-colors hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[860px]:hidden ${
+            isActive('/settings') ? 'text-ink' : 'text-ink-3'
           }`}
           aria-current={isActive('/settings') ? 'page' : undefined}
           aria-label={app.t('navSettings')}
@@ -352,7 +361,7 @@ export function AppLayout(props: { children?: JSX.Element }) {
               }`}
               aria-current={isActive(item.href) ? 'page' : undefined}
             >
-              <Icon name={item.icon} size={18} />
+              <Icon name={BOTTOM_ICONS[item.key]} size={18} />
               {app.t(item.key)}
             </a>
           )}

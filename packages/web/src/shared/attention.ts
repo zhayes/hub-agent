@@ -22,6 +22,11 @@ export interface AttentionItem {
   /** 具体对象：命令 / 资源路径。只给能核对的，不编。 */
   resource?: string
   risk?: string
+  /** 领域动作名（如 `sandbox.relax`）；决定标题与按钮怎么说。 */
+  action?: string
+  decisionMode?: 'once' | 'policy'
+  /** 审批的 TTL。 */
+  expiresAt?: string
   /** 在哪个任务里发生的。 */
   taskTitle?: string
 }
@@ -47,6 +52,9 @@ export function deriveAttention(source: AttentionSource): AttentionItem[] {
       title: approval.reason,
       resource: approval.resource,
       risk: approval.riskLevel,
+      ...(approval.action === undefined ? {} : { action: approval.action }),
+      ...(approval.decisionMode === undefined ? {} : { decisionMode: approval.decisionMode }),
+      ...(approval.expiresAt === undefined ? {} : { expiresAt: approval.expiresAt }),
       ...(taskTitle === undefined ? {} : { taskTitle }),
     })
   }

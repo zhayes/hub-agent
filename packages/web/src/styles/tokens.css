@@ -10,6 +10,9 @@
   /* Surfaces. Canvas 比 surface 略深，靠明度差分层，不靠投影。 */
   --hx-bg-canvas: light-dark(#f6f7f9, #0b0c0e);
   --hx-bg-surface: light-dark(#ffffff, #111316);
+  /* 卡片之上的“抬升面”：输入壳、用户气泡、激活页签（v2 的 --raised）。
+     暗色下它比 surface 再亮一档，否则卡片和输入框会糊在一起。 */
+  --hx-bg-raised: light-dark(#ffffff, #171a1e);
   /* Highlighted block inside a surface (evidence, code, dock body). */
   --hx-bg-subtle: light-dark(#f1f3f6, #171a1e);
   --hx-bg-hover: light-dark(#eceff3, #1c2025);

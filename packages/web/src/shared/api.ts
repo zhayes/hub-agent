@@ -74,6 +74,14 @@ export interface ApprovalRow {
   resource: string
   status: string
   riskLevel: string
+  /** 领域动作名，如 `sandbox.relax`：决定标题怎么说。 */
+  action?: string
+  /** once = 仅本次；policy = 按策略长期生效 */
+  decisionMode?: 'once' | 'policy'
+  /** 过期时间（ISO）；`once` 审批有 TTL。 */
+  expiresAt?: string
+  createdAt?: string
+  requestedBy?: string
 }
 
 export interface TaskView {

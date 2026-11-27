@@ -31,7 +31,7 @@ import {
 import { deriveAttention } from '../../shared/attention'
 import { relativeTime, shortenId } from '../../shared/format'
 import { type Locale, type MessageKey, statusKey, type Translator } from '../../shared/i18n'
-import { type DockAgent, RunDock, type RunPhase } from './RunDock'
+import { agentBadge, type DockAgent, RunDock, type RunPhase } from './RunDock'
 import {
   forgetThread,
   readCachedSummaries,
@@ -1191,7 +1191,7 @@ export function ChatView(props: ChatViewProps) {
       </Show>
 
       <section
-        class="flex min-h-0 min-w-0 flex-col bg-surface"
+        class="flex min-h-0 min-w-0 flex-col bg-canvas"
         aria-label={props.t('chat')}
         style={columnStyle(1)}
       >
@@ -1480,7 +1480,7 @@ export function ChatView(props: ChatViewProps) {
               </div>
             </Show>
             {/* 一个输入壳（v9）：textarea + 控件行同属一块，不再分成三行。 */}
-            <div class="rounded-[16px] border border-line-strong bg-surface px-3 pt-3 pb-[9px] shadow-[0_1px_2px_rgb(18_21_26/5%),0_12px_28px_-14px_rgb(18_21_26/18%)] transition-[border-color,box-shadow] focus-within:border-[color-mix(in_oklab,var(--hx-accent)_45%,var(--hx-line-default))]">
+            <div class="rounded-[16px] border border-line-strong bg-raised px-3 pt-3 pb-[9px] shadow-[0_1px_2px_rgb(18_21_26/5%),0_12px_28px_-14px_rgb(18_21_26/18%)] transition-[border-color,box-shadow] focus-within:border-[color-mix(in_oklab,var(--hx-accent)_45%,var(--hx-line-default))]">
               <textarea
                 id="chat-composer"
                 rows="2"
@@ -1849,94 +1849,83 @@ function TurnBlock(props: {
     props.phase === 'failed' ||
     props.turn.steps.some((step) => step.kind === 'auth' || step.kind === 'clarification')
 
-  const startedAt = (): string =>
-    props.turn.user?.createdAt ?? props.turn.steps[0]?.createdAt ?? new Date().toISOString()
-
   return (
-    <article class="flex gap-2.5">
-      <div
-        class="mt-[3px] grid size-6 shrink-0 place-items-center rounded-full bg-ink text-[10px] font-semibold tracking-tight text-canvas"
-        aria-hidden="true"
+    <article class="flex flex-col">
+      <ProcessTrace
+        title={props.t('chatProcess')}
+        meta={`${props.turn.steps.length} ${props.t('chatSteps')} · ${props.t('chatTurnElapsed', {
+          duration: formatDuration(props.elapsedMs, props.t),
+        })}`}
+        open={open()}
       >
-        H
-      </div>
-      <div class="min-w-0 flex-1">
-        <div class="mb-1 flex items-baseline gap-1.5 text-badge text-ink-3">
-          <span class="font-medium text-ink-2">{props.t('appName')}</span>
-          <time>{relativeTime(props.locale, startedAt())}</time>
-        </div>
-
-        <ProcessTrace
-          title={props.t('chatProcess')}
-          meta={`${props.turn.steps.length} ${props.t('chatSteps')} · ${props.t('chatTurnElapsed', {
-            duration: formatDuration(props.elapsedMs, props.t),
-          })}`}
-          open={open()}
-        >
-          <ol class="flex list-none flex-col gap-1.5 p-0">
-            <For each={props.turn.steps}>
-              {(step) => (
-                <TurnStep
-                  step={step}
-                  t={props.t}
-                  locale={props.locale}
-                  threadId={props.threadId}
-                  onOpenTask={props.onOpenTask}
-                  onApprove={props.onApprove}
-                  onReject={props.onReject}
-                  onAnswer={props.onAnswer}
-                  onAuthRetried={props.onAuthRetried}
-                />
-              )}
-            </For>
-          </ol>
-        </ProcessTrace>
-
-        <Show when={props.turn.final}>
-          {(final) => (
-            <div class="mt-2">
-              <RichText
-                text={final().content}
-                copyLabel={props.t('copy')}
-                streaming={props.streaming}
-                quiet={final().kind === 'result'}
+        <ol class="flex list-none flex-col gap-1.5 p-0">
+          <For each={props.turn.steps}>
+            {(step) => (
+              <TurnStep
+                step={step}
+                t={props.t}
+                locale={props.locale}
+                threadId={props.threadId}
+                onOpenTask={props.onOpenTask}
+                onApprove={props.onApprove}
+                onReject={props.onReject}
+                onAnswer={props.onAnswer}
+                onAuthRetried={props.onAuthRetried}
               />
-            </div>
-          )}
-        </Show>
+            )}
+          </For>
+        </ol>
+      </ProcessTrace>
 
-        <Show when={props.task !== undefined || props.files.length > 0}>
-          <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <Show when={props.task}>
-              {(task) => (
-                <button
-                  type="button"
-                  class="flex max-w-[18rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-badge text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  title={task().id}
-                  onClick={() => props.onOpenTask()}
-                >
-                  <Icon name="tasks" size={12} class="shrink-0 text-ink-3" />
-                  <span class="truncate">{task().title}</span>
-                  <span class="shrink-0 text-ink-3">{props.t(statusKey(task().status))}</span>
-                </button>
-              )}
-            </Show>
-            <For each={props.files.slice(0, 6)}>
-              {(file) => (
-                <button
-                  type="button"
-                  class="flex max-w-[15rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-badge text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  title={file}
-                  onClick={() => props.onOpenFile(file)}
-                >
-                  <Icon name="file" size={12} class="shrink-0 text-ink-3" />
-                  <span class="truncate">{file.split('/').at(-1)}</span>
-                </button>
-              )}
-            </For>
+      <Show when={props.turn.final}>
+        {(final) => (
+          <div class="mt-2">
+            <RichText
+              text={final().content}
+              copyLabel={props.t('copy')}
+              streaming={props.streaming}
+              quiet={final().kind === 'result'}
+            />
           </div>
-        </Show>
-      </div>
+        )}
+      </Show>
+
+      <Show
+        when={
+          (props.phase === 'done' || props.phase === 'failed') &&
+          (props.task !== undefined || props.files.length > 0)
+        }
+      >
+        <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <Show when={props.task}>
+            {(task) => (
+              <button
+                type="button"
+                class="flex max-w-[18rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-badge text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                title={task().id}
+                onClick={() => props.onOpenTask()}
+              >
+                <Icon name="tasks" size={12} class="shrink-0 text-ink-3" />
+                <span class="truncate">{task().title}</span>
+                <span class="shrink-0 text-ink-3">{props.t(statusKey(task().status))}</span>
+              </button>
+            )}
+          </Show>
+          <For each={props.files.slice(0, 6)}>
+            {(file) => (
+              <button
+                type="button"
+                class="flex max-w-[15rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-badge text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                title={file}
+                onClick={() => props.onOpenFile(file)}
+              >
+                <Icon name="file" size={12} class="shrink-0 text-ink-3" />
+                <span class="truncate">{file.split('/').at(-1)}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
     </article>
   )
 }
@@ -2309,10 +2298,11 @@ function MessageRow(props: {
   if (props.message.role === 'user') {
     return (
       <article class="flex flex-col items-end">
-        <div class="max-w-[min(100%,68ch)] rounded-[16px] rounded-br-[4px] bg-subtle px-3.5 py-2.5 text-body text-ink">
+        {/* 用户气泡（v2 §会话）：12px 圆角 + 1px 边框的 raised 块，没有小尾巴。
+            v9 正文没有时间戳——时间在会话抽屉里，不在每一句旁边。 */}
+        <div class="max-w-[min(70%,60ch)] rounded-panel border border-line bg-raised px-3 py-[9px] text-body text-ink">
           <RichText text={props.message.content} copyLabel={props.t('copy')} />
         </div>
-        <span class="mt-1 pr-1 text-badge text-ink-3">{time()}</span>
       </article>
     )
   }
@@ -2324,22 +2314,27 @@ function MessageRow(props: {
     props.message.kind === 'clarification' ||
     props.message.kind === 'auth'
 
-  return (
-    <article class="flex gap-2.5">
-      <div
-        class="mt-[3px] grid size-6 shrink-0 place-items-center rounded-full bg-ink text-[10px] font-semibold tracking-tight text-canvas"
-        aria-hidden="true"
-      >
-        H
-      </div>
-      <div class="min-w-0 flex-1">
-        <Show when={props.showMeta}>
-          <div class="mb-1 flex items-baseline gap-1.5 text-badge text-ink-3">
-            <span class="font-medium text-ink-2">{props.t('appName')}</span>
-            {time()}
-          </div>
-        </Show>
+  /* agent 产出的文本是 `**标题**\n\n正文`（后端这么拼）：拆开画成 v9 的块。 */
+  const agentParts = (): { title: string; body: string } | undefined => {
+    if (props.message.agentName === undefined) return undefined
+    const match = /^\*\*(.+?)\*\*\s*\n+([\s\S]*)$/.exec(props.message.content)
+    return match === null ? undefined : { title: match[1] ?? '', body: match[2] ?? '' }
+  }
 
+  return (
+    <article class={props.message.agentName === undefined ? 'flex flex-col' : 'flex gap-2.5'}>
+      {/* v9：助手侧没有头像与“HubAgent · 时间”；只有 agent 产出带 18px 首字母徽标。 */}
+      <Show when={props.message.agentName}>
+        {(name) => (
+          <span
+            class="mt-[3px] grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-ink text-[9px] font-semibold tracking-tight text-canvas"
+            aria-hidden="true"
+          >
+            {agentBadge(name())}
+          </span>
+        )}
+      </Show>
+      <div class="min-w-0 flex-1">
         <Show when={chips().length > 0 && !card() && props.message.kind !== 'error'}>
           <ToolChips chips={chips()} class="mb-2" />
         </Show>
@@ -2420,20 +2415,36 @@ function MessageRow(props: {
           </ThinkingTrace>
         </Show>
 
-        <Show
-          when={
-            !card() &&
-            props.message.kind !== 'error' &&
-            props.message.kind !== 'progress' &&
-            !plan()
-          }
-        >
-          <RichText
-            text={props.message.content}
-            copyLabel={props.t('copy')}
-            streaming={props.streaming}
-            quiet={props.message.kind === 'result'}
-          />
+        <Show when={agentParts()}>
+          {(parts) => (
+            <div>
+              <p class="text-meta font-semibold text-ink">{parts().title}</p>
+              <div class="mt-1">
+                <RichText
+                  text={parts().body}
+                  copyLabel={props.t('copy')}
+                  streaming={props.streaming}
+                />
+              </div>
+            </div>
+          )}
+        </Show>
+        <Show when={agentParts() === undefined}>
+          <Show
+            when={
+              !card() &&
+              props.message.kind !== 'error' &&
+              props.message.kind !== 'progress' &&
+              !plan()
+            }
+          >
+            <RichText
+              text={props.message.content}
+              copyLabel={props.t('copy')}
+              streaming={props.streaming}
+              quiet={props.message.kind === 'result'}
+            />
+          </Show>
         </Show>
       </div>
     </article>

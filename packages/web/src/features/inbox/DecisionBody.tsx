@@ -27,51 +27,71 @@ const riskKey = (risk: string | undefined): 'riskHigh' | 'riskMedium' | 'riskLow
         ? 'riskLow'
         : undefined
 
+/** 领域动作 → 一句“你被要求做什么”（v9 §3.7.3）。 */
+function actionTitle(action: string | undefined, t: Translator): string | undefined {
+  if (action === 'sandbox.relax') return t('approvalActionSandbox')
+  return undefined
+}
+
+/** 过期时间 → “58 分钟后过期”。已过期不再报价，直接说已过期。 */
+function expiryText(expiresAt: string | undefined, t: Translator): string | undefined {
+  if (expiresAt === undefined) return undefined
+  const at = Date.parse(expiresAt)
+  if (!Number.isFinite(at)) return undefined
+  const minutes = Math.round((at - Date.now()) / 60_000)
+  if (minutes <= 0) return t('expired')
+  return minutes < 60
+    ? t('expiresInMinutes', { minutes })
+    : t('expiresInHours', { hours: Math.round(minutes / 60) })
+}
+
 /**
  * 一条待你仲裁的事（v9 §3.7.3）。
  *
- * 五个问题：是什么（标题 + 命令）/ 在哪（任务）/ 为什么 / 允许后 / 拒绝后。
+ * 五个问题：是什么（动作 + 命令）/ 为什么 / 允许后 / 拒绝后 / 什么时候过期。
  * 浮层与 dock 共用这一份，避免两处文案各写一遍再漂移。
  * **没有内框、没有竖线、没有「你」徽标**：“轮到你”由容器的琥珀色与实心按钮表达。
  */
 export function DecisionBody(props: DecisionBodyProps) {
   const item = props.item
+  const title = (): string => actionTitle(item.action, props.t) ?? item.title
+  const meta = (): string => {
+    const expiry = expiryText(item.expiresAt, props.t)
+    const risk = riskKey(item.risk)
+    const riskLabel = risk === undefined ? undefined : props.t(risk)
+    return [expiry, riskLabel].filter((part) => part !== undefined).join(' · ')
+  }
+  const allowLabel = (): string =>
+    item.decisionMode === 'policy'
+      ? props.t('approve')
+      : item.action === 'sandbox.relax'
+        ? props.t('allowOnce')
+        : props.t('approve')
+
   return (
     <div>
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h3 class="min-w-0 flex-1 text-meta font-semibold text-ink">{item.title}</h3>
-        <Show when={riskKey(item.risk)}>
-          {(key) => <span class="shrink-0 text-badge text-warning">{props.t(key())}</span>}
+        <h3 class="min-w-0 flex-1 text-meta font-semibold text-ink">{title()}</h3>
+        <Show when={meta() !== ''}>
+          <span class="shrink-0 text-badge text-ink-3">{meta()}</span>
         </Show>
       </div>
 
+      {/* 命令块比卡片更深一层（v9 `.cmd`：canvas 底 + 1px 边），暗色下才不会 “卡片套卡片”。 */}
       <Show when={item.resource}>
         {(resource) => (
-          <code class="mt-2 block overflow-x-auto rounded-control bg-subtle px-2.5 py-2 font-mono text-badge text-ink-2">
+          <code class="mt-2 block overflow-x-auto rounded-[8px] border border-line bg-canvas px-2.5 py-[7px] font-mono text-badge text-ink">
             {resource()}
           </code>
         )}
       </Show>
 
       <dl class={facts}>
-        <Show when={item.taskTitle ?? item.taskId}>
-          <div class={factRow}>
-            <dt class={factKey}>{props.t('approvalWhere')}</dt>
-            <dd class={factValue}>
-              <Show when={item.taskId} fallback={<span>{item.taskTitle}</span>}>
-                {(taskId) => (
-                  <a
-                    class="underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                    href={`/tasks/${taskId()}`}
-                  >
-                    {item.taskTitle ?? taskId()}
-                  </a>
-                )}
-              </Show>
-            </dd>
-          </div>
-        </Show>
         <Show when={item.kind === 'approval'}>
+          <div class={factRow}>
+            <dt class={factKey}>{props.t('approvalWhy')}</dt>
+            <dd class={factValue}>{item.title}</dd>
+          </div>
           <div class={factRow}>
             <dt class={factKey}>{props.t('ifApprove')}</dt>
             <dd class={factValue}>{props.t('consequenceApprove')}</dd>
@@ -104,7 +124,7 @@ export function DecisionBody(props: DecisionBodyProps) {
             onClick={() => props.onApprove(item.approvalId ?? '')}
             disabled={item.approvalId === undefined}
           >
-            {props.t('approve')}
+            {allowLabel()}
           </Button>
           <Button
             variant="ghost"
