@@ -14,6 +14,7 @@ import { newId } from '../shared/id'
 import type { Db } from '../storage/db'
 import { loadState } from '../storage/queries/state'
 import { appendEvent } from '../storage/write/events'
+import { createClarification } from './clarify'
 import { deriveExecutionId } from './recovery/idempotency'
 import {
   type RemoteArtifact,
@@ -219,6 +220,9 @@ export function settleRemoteExecution(db: Db, input: SettleRemoteExecutionInput)
     return
   }
 
+  /* 已经验收过就不再写：避免重复对账追加第二条 verification / 第二个澄清。 */
+  if (hasVerification(current, execId)) return
+
   /* 交付物先入 manifest：它是验收的对象与证据。 */
   const recorded: RemoteArtifact[] = []
   for (const artifact of input.artifacts ?? []) {
@@ -276,12 +280,35 @@ export function settleRemoteExecution(db: Db, input: SettleRemoteExecutionInput)
     appendStatus(db, execId, 'waiting_input', now)
     appendSubtaskStatus(db, ref, 'waiting_input', now)
     appendTaskStatus(db, ref, 'waiting_input', now)
+    /* 给人一个可操作的入口：控制台能看到这条澄清，并用 accept / reject 回答。 */
+    createClarification(db, {
+      goalId: ref.goalId,
+      kind: 'decide',
+      executionId,
+      question: manualReviewQuestion(ref, recorded.length),
+      options: ['accept', 'reject'],
+    })
     return
   }
   appendStatus(db, execId, 'failed', now)
   appendSubtaskStatus(db, ref, 'failed', now)
   /* 不直接把 Goal 判失败：留给 Brain 的 reject(replan/retry) 决策。 */
   appendTaskStatus(db, ref, 'failed', now)
+}
+
+/** 该执行是否已经有验收记录（settle 的幂等闸门）。 */
+function hasVerification(
+  state: { verifications: Record<string, { executionId: string }> },
+  executionId: string,
+): boolean {
+  return Object.values(state.verifications).some((run) => run.executionId === executionId)
+}
+
+/** 人工验收提示：说清楚“远端说完成了，但本地无法自动判定”。 */
+function manualReviewQuestion(ref: RemoteTaskRef, artifactCount: number): string {
+  const artifacts =
+    artifactCount === 0 ? '没有交付物' : `交付物 ${artifactCount} 个（见交付物清单）`
+  return `远端任务 ${ref.remoteTaskId} 声明完成（${artifacts}），但本地无法自动验收。请核对后选择：accept（接受）或 reject（拒绝）。`
 }
 
 function isSettled(status: ExecutionStatus): boolean {

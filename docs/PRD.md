@@ -1738,6 +1738,8 @@ A2A 负责双方的任务通信，内部 Task Graph 不要求暴露给远程 Age
 
 **实现口径（2026-11-27）**：`runtime/remote-execution.ts` 已按上表映射；`Execution.agentId` 记为 `remote:<peerId>` 以区分本机进程。`COMPLETED` **不会**直接变 `succeeded`：先写交付物 manifest，再跑本地验收；未提供验收器时判 `manual_required`（`Execution → waiting_input`，子任务与 Task 同步），因此“远端成功”只能由本地证据转成成功。
 
+人工验收出口（2026-11-27）：`waiting_input` 的执行可由人接受或拒绝（`POST /api/v1/executions/:id/accept|reject`）。接受会写一条 `decidedBy='human'` 的验收记录、把执行/子任务置 `succeeded`、Task 回 `running` 并产生下一个决策点；拒绝则三态收敛为 `failed`，交回 Brain 重规划。
+
 ### 7.6.2 入站：本机接收远端委托
 
 | 本地推进 | 对外 `TaskState` |

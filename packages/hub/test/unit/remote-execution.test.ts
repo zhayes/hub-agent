@@ -10,6 +10,7 @@ import type {
 } from '../../src/brain/types'
 import { addAgent } from '../../src/runtime/agent-registry'
 import { runGoalWithBrain } from '../../src/runtime/brain-run'
+import { listClarifications } from '../../src/runtime/clarify'
 import { listRemoteArtifacts } from '../../src/runtime/remote-artifact'
 import {
   mapRemoteStateToExecution,
@@ -211,6 +212,13 @@ describe('远端完成：不采信自述，先本地验收', () => {
       .prepare('SELECT status FROM subtasks WHERE id = ?')
       .get(ref?.subtaskId) as { status: string } | undefined
     expect(subtask?.status).toBe('waiting_input')
+
+    /* 留了一条可操作的人工验收入口：选项就是 accept / reject。 */
+    const clarifications = listClarifications(database, goalId)
+    expect(clarifications).toHaveLength(1)
+    expect(clarifications[0]?.options).toEqual(['accept', 'reject'])
+    expect(clarifications[0]?.executionId).toBe(ref?.localExecutionId)
+    expect(clarifications[0]?.kind).toBe('decide')
   })
 
   it('验收通过（带可执行检查）才置 succeeded，并留下证据', async () => {

@@ -3,6 +3,7 @@ import { extname, join, normalize, resolve } from 'node:path'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { asChatThreadId } from '../../domain/ids'
+import { acceptExecution, rejectExecution } from '../../runtime/acceptance'
 import { adoptAgent, loginAgent, verifyAgent } from '../../runtime/agent-adopt'
 import { scanAgents } from '../../runtime/agent-discovery/scan'
 import { listAgents, removeAgent, setAgentStatus } from '../../runtime/agent-registry'
@@ -533,6 +534,52 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     })
   }
 
+  /* 人工验收：把停在 waiting_input 的执行接受或拒绝（PRD §7.7）。 */
+  app.post('/api/v1/executions/:id/accept', async (context) => {
+    const note = await optionalText(
+      context.req.json<unknown>().catch(() => undefined),
+      ['note', 'reason'],
+    )
+    try {
+      const result = acceptExecution(db, {
+        executionId: context.req.param('id'),
+        ...(note === undefined ? {} : { note }),
+      })
+      return context.json({ ok: true, ...result })
+    } catch (error) {
+      return context.json(
+        {
+          code: 'ACCEPTANCE_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
+  })
+
+  app.post('/api/v1/executions/:id/reject', async (context) => {
+    const reason =
+      (await optionalText(
+        context.req.json<unknown>().catch(() => undefined),
+        ['reason', 'note'],
+      )) ?? 'rejected by human'
+    try {
+      const result = rejectExecution(db, {
+        executionId: context.req.param('id'),
+        reason,
+      })
+      return context.json({ ok: true, ...result })
+    } catch (error) {
+      return context.json(
+        {
+          code: 'ACCEPTANCE_REJECTED',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        409,
+      )
+    }
+  })
+
   app.get('/api/v1/events/stream', (context) => {
     const since = Number.parseInt(context.req.query('sinceSeq') ?? '0', 10)
     let seq = Number.isFinite(since) ? since : 0
@@ -652,4 +699,16 @@ function contentType(file: string): string {
     default:
       return 'application/octet-stream'
   }
+}
+
+/** 从请求体里取第一个非空字符串字段（人工接受/拒绝的说明是可选的）。 */
+async function optionalText(body: unknown, keys: readonly string[]): Promise<string | undefined> {
+  const resolved = await body
+  if (typeof resolved !== 'object' || resolved === null) return undefined
+  const record = resolved as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return undefined
 }

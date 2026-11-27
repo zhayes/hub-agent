@@ -490,7 +490,7 @@ ADR 0026 要求“启用 Relay 之前必须补上 mTLS”。这一步已完成�
 
 验证：`test/unit/remote-execution.test.ts`（5 条）——状态映射表、无验收器时 `manual_required` + `waiting_input`、带检查的 `pass` → `succeeded` + 证据、空检查的 `pass` 被降级、运行中不产生验收。
 
-仍差：P0 未实现“**把产物应用到宿主 worktree 并跑命令检查**”，所以代码类交付物只能走人工验收；`manual_required` 之后的“人类接受”入口（Clarification → 状态收敛）也仍是既有缺口。
+仍差：交付物**应用**与基于应用的命令验收（已由下一节补上）；`manual_required` 的人工接受入口也已由再下一节补上。
 
 ### 远端交付物的应用与验收（2026-11-27，接上一节）
 
@@ -538,7 +538,24 @@ token = "outbound-token"  # 或给 [a2a.remotePeers.tls]（certFile/keyFile/caFi
 
 验证：`test/unit/config-a2a.test.ts`（3）、`test/unit/remote-endpoints.test.ts`（5）、`test/unit/hub-a2a-config.test.ts`（3：配置启用入站面并拉到卡片、非法出站配置拒启、只配出站不会把入站面带起来）。
 
-仍未做：CLI 没有 `ha a2a peer add` 之类的配对/发证命令（现在靠手写配置 + `regenerate` 风格的外部证书）；`manual_required` 的人工接受入口仍缺。
+仍未做：CLI 没有 `ha a2a peer add` 之类的配对/发证命令（现在靠手写配置 + `regenerate` 风格的外部证书）；Web 控制台也还没有“接受/拒绝”按钮（API 已就绪，见下一节）。
+
+### 人工验收：waiting_input → 收敛 → Brain 继续（2026-11-27）
+
+远端结果或确定性检查无法自动判定时，执行停在 `waiting_input`。现在这条状态有出口了。
+
+- `runtime/acceptance.ts`：
+  - `acceptExecution` / `rejectExecution`：只接受 `waiting_input` 的执行（其余状态直接拒，不把运行中的执行判成功）。
+  - 先写一条 `decidedBy='human'` 的 `verification.recorded`（接受 = `llmReview` 检查通过 + `verdict=pass`；拒绝 = `verdict=fail`），保证“验收真相”有人可查。
+  - 状态收敛按状态机走：`waiting_input → running → succeeded|failed`；拒绝时 Task/Subtask 一起收敛为 `failed`，交回 Brain 重规划。
+  - 接受后 Task 回 `running` 并**产生下一个决策点**（`human:<executionId>:accept`），否则 Brain 永远不会被唤醒。
+  - `succeeded` 必须有证据：执行没有远端证据时，以“人工作出的依据”充当证据；已有 `a2a:<peer>/<task>` 证据则保留不覆盖。
+- `settleRemoteExecution` 判 `manual_required` 时创建一条 `kind='decide'` 的澄清，选项固定为 `accept` / `reject`，并绑定 `executionId`；所以人能看到“为什么需要我”，也知道该回答什么。
+- 入口：`POST /api/v1/executions/:id/accept`（可选 `note`）与 `POST /api/v1/executions/:id/reject`（可选 `reason`），鉴权与其它本地 API 一致。
+
+验证：`test/unit/acceptance.test.ts`（4）——接受后的验收记录/三态收敛/决策点、拒绝的失败收敛、重复接受被拒、不存在或非等待态被拒；`test/unit/remote-execution.test.ts` 追加断言：`manual_required` 会留下 options 为 `['accept','reject']` 且绑定 executionId 的澄清。
+
+仍未做：Web 控制台的接受/拒绝按钮（API 已就绪）；CLI 子命令；澄清答案（`answer=accept`）还没有自动串到 `acceptExecution`（需要先把对话路由与执行关联起来）。
 
 ### A5 核心验收场景
 
