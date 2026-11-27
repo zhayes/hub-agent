@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DomainEvent } from '../../src/domain/events'
-import { asApprovalId, asExecutionId, asGoalId } from '../../src/domain/ids'
+import { asAgentId, asApprovalId, asExecutionId, asGoalId, asSubtaskId } from '../../src/domain/ids'
 import { applyEvent, type DomainState, emptyState } from '../../src/domain/machine'
 import {
   AT,
@@ -568,5 +568,34 @@ describe('applyEvent 是全函数', () => {
     for (const event of events) {
       expect(() => applyEvent(seed(), event)).not.toThrow()
     }
+  })
+})
+
+describe('subtask.assigned', () => {
+  it('把实际派单的 Agent 写回子任务，不改状态', () => {
+    const state = seed()
+    const before = state.subtasks[IDS.s1]
+    const outcome = applyEvent(state, {
+      type: 'subtask.assigned',
+      subtaskId: IDS.s1,
+      agentId: asAgentId('agent-real'),
+      at: AT,
+    })
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.state.subtasks[IDS.s1]?.assignedAgentId).toBe('agent-real')
+    expect(outcome.state.subtasks[IDS.s1]?.status).toBe(before?.status)
+  })
+
+  it('子任务不存在时拒绝', () => {
+    const outcome = applyEvent(seed(), {
+      type: 'subtask.assigned',
+      subtaskId: asSubtaskId('missing'),
+      agentId: asAgentId('a'),
+      at: AT,
+    })
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) return
+    expect(outcome.error.code).toBe('NOT_FOUND')
   })
 })

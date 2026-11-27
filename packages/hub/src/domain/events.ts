@@ -7,7 +7,7 @@ import type {
   Task,
   VerificationRun,
 } from './entities'
-import type { ApprovalId, ExecutionId, GoalId, SubtaskId, TaskId, Timestamp } from './ids'
+import type { AgentId, ApprovalId, ExecutionId, GoalId, SubtaskId, TaskId, Timestamp } from './ids'
 import type {
   ApprovalStatus,
   ExecutionStatus,
@@ -28,6 +28,7 @@ export type DomainEvent =
   | { type: 'task.created'; task: Task }
   | { type: 'task.status'; taskId: TaskId; to: TaskStatus; at: Timestamp }
   | { type: 'subtask.created'; subtask: Subtask }
+  | { type: 'subtask.assigned'; subtaskId: SubtaskId; agentId: AgentId; at: Timestamp }
   | { type: 'subtask.status'; subtaskId: SubtaskId; to: SubtaskStatus; at: Timestamp }
   | { type: 'execution.created'; execution: Execution }
   | { type: 'execution.status'; executionId: ExecutionId; to: ExecutionStatus; at: Timestamp }

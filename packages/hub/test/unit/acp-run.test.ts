@@ -105,6 +105,8 @@ describe('runAcpTask：成功链路', () => {
     expect(result.evidence.diff).toContain('mock-output.txt')
     expect(result.evidence.diffTruncated).toBeUndefined()
     expect(result.evidence.transcriptRef).toBe(result.transcriptRef)
+    /* Agent 的最终回答进证据：只读任务的产物就是这段文字，Brain 靠它做后续判断。 */
+    expect(result.evidence.result).toContain('mock agent working')
     expect(existsSync(result.transcriptRef)).toBe(true)
     expect(result.updates).toBeGreaterThan(0)
 

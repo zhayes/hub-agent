@@ -37,6 +37,7 @@ import { answerClarification } from '../clarify'
 import { failTask } from '../recovery/fail'
 import { resumeExecution } from '../resume-execution'
 import { completeTaskAfterDelivery } from '../workspace/finalize'
+import { collectAgentOutputs } from './agent-outputs'
 
 export interface ChatServiceOptions {
   db: Db
@@ -989,33 +990,67 @@ export class ChatService {
       })
       /* 任务成功时，最终回答用 Agent 自己的输出，而不是 Brain 的“任务完成/编号”总结。 */
       const produced = result.ok ? sink.finalizeOutput() : undefined
-      if (produced !== undefined) {
+      const segments =
+        result.ok && result.goalId !== undefined
+          ? collectAgentOutputs(
+              loadState(db),
+              result.goalId,
+              new Map(listAgents(db).map((agent) => [String(agent.id), agent.name])),
+            )
+          : []
+      /* 已产出“回答”？分段列表与流式文本任一有内容都算，避免后面再多补一条“任务完成”。 */
+      const answered = produced !== undefined || segments.length > 0
+      if (answered) {
         brainStream?.finish(undefined)
-        /* 流式输出行收成一句提示，完整结果追加到回合末尾（保证是最后一条回答）。 */
-        updateChatMessage(db, asChatMessageId(produced.id), {
-          kind: 'progress',
-          stage: 'output',
-          content: 'Agent 输出已生成，完整内容见下方回答。',
-        })
-        appendChatMessage(db, {
-          threadId,
-          role: 'assistant',
-          kind: 'text',
-          content: produced.text.slice(0, 20_000),
-          ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
-          ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
-        })
+        if (produced !== undefined) {
+          /* 流式输出行收成一句提示，完整结果追加到回合末尾（保证是最后一条回答）。 */
+          updateChatMessage(db, asChatMessageId(produced.id), {
+            kind: 'progress',
+            stage: 'output',
+            content: 'Agent 输出已生成，完整内容见下方回答。',
+          })
+        }
+        if (segments.length > 0) {
+          /*
+           * 每个子任务单独成段：一次对话可能派给多个 Agent（workbuddy + dsh），
+           * 以前它们的输出会累加到同一个字符串里、无归属、并且 20k 以后被静默砍掉。
+           */
+          for (const segment of segments) {
+            appendChatMessage(db, {
+              threadId,
+              role: 'assistant',
+              kind: 'text',
+              content:
+                segment.title === undefined
+                  ? segment.text
+                  : `**${segment.title}**\n\n${segment.text}`,
+              agentName: segment.agentName,
+              ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
+              ...(segment.taskId === undefined ? {} : { taskId: segment.taskId }),
+            })
+          }
+        } else if (produced !== undefined) {
+          /* 拿不到证据（例如全是远程执行）时退回流式文本，宁可少归属也别丢内容。 */
+          appendChatMessage(db, {
+            threadId,
+            role: 'assistant',
+            kind: 'text',
+            content: produced.text.slice(0, 20_000),
+            ...(thread?.goalId === undefined ? {} : { goalId: thread.goalId }),
+            ...(result.taskId === undefined ? {} : { taskId: result.taskId }),
+          })
+        }
       }
       /* 有卡/无 reply 时，流式文本只是前言：收起成 thinking 步骤。 */
       if (
-        produced === undefined &&
+        !answered &&
         (result.reply === undefined ||
           result.approval !== undefined ||
           result.clarification !== undefined)
       ) {
         brainStream?.finish(undefined)
       }
-      if (produced !== undefined) {
+      if (answered) {
         /* 已用 Agent 输出作为回答，跳过 Brain 总结与“任务完成”卡片。 */
       } else if (result.approval !== undefined) {
         appendChatMessage(db, {

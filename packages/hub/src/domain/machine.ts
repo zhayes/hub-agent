@@ -227,6 +227,25 @@ export function applyEvent(state: DomainState, event: DomainEvent): ApplyOutcome
       return accept({ ...state, subtasks: { ...state.subtasks, [id]: event.subtask } })
     }
 
+    case 'subtask.assigned': {
+      const subtask = state.subtasks[event.subtaskId]
+      if (subtask === undefined) {
+        return reject(state, 'NOT_FOUND', `subtask 不存在：${event.subtaskId}`)
+      }
+      /* 只记录“派给谁”，不改状态：状态迁移仍由 subtask.status 负责。 */
+      return accept({
+        ...state,
+        subtasks: {
+          ...state.subtasks,
+          [event.subtaskId]: {
+            ...subtask,
+            assignedAgentId: event.agentId,
+            updatedAt: event.at,
+          },
+        },
+      })
+    }
+
     case 'subtask.status': {
       const subtask = state.subtasks[event.subtaskId]
       if (subtask === undefined) {

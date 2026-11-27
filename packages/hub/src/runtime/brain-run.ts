@@ -410,6 +410,37 @@ export async function runGoalWithBrain(
         !remoteSubmittedIds.has(subtask.id) &&
         subtask.status === 'ready',
     )
+
+    /*
+     * 中途改计划：Brain 看到结果后想补步骤（例：“两个 review 都过了，但我要看正文再做对比，
+     * 所以再加一个只读子任务”）。以前这里直接 break，动作被静默丢弃，
+     * 于是界面上说了“新增子任务”却什么都没发生。
+     * 只在“当前没有可派发子任务”时接受，避免顶掉正在跑的计划。
+     */
+    const revised = round.actions
+      .filter((action) => action.type === 'revise_plan')
+      .flatMap((action) => action.subtasks)
+    if (ready.length === 0 && revised.length > 0) {
+      if (replans >= 2) {
+        report({ stage: 'thinking', text: '重规划次数已用尽，忽略本轮新增步骤' })
+        break
+      }
+      replans += 1
+      drafts = revised
+      createdPlan = createTaskPlan({
+        db: options.db,
+        goalId,
+        objective: options.objective,
+        drafts,
+        agentId: options.agent.id,
+        at: asTimestamp(new Date().toISOString()),
+      })
+      taskId = createdPlan.taskId
+      draftSubtasks = createdPlan.subtasks
+      onTaskCreated?.({ goalId, taskId })
+      continue
+    }
+
     const targets =
       requested.size === 0 ? ready : ready.filter((subtask) => requested.has(subtask.id))
     if (targets.length === 0) break
@@ -477,6 +508,18 @@ export async function runGoalWithBrain(
 
       /* Brain 点名了 Agent 就听它的；没点名再过 Selection Engine，而不是永远吃默认值。 */
       const chosen = pickSubtaskAgent(subtask, delegatedAgent.get(subtask.id))
+      /*
+       * 计划阶段所有子任务都挂的是默认 Agent；真正派单后把实际选择写回，
+       * 否则“dsh 审阅”这条子任务在库里会一直显示归属 workbuddy。
+       */
+      if (subtask.assignedAgentId === undefined || subtask.assignedAgentId !== chosen.id) {
+        appendEvent(options.db, loadState(options.db), {
+          type: 'subtask.assigned',
+          subtaskId: subtask.id,
+          agentId: asAgentId(chosen.id),
+          at: asTimestamp(new Date().toISOString()),
+        })
+      }
       report({
         stage: 'dispatching',
         text: `派给 ${chosen.name}：${subtask.title}`,

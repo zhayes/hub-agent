@@ -1074,6 +1074,10 @@ HubAgent 重启后必须能够：
 - 变更结果：`{ branch, commitSha, diffstat, changedFiles }`。
 - 写入范围：是否全部落在契约的 `allowedPaths` 内。
 - 验证输出：命令、退出码、耗时、日志引用。
+- **Agent 的最终回答**（`result`，有界截断）：只读任务（review / 分析 / 对比）的产物就是这段文字。
+  不给 Brain 看的结果是：它只能看到 verdict，于是再派一个 Agent 去“读 transcript”，白跑一趟。
+  这里存的是 Agent 交回的答案，不是 transcript 全文；快照再按 Brain 上下文预算截断并标记。
+- Agent 会话标识（`sessionId`）：留作事后回查 Agent 侧原会话（ACP `session/load`）。
 - 原始 transcript 引用（默认保留，Brain 不读取）。
 
 规则：

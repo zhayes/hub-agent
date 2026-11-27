@@ -493,7 +493,8 @@ interface OrchestratorBrain {
 
 - Goal 摘要与预算余额
 - 当前 `PlanRevision`
-- 各 Subtask 的状态、进度摘要、证据引用
+- 各 Subtask 的状态、进度摘要、证据引用（含 Agent 最终回答 `result`，按 4000 字截断并标记）
+- 执行用的 Agent 会话标识（`sessionId`），用于事后回查 Agent 侧原会话
 - 可用 Agent 的能力与健康摘要（已过滤，只给候选）
 - 待决事项（Approval、无进展告警、失败原因分类）
 - 会话工作区 `workspace.path`（Chat 会话才有）——Brain 靠它判断“当前项目”，没有就只能按上下文猜
@@ -916,7 +917,7 @@ Brain 流式：`OrchestratorBrain.step(input, sink)` 的 `BrainDeltaSink` 由 Pi
 精确续跑：`execution_resume`（迁移 013）保存 worktree + checks；`resumeExecution` 审批后原地重跑验收（同一 execution）；`ChatService.continueWaitingTask` 对 waiting_input 子任务沿用同一 Task 开新 attempt。
 Agent 进程沙箱的写授权 = `options.allowedWrite` + `agent.allowedWrite`（Agent 自身状态目录），否则 profile boot 会 EPERM 退出。dsh 的内层沙箱通过 `DSH_PERMISSION_MODE=danger-full-access` 关闭，避免与 srt 嵌套（ADR 0025）。
 文件预览：`GET /api/v1/tasks/:id/file` 只读，限定 evidence.changedFiles，根为最新 lease worktree 或 project root，带路径/大小/二进制防护。
-执行过程：`runAcpTask` 的 `onEvent`（message.delta / tool.call / plan.updated）由 ChatService 折叠成 `kind='progress'` 行，`stage` 区分 thinking/tool/thought/output；思考与输出按 450ms 合并后原地更新，`chat_messages.updated_at`（迁移 012）作为 SSE 水位，增量推送 `message.update` 帧；A 侧注入的 `thinking` 步骤来自 DecisionRecord.rationale。右侧资源栏读取 `/api/v1/tasks/:id` 的 evidence（changedFiles、verification、approvals）。消息 100 条分页，1,000 条 E2E 覆盖。Approval/Clarification 的“继续”首版是 `/chat/threads/:id/resume` 新 attempt，不是原 execution 精确恢复（已记入 ADR 0018）。
+执行过程：`runAcpTask` 的 `onEvent`（message.delta / tool.call / plan.updated）由 ChatService 折叠成 `kind='progress'` 行，`stage` 区分 thinking/tool/thought/output；思考与输出按 450ms 合并后原地更新，`chat_messages.updated_at`（迁移 012）作为 SSE 水位，增量推送 `message.update` 帧；A 侧注入的 `thinking` 步骤来自 DecisionRecord.rationale。右侧资源栏读取 `/api/v1/tasks/:id` 的 evidence（changedFiles、verification、approvals）。消息 100 条分页，1,000 条 E2E 覆盖。**最终回答按执行分段**（`runtime/chat/agent-outputs.ts`）：一个回合派给多个 Agent 时，每个执行一条 `kind='text'`、带 `agentName` 与小标题，不再把两份输出拼成一条无归属长文（也就不会在 20k 处静默砍尾）。Approval/Clarification 的“继续”首版是 `/chat/threads/:id/resume` 新 attempt，不是原 execution 精确恢复（已记入 ADR 0018）。
 
 **M11 落地（P1 生产基础）。** `interfaces/http/app.ts` 提供 tasks/evidence/decisions/agents/approvals/SSE；`hubagentd` 默认监听 `127.0.0.1:7788`，token 写入 `$HUBAGENT_HOME/token`（0600）。`packages/web` 是 Solid 2 + Vite + `@solidjs/router@2.0.1` 控制台，使用真实路由、三态主题、typed i18n、图标按钮与无边框选中；Chat 后端/UI 仍按 WEB-CONSOLE-PLAN P2/P3 推进。
 

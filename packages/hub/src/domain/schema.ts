@@ -213,6 +213,12 @@ export const domainEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('subtask.created'), subtask: subtaskSchema }),
   z.object({
+    type: z.literal('subtask.assigned'),
+    subtaskId: subtaskIdSchema,
+    agentId: agentIdSchema,
+    at: timestampSchema,
+  }),
+  z.object({
     type: z.literal('subtask.status'),
     subtaskId: subtaskIdSchema,
     to: z.enum(SUBTASK_STATUSES),

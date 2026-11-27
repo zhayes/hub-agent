@@ -65,6 +65,13 @@ function eventMeta(event: DomainEvent, next: DomainState, recordedAt: string): E
         aggregateId: event.subtask.id,
         goalId: next.tasks[event.subtask.taskId]?.goalId ?? null,
       }
+    case 'subtask.assigned':
+      return {
+        at: event.at,
+        aggregateType: 'subtask',
+        aggregateId: event.subtaskId,
+        goalId: goalIdOfSubtask(next, event.subtaskId),
+      }
     case 'subtask.status':
       return {
         at: event.at,

@@ -43,6 +43,11 @@ export function upsertAggregate(db: Db, event: DomainEvent, next: DomainState): 
       if (subtask !== undefined) upsertSubtask(db, subtask)
       return
     }
+    case 'subtask.assigned': {
+      const subtask = next.subtasks[event.subtaskId]
+      if (subtask !== undefined) upsertSubtask(db, subtask)
+      return
+    }
     case 'subtask.status': {
       const subtask = next.subtasks[event.subtaskId]
       if (subtask !== undefined) upsertSubtask(db, subtask)

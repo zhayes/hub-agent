@@ -65,6 +65,12 @@ import { runVerification } from './verify/runner'
 export const DEFAULT_ACP_MAX_STDOUT_BYTES = 32 * 1024 * 1024
 export const DEFAULT_ACP_MAX_STDERR_BYTES = 8 * 1024 * 1024
 
+/**
+ * Agent 最终回答的保留上限（字符）。证据里存这么多，快照再按 Brain 预算截断。
+ * 典型 review 5–10k 字，16k 足够放下“结论 + 要点”，又不至于把库写爆。
+ */
+const MAX_RESULT_CHARS = 16_000
+
 export interface RunAcpTaskOptions {
   db: Db
   provider: SandboxProvider
@@ -197,6 +203,13 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
    */
   const pendingEvents: AcpExecutionEvent[] = []
   let eventCount = 0
+  /*
+   * Agent 的最终回答：只读任务（review / 分析）的产物就是这段文字。
+   * 以前只流给 UI + 落 transcript，Brain 只能看到 verdict，于是它只能再派
+   * 一个 agent 去“读 transcript”——白跑一趟。这里把它存成证据。
+   */
+  let resultText = ''
+  let resultChars = 0
   const networkMode = options.networkMode ?? 'agent-managed'
   /* 缺省与“工作区内修改”一致：沙箱兜底，不逐次弹确认。 */
   const permissionMode: PermissionMode = options.permissionMode ?? 'workspace-write'
@@ -209,6 +222,12 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
 
   const recordEvent = (event: AcpExecutionEvent): void => {
     eventCount += 1
+    if (event.kind === 'message.delta' && event.role === 'agent') {
+      resultChars += event.text.length
+      if (resultText.length < MAX_RESULT_CHARS) {
+        resultText = `${resultText}${event.text}`.slice(0, MAX_RESULT_CHARS)
+      }
+    }
     /* UI 拿原始事件（含 raw）；只给落盘副本瘦身。 */
     options.onEvent?.(event)
     if (transcriptRef === undefined) {
@@ -223,6 +242,13 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         event: slimTranscriptEvent(event),
       })}\n`,
     )
+  }
+
+  /** Agent 最终回答（已按上限截断时显式标记，不静默砍尾）。 */
+  const resultEvidence = (): string | undefined => {
+    const text = resultText.trim()
+    if (text === '') return undefined
+    return resultChars > MAX_RESULT_CHARS ? `${text}\n…（已截断，原文共 ${resultChars} 字）` : text
   }
 
   const host = new AgentHost({
@@ -507,6 +533,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
     )
     const evidence: ExecutionEvidence = {
       ...git,
+      ...(resultEvidence() === undefined ? {} : { result: resultEvidence() }),
       transcriptRef,
     }
 
@@ -621,6 +648,7 @@ export async function runAcpTask(options: RunAcpTaskOptions): Promise<RunAcpTask
         )
         const evidence: ExecutionEvidence = {
           ...git,
+          ...(resultEvidence() === undefined ? {} : { result: resultEvidence() }),
           ...(transcriptRef === undefined ? {} : { transcriptRef }),
         }
         append({ type: 'execution.evidence', executionId: ids.executionId, evidence })

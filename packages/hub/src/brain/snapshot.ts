@@ -1,9 +1,11 @@
+import type { ExecutionEvidence } from '../domain/entities'
 import type { DomainState } from '../domain/machine'
 import type {
   AgentSummary,
   BrainBudget,
   BrainInput,
   ChatTurn,
+  ExecutionView,
   PendingDecisionView,
   RemotePeerSummary,
   SubtaskView,
@@ -73,7 +75,8 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
           execution: {
             id: latest.id,
             status: latest.status,
-            ...(latest.evidence === undefined ? {} : { evidence: latest.evidence }),
+            ...(latest.sessionId === undefined ? {} : { sessionId: latest.sessionId }),
+            ...(latest.evidence === undefined ? {} : { evidence: evidenceView(latest.evidence) }),
             ...(verification === undefined
               ? {}
               : { verification: { verdict: verification.verdict } }),
@@ -119,5 +122,33 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
     approvals,
     budget: { ...options.budget },
     stateVersion: options.stateVersion,
+  }
+}
+
+/**
+ * 快照里给 Brain 看的证据视图。
+ *
+ * `evidence.result` 是 Agent 的最终回答，可能有上万字；整段塞进快照会把
+ * 上下文预算吃掉。这里按固定上限截断并显式标记，让 Brain 知道“还有更多”。
+ */
+const BRAIN_RESULT_CHARS = 4_000
+
+function evidenceView(evidence: NonNullable<ExecutionEvidence>): ExecutionView['evidence'] {
+  const result = evidence.result
+  const truncated = result !== undefined && result.length > BRAIN_RESULT_CHARS
+  return {
+    ...(evidence.branch === undefined ? {} : { branch: evidence.branch }),
+    ...(evidence.commitSha === undefined ? {} : { commitSha: evidence.commitSha }),
+    ...(evidence.diffstat === undefined ? {} : { diffstat: evidence.diffstat }),
+    ...(evidence.changedFiles === undefined ? {} : { changedFiles: evidence.changedFiles }),
+    ...(evidence.transcriptRef === undefined ? {} : { transcriptRef: evidence.transcriptRef }),
+    ...(result === undefined
+      ? {}
+      : {
+          result: truncated
+            ? `${result.slice(0, BRAIN_RESULT_CHARS)}\n…（已截断，原文共 ${result.length} 字）`
+            : result,
+        }),
+    ...(truncated ? { resultTruncated: true } : {}),
   }
 }

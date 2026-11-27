@@ -610,3 +610,79 @@ describe('M8：自动重规划', () => {
     ).toBe('failed')
   })
 })
+
+/**
+ * 先跑一个子任务；等它成功后，再“临时补一步”（模拟：两个 review 都过了，
+ * 但我要看正文才能做对比，所以再加一个只读子任务）。
+ */
+class AddOnBrain implements OrchestratorBrain {
+  private added = false
+
+  async step(input: BrainInput): Promise<BrainAction[]> {
+    const subtasks = input.tasks.flatMap((task) => task.subtasks)
+    if (subtasks.length === 0) {
+      return [
+        {
+          type: 'revise_plan',
+          subtasks: [{ title: 'first', description: 'first', requiredCapabilities: [] }],
+          reason: 'plan',
+        },
+      ]
+    }
+    const allDone = subtasks.every((subtask) => subtask.status === 'succeeded')
+    if (allDone && !this.added) {
+      this.added = true
+      return [
+        {
+          type: 'revise_plan',
+          subtasks: [{ title: 'follow-up', description: 'follow-up', requiredCapabilities: [] }],
+          reason: '补一步：需要追加只读分析',
+        },
+      ]
+    }
+    if (allDone) return [{ type: 'finish', summary: 'done' }]
+    return []
+  }
+
+  async explain(): Promise<DecisionRationale[]> {
+    return [{ type: 'decompose', rationale: 'add-on' }]
+  }
+}
+
+describe('runGoalWithBrain：中途补计划', () => {
+  it('子任务全部成功后的 revise_plan 会被真的执行，而不是静默丢弃', async () => {
+    const db = database()
+    const dir = repo()
+    const result = await runGoalWithBrain({
+      db,
+      provider: new MockProvider(),
+      brain: new AddOnBrain(),
+      agent: resolveAgent(db, 'mock'),
+      objective: 'two steps with an add-on',
+      worktree: dir,
+      checks: [
+        { kind: 'command', cmd: 'true', timeoutMs: 5_000, expect: { exitCode: 0 } },
+        { kind: 'diffScope', allowedPaths: ['.'] },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    /* 第一份 + 补充那份都真的跑了 */
+    expect(result.executions).toHaveLength(2)
+
+    const tasks = db
+      .prepare('SELECT COUNT(*) AS n FROM tasks WHERE goal_id = ?')
+      .get(result.goalId) as unknown as { n: number }
+    expect(tasks.n).toBe(2)
+
+    const titles = db
+      .prepare(
+        `SELECT s.title, s.status FROM subtasks s
+         JOIN tasks t ON t.id = s.task_id
+         WHERE t.goal_id = ? ORDER BY s.created_at`,
+      )
+      .all(result.goalId) as unknown as Array<{ title: string; status: string }>
+    expect(titles.map((row) => row.title)).toEqual(['first', 'follow-up'])
+    expect(titles.every((row) => row.status === 'succeeded')).toBe(true)
+  })
+})

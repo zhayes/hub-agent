@@ -47,12 +47,20 @@ export interface RemotePeerSummary {
 export interface ExecutionView {
   id: string
   status: ExecutionStatus
+  /**
+   * Agent 侧的会话标识。留着它才能事后去 Agent 那边回查原会话
+   * （ACP `session/load`），与本地 transcript 互为补充。
+   */
+  sessionId?: string
   evidence?: {
     branch?: string
     commitSha?: string
     diffstat?: string
     changedFiles?: string[]
     transcriptRef?: string
+    /** Agent 的最终回答（已按 Brain 上下文预算截断，见 buildBrainInput）。 */
+    result?: string
+    resultTruncated?: boolean
   }
   verification?: {
     verdict: 'pass' | 'fail' | 'manual_required'

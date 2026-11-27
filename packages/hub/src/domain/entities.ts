@@ -97,6 +97,11 @@ export interface ExecutionEvidence {
   diffstat?: string
   changedFiles?: string[]
   transcriptRef?: string
+  /**
+   * Agent 本轮自己交回的最终回答（不是 transcript 全文，也不是自述式验收）。
+   * 只读任务（review、分析）的“产物”就在这里；截断上限由 Runtime 控制。
+   */
+  result?: string
   diff?: string
   diffTruncated?: boolean
 }

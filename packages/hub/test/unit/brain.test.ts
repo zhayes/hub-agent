@@ -7,7 +7,7 @@ import {
   type OrchestratorBrain,
 } from '../../src/brain/types'
 import { validateBrainActions } from '../../src/brain/validate'
-import { asGoalId, asTimestamp } from '../../src/domain/ids'
+import { asGoalId, asSessionId, asTimestamp } from '../../src/domain/ids'
 import { applyEvent, type DomainState, emptyState } from '../../src/domain/machine'
 import { runBrainRound } from '../../src/runtime/brain-loop'
 import { answerClarification, createClarification } from '../../src/runtime/clarify'
@@ -21,6 +21,7 @@ import { listDecisions, recordDecision } from '../../src/runtime/decision-record
 import { type Db, openDatabase } from '../../src/storage/db'
 import { migrate } from '../../src/storage/migrate'
 import { appendEvent } from '../../src/storage/write/events'
+import { IDS, seed } from './domain-fixtures'
 
 const dbs: Db[] = []
 
@@ -295,5 +296,44 @@ describe('Brain 快照：会话工作区', () => {
     expect(withWorkspace.workspace).toEqual({ path: '/Users/me/adstudio' })
 
     expect(input(state).workspace).toBeUndefined()
+  })
+})
+
+describe('Brain 快照：执行证据', () => {
+  it('带上 Agent 最终回答与会话标识，并按预算截断', () => {
+    const base = seed()
+    const longResult = 'r'.repeat(5_000)
+    const original = base.executions[IDS.e1]
+    if (original === undefined) throw new Error('fixture 缺少 execution')
+    const state = {
+      ...base,
+      executions: {
+        ...base.executions,
+        [IDS.e1]: {
+          ...original,
+          sessionId: asSessionId('sess-1'),
+          evidence: { result: longResult, transcriptRef: 'transcript.jsonl' },
+        },
+      },
+    }
+
+    const snapshot = buildBrainInput({
+      state,
+      goalId: IDS.goal,
+      agents: [],
+      pending: [],
+      budget: DEFAULT_BRAIN_BUDGET,
+      stateVersion: 1,
+    })
+
+    const execution = snapshot.tasks
+      .flatMap((task) => task.subtasks)
+      .find((subtask) => subtask.id === IDS.s1)?.execution
+    expect(execution?.sessionId).toBe('sess-1')
+    /* 4000 字上限 + 截断标记，避免把上下文预算吃光 */
+    expect(execution?.evidence?.result?.length).toBeLessThan(4_200)
+    expect(execution?.evidence?.result).toContain('已截断')
+    expect(execution?.evidence?.resultTruncated).toBe(true)
+    expect(execution?.evidence?.transcriptRef).toBe('transcript.jsonl')
   })
 })
