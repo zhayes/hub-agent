@@ -7,6 +7,7 @@ import type {
   Clarification,
   DecisionRecord,
   OrchestratorBrain,
+  RemotePeerSummary,
 } from '../brain/types'
 import type { Goal, Subtask, Task } from '../domain/entities'
 import { asAgentId, asGoalId, asSubtaskId, asTaskId, asTimestamp, type TaskId } from '../domain/ids'
@@ -21,11 +22,16 @@ import type { AgentRecord } from './agent-registry'
 import { runBrainRound } from './brain-loop'
 import { createClarification } from './clarify'
 import { createAcpDispatchExecutor } from './dispatch/acp-executor'
-import { enqueueDispatch } from './dispatch/queue'
+import { enqueueDispatch, listDispatches } from './dispatch/queue'
 import { drainDispatches } from './dispatch/runner'
 import { cancelTask } from './recovery/cancel'
 import { failGoal } from './recovery/fail'
 import { deriveIdempotencyKey } from './recovery/idempotency'
+import {
+  type ConnectRemote,
+  createRemoteDispatchExecutor,
+  type ResolvePeerEndpoint,
+} from './remote-dispatch'
 import { completeGoal, completeTaskAfterDelivery } from './workspace/finalize'
 
 /**
@@ -62,6 +68,17 @@ export interface RunGoalWithBrainOptions
   onBrainDelta?: BrainDeltaSink
   /** 可参与自动换 Agent 的候选；默认只有 options.agent */
   availableAgents?: readonly AgentRecord[]
+  /**
+   * 远程委托（A3）。给了才启用：Brain 快照里出现 `peers`，`delegate.peerId` 才有效。
+   * 不给时 `peerId` 一律被校验拒绝，也不会退回本地 Agent。
+   */
+  remote?: {
+    peers: readonly RemotePeerSummary[]
+    /** peerId → 端点（token/tls 由组合根注入） */
+    resolvePeer: ResolvePeerEndpoint
+    /** 测试注入；缺省用真实 SDK 客户端 */
+    connect?: ConnectRemote
+  }
   /** 共享工作区完成即落 Task completed；worktree 由交付/merge 后 finalize */
   completeOnSuccess?: boolean
   /** 执行过程回调；只做展示，异常不得影响执行 */
@@ -106,6 +123,7 @@ export async function runGoalWithBrain(
     onProgress,
     onGoalCreated,
     onTaskCreated,
+    remote,
     ...taskOptions
   } = options
   const goalId = asGoalId(newId())
@@ -136,6 +154,8 @@ export async function runGoalWithBrain(
 
   const availableAgents = options.availableAgents ?? [options.agent]
   const agentPool = availableAgents.length > 0 ? availableAgents : [options.agent]
+  /* 没配置远程对端时，快照不带 peers，delegate.peerId 会被校验拒绝。 */
+  const peersArg = remote === undefined || remote.peers.length === 0 ? {} : { peers: remote.peers }
   const agentById = new Map<string, AgentRecord>(
     agentPool.map((agent) => [String(agent.id), agent]),
   )
@@ -167,6 +187,7 @@ export async function runGoalWithBrain(
     reason: 'plan_invalid',
     dedupeKey: `goal:${goalId}:decompose`,
     agents,
+    ...peersArg,
     ...(budget === undefined ? {} : { budget }),
     ...(conversation === undefined ? {} : { conversation }),
     ...(options.onBrainDelta === undefined ? {} : { onDelta: options.onBrainDelta }),
@@ -277,6 +298,16 @@ export async function runGoalWithBrain(
       : { initializeTimeoutMs: taskOptions.initializeTimeoutMs }),
   }
 
+  /* 远程执行器整个回合复用：它只负责“提交”，不阻塞等待远端结果。 */
+  const remoteExecutor =
+    remote === undefined
+      ? undefined
+      : createRemoteDispatchExecutor({
+          db: options.db,
+          resolvePeer: remote.resolvePeer,
+          ...(remote.connect === undefined ? {} : { connect: remote.connect }),
+        })
+
   while (roundIndex < 20) {
     const round = await runBrainRound({
       db: options.db,
@@ -285,6 +316,7 @@ export async function runGoalWithBrain(
       reason: roundIndex === 0 ? 'plan_invalid' : 'subtask_terminal',
       dedupeKey: `goal:${goalId}:dispatch:${roundIndex}`,
       agents,
+      ...peersArg,
       ...(budget === undefined ? {} : { budget }),
       ...(conversation === undefined ? {} : { conversation }),
     })
@@ -296,6 +328,10 @@ export async function runGoalWithBrain(
     }
     const turnReply = replyTextOf(round.actions)
     if (turnReply !== undefined) replyText = turnReply
+
+    /* 本轮动作全被校验拒（包括未知 peerId）：不要退回“自动派发所有 ready”，
+       否则等于静默把远程委托降级成本地执行。 */
+    if (round.validation.errors.length > 0 && round.actions.length === 0) break
 
     const human = round.actions.find((action) => action.type === 'request_human')
     if (human !== undefined) {
@@ -342,10 +378,21 @@ export async function runGoalWithBrain(
     }
 
     const executed = new Set(executions.map((item) => item.subtaskId))
+    /* 已提交给远端的子任务不再当作“待派发”：结果由对账推进，本回合不该再碰。 */
+    const remoteSubmittedIds = new Set(
+      listDispatches(options.db, goalId)
+        .filter((intent) => intent.target === 'remote-a2a')
+        .map((intent) => intent.subtaskId),
+    )
     const delegatedAgent = new Map<string, string>()
+    const delegatedPeer = new Map<string, string>()
     for (const action of round.actions) {
-      if (action.type === 'delegate' && action.request.agentId !== undefined) {
+      if (action.type !== 'delegate') continue
+      if (action.request.agentId !== undefined) {
         delegatedAgent.set(action.request.subtaskId, action.request.agentId)
+      }
+      if (action.request.peerId !== undefined) {
+        delegatedPeer.set(action.request.subtaskId, action.request.peerId)
       }
     }
     const requested = new Set(
@@ -354,13 +401,60 @@ export async function runGoalWithBrain(
         .map((action) => action.request.subtaskId),
     )
     const ready = draftSubtasks.filter(
-      (subtask) => !executed.has(subtask.id) && subtask.status === 'ready',
+      (subtask) =>
+        !executed.has(subtask.id) &&
+        !remoteSubmittedIds.has(subtask.id) &&
+        subtask.status === 'ready',
     )
     const targets =
       requested.size === 0 ? ready : ready.filter((subtask) => requested.has(subtask.id))
     if (targets.length === 0) break
 
+    let remoteSubmitted = 0
     for (const subtask of targets) {
+      /* 远程目标：只提交、不等结果（ADR 0027 D1）。 */
+      const peerId = delegatedPeer.get(subtask.id)
+      if (peerId !== undefined) {
+        if (remoteExecutor === undefined) {
+          throw new HubError('ACTION_REJECTED', '未配置远程对端，无法委托', {
+            goalId,
+            subtaskId: subtask.id,
+            peerId,
+          })
+        }
+        report({ stage: 'dispatching', text: `委托远程对端 ${peerId}：${subtask.title}` })
+        const remoteKey = deriveIdempotencyKey({
+          goalId,
+          subtaskId: subtask.id,
+          attempt: 1,
+        })
+        const { intent } = enqueueDispatch(options.db, {
+          goalId,
+          taskId,
+          subtaskId: subtask.id,
+          target: 'remote-a2a',
+          objective: subtask.description,
+          idempotencyKey: remoteKey,
+          payload: { peerId },
+        })
+        const drained = await drainDispatches(options.db, {
+          goalId,
+          intentId: intent.id,
+          max: 1,
+          executor: remoteExecutor,
+        })
+        if (drained.failed.length > 0) {
+          report({ stage: 'failed', text: `远程委托提交失败：${peerId}` })
+          throw new HubError('ACTION_REJECTED', '远程委托提交失败', {
+            goalId,
+            subtaskId: subtask.id,
+            peerId,
+          })
+        }
+        remoteSubmitted += 1
+        continue
+      }
+
       /* Brain 点名了 Agent 就听它的；没点名再过 Selection Engine，而不是永远吃默认值。 */
       const chosen = pickSubtaskAgent(subtask, delegatedAgent.get(subtask.id))
       report({
@@ -453,6 +547,23 @@ export async function runGoalWithBrain(
       lastResult = result
       if (!result.ok) break
     }
+
+    if (remoteSubmitted > 0) {
+      /* 远程委托只提交：本回合到此为止，等对账把远端终态带回来（ADR 0027 D1）。 */
+      report({
+        stage: 'waiting',
+        text: `已提交 ${remoteSubmitted} 个远程子任务，等待远端结果`,
+      })
+      return waitingResult({
+        goalId,
+        taskId,
+        agent: { id: options.agent.id, name: options.agent.name },
+        executions,
+        decisions,
+        stopReason: 'waiting_remote',
+        ...(lastResult === undefined ? {} : { last: lastResult }),
+      })
+    }
     if (lastResult !== undefined && !lastResult.ok) {
       if (lastResult.approval !== undefined || lastResult.stopReason === 'waiting_approval') {
         report({ stage: 'waiting', text: '等待你批准后继续', agent: agentLabel })
@@ -472,6 +583,7 @@ export async function runGoalWithBrain(
           reason: 'plan_invalid',
           dedupeKey: `goal:${goalId}:replan:${replans}`,
           agents,
+          ...peersArg,
           ...(budget === undefined ? {} : { budget }),
         })
         if (replan !== undefined) decisions.push(replan.record)
@@ -505,6 +617,20 @@ export async function runGoalWithBrain(
   }
 
   if (lastResult === undefined) {
+    /* 全部子任务都已提交给远端：本回合没有本地结果，但这不等于失败。 */
+    const remotePending = listDispatches(options.db, goalId).some(
+      (intent) => intent.target === 'remote-a2a',
+    )
+    if (remotePending) {
+      return waitingResult({
+        goalId,
+        taskId,
+        agent: { id: options.agent.id, name: options.agent.name },
+        executions,
+        decisions,
+        stopReason: 'waiting_remote',
+      })
+    }
     throw new HubError('ACTION_REJECTED', 'Brain 计划没有可执行子任务', { goalId })
   }
   if (lastResult.ok && completeOnSuccess) {

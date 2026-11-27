@@ -16,7 +16,7 @@ export function buildBrainSystemPrompt(chat = false): string {
     '每次只返回一个 JSON 对象：{"actions": [...]}。actions 允许的类型：',
     '- {"type":"reply","text":"给用户的回答"} —— 直接回答、解释、闲聊、追问，不建任务。',
     '- {"type":"revise_plan","subtasks":[{"title","description","requiredCapabilities":[],"maxAttempts":1}],"reason"} —— 需要在本机产生副作用（改代码、跑命令、装依赖、读仓库）时才拆计划。',
-    '- {"type":"delegate","request":{"subtaskId","objective","agentId?"}}',
+    '- {"type":"delegate","request":{"subtaskId","objective","agentId?","peerId?"}} —— agentId 是本地 Agent，peerId 是快照 peers 里的远程对端，二者互斥、同一子任务只能选一个',
     '- {"type":"cancel","executionId","reason"}',
     '- {"type":"accept","subtaskId","rationale"}',
     '- {"type":"reject","subtaskId","reason","next":"retry"|"replan"}',

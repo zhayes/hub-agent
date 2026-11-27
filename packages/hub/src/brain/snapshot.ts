@@ -5,6 +5,7 @@ import type {
   BrainInput,
   ChatTurn,
   PendingDecisionView,
+  RemotePeerSummary,
   SubtaskView,
   TaskView,
 } from './types'
@@ -13,6 +14,8 @@ export interface BuildBrainInputOptions {
   state: DomainState
   goalId: string
   agents: readonly AgentSummary[]
+  /** 可委托的远程对端；未配置时快照不带 `peers` 字段。 */
+  peers?: readonly RemotePeerSummary[]
   pending: readonly PendingDecisionView[]
   budget: BrainBudget
   stateVersion: number
@@ -91,6 +94,7 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
     }))
 
   const conversation = options.conversation?.filter((turn) => turn.content.trim() !== '')
+  const peers = options.peers ?? []
 
   return {
     goal: {
@@ -105,6 +109,7 @@ export function buildBrainInput(options: BuildBrainInputOptions): BrainInput {
     planRevision: options.planRevision ?? 1,
     tasks: taskViews,
     agents: [...options.agents].sort((a, b) => a.id.localeCompare(b.id)),
+    ...(peers.length === 0 ? {} : { peers: [...peers].sort((a, b) => a.id.localeCompare(b.id)) }),
     pending: [...options.pending].sort(
       (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
     ),

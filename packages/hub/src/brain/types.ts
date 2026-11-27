@@ -31,6 +31,19 @@ export interface AgentSummary {
   capabilities?: unknown
 }
 
+/**
+ * 可委托的远程 HubAgent 对端（只读快照，A3）。
+ *
+ * 只给 Brain 看“能委托给谁”；能力声明不代表授权或质量（PRD §7.2）。
+ * `id` 是**本机**给对端起的 peerId，不是对端自报的名字（ADR 0026）。
+ */
+export interface RemotePeerSummary {
+  id: string
+  displayName: string
+  /** 对端公开给本机的能力白名单；缺省表示未声明。 */
+  capabilities?: unknown
+}
+
 export interface ExecutionView {
   id: string
   status: ExecutionStatus
@@ -94,6 +107,8 @@ export interface BrainInput {
   conversation?: ChatTurn[]
   tasks: TaskView[]
   agents: AgentSummary[]
+  /** 可委托的远程对端；没有配置时省略，Brain 也就看不到任何 peer。 */
+  peers?: readonly RemotePeerSummary[]
   pending: PendingDecisionView[]
   approvals: Array<{
     id: string
@@ -115,7 +130,15 @@ export interface SubtaskDraft {
 export interface DelegateRequest {
   subtaskId: string
   objective: string
+  /** 本地 Agent（与 `peerId` 互斥）。 */
   agentId?: string
+  /**
+   * 远程 HubAgent 对端的 peerId（与 `agentId` 互斥，A3）。
+   *
+   * 表达“把这件活委托给另一台机器上的 HubAgent”；Runtime 只提交、不阻塞回合，
+   * 远端结果由对账推进，且仍要本地验收（PRD §7.7）。
+   */
+  peerId?: string
 }
 
 export type BrainAction =

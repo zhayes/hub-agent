@@ -24,6 +24,7 @@ const actionSchema = z.discriminatedUnion('type', [
       subtaskId: z.string().min(1),
       objective: z.string().min(1),
       agentId: z.string().min(1).optional(),
+      peerId: z.string().min(1).optional(),
     }),
   }),
   z.object({
@@ -107,6 +108,7 @@ export function validateBrainActions(
   const knownSubtasks = new Set(subtasksOf(input).map((subtask) => subtask.id))
   const knownExecutions = new Set(executionsOf(input).map((execution) => execution.id))
   const knownAgents = new Map(input.agents.map((agent) => [agent.id, agent]))
+  const knownPeers = new Map((input.peers ?? []).map((peer) => [peer.id, peer]))
   const seen = new Set<string>()
 
   for (const [index, raw] of rawActions.entries()) {
@@ -137,6 +139,22 @@ export function validateBrainActions(
           message: `delegate 引用了不存在的子任务：${action.request.subtaskId}`,
         })
         continue
+      }
+      /* 本地与远程只能二选一：两个都给会让“到底谁执行”含糊。 */
+      if (action.request.agentId !== undefined && action.request.peerId !== undefined) {
+        errors.push({ index, message: 'delegate 的 agentId 与 peerId 只能二选一' })
+        continue
+      }
+      if (action.request.peerId !== undefined) {
+        const peer = knownPeers.get(action.request.peerId)
+        if (peer === undefined) {
+          /* 未知/未授权的对端直接拒，**不能**退回本地 Agent。 */
+          errors.push({
+            index,
+            message: `delegate 引用了未知远程对端：${action.request.peerId}`,
+          })
+          continue
+        }
       }
       if (action.request.agentId !== undefined) {
         const agent = knownAgents.get(action.request.agentId)

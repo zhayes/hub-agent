@@ -440,7 +440,7 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 
 - `test/unit/a2a-bidirectional.test.ts`：两个独立运行时（各自 SQLite + 真实 `startA2aServer` 入站面 + Peer token）通过真实 HTTP/JSON-RPC **互相委托**：A→B 与 B→A 各自“落派发意图 → 提交 → 对账到终态 → 各产出一条决策点”；并验证「同一幂等键重放不会第二次委托」「重复对账不重复产出决策点」。
 
-未落地：`target='remote-a2a'` 的 **Brain 接线**（= 让 Brain 能选远程目标）与 `local_execution_id` 回填。这是**契约级改动**：`Subtask` 目前只有 `assignedAgentId`，没有“远程目标”概念，需先改 PRD §13.5 的 delegate 动作与领域模型，不靠临时字段凑。因此目前的互委托验证是 **Runtime/协议层**（直接下派发意图），还不是“Brain 自己选择远程 Agent”。
+未落地：`local_execution_id` 回填、远端结果 → 本地 Execution 状态映射、交付物 manifest（`remote_artifacts`）与本地验收。Brain 目前已能选远程目标，但远端结果尚未落成本地 Execution，所以“混合 Plan 的验收闭环”（A3 门禁）仍差这一段。
 
 **交付物 manifest（`remote_artifacts`）尚未建表**：§4.1.1 冻结了字段，但按“建表随实现同一个 PR”的约定，它属于远程交付物阶段（A3 验收/交付），不在本次提交范围；当前 `remote_task_refs` 只记录执行状态关联，不代表已能接收代码交付物。
 
@@ -461,6 +461,20 @@ ADR 0026 要求“启用 Relay 之前必须补上 mTLS”。这一步已完成�
 测试证书在 `packages/hub/test/fixtures/a2a-tls/`（`regenerate.sh` 可重建；仅测试用，随仓库公开）。
 
 仍未做：证书签发/轮换/到期的用户流程、Relay 的 TLS 终止点与信封加密（A4 本体）、按 peer 的能力/预算/速率限制。
+
+### Brain 选远程目标（2026-11-27）
+
+契约改动（PRD §13.5.2.1）：`delegate` 新增可选 `peerId`，与 `agentId` 互斥。
+
+- `brain/types.ts`：`RemotePeerSummary` + `BrainInput.peers` + `DelegateRequest.peerId`。
+- `brain/snapshot.ts` / `brain-loop.ts`：快照按需携带 `peers`（未配置时整个字段不出现）。
+- `brain/validate.ts`：未知 peerId 直接拒（**不退回本地 Agent**）；`agentId`+`peerId` 同时给也拒。
+- `runtime/brain-run.ts`：新增 `remote?: { peers, resolvePeer, connect? }`；`delegate.peerId` 走 `enqueueDispatch(target='remote-a2a')` → `drainDispatches`（复用 `createRemoteDispatchExecutor`），**只提交即结束回合**（`stopReason='waiting_remote'`）；已提交的子任务不再当作待派发；本轮动作全被校验拒时**不**回退到“自动派发所有 ready”（否则等于静默把远程降级成本地）。
+- `brain/pi/prompt.ts`：系统提示写明 `peerId?` 与互斥规则。
+
+验证：`test/unit/brain-remote.test.ts`（6 条）——已知/未知 peerId、无 peers 时一律拒、二选一互斥、端到端只提交一次且落意图+关联、回合 `waiting_remote`、未配置 remote 时拒绝且不产生任何派发。
+
+仍未做：远端结果落成本地 Execution（`local_execution_id` 回填 + PRD §7.6.1 状态映射）、交付物 manifest 与本地验收（§7.7）。
 
 ### A5 核心验收场景
 
