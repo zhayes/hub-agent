@@ -1571,9 +1571,11 @@ V1 允许两种唤醒实现：
 
 **模式从哪里来（优先级从高到低）**
 
-1. 用户单次显式指定（`hubagent run --delivery ...`）；
-2. 项目默认（`Project.defaults.delivery`）；
+1. 用户单次显式指定（控制台：任务页的「导出补丁」→ `POST /api/v1/tasks/:id/deliver`；CLI 侧的 `--delivery` 尚未实现）；
+2. 项目默认（`Project.defaults.delivery`）——**字段尚未落地**，所以这一级今天不生效；
 3. 内建默认 `branch-only`。
+
+> 实现现状（P8）：`branch-only` 与 `patch-export` 已可用；`auto-merge` 因为没有项目级 `targetRef` / `autoMerge`，接口直接拒绝并说明原因。详见 PLAN-CONSOLE-INTERACTION §3.8.14。
 
 **Brain 不能指定交付模式，也不能指定目标分支。** 这是用户与项目策略，不是任务语义；让 LLM 决定“是否进主干”等于把仓库级风险交给一次推理。Brain 只能就模式提出建议，由用户显式采纳。
 

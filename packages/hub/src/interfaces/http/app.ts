@@ -6,6 +6,7 @@ import {
   pickDirectory as nativePickDirectory,
   type PickDirectoryOutcome,
 } from '../../agent-host/native-picker'
+import { isDeliveryMode, normalizeRunSettings } from '../../domain/chat'
 import { asChatThreadId } from '../../domain/ids'
 import { isPermissionMode } from '../../domain/status'
 import { acceptExecution, rejectExecution } from '../../runtime/acceptance'
@@ -24,6 +25,7 @@ import {
   writeModelConfig,
 } from '../../runtime/model-config/model-config'
 import { readTaskFile } from '../../runtime/task-files'
+import { deliverTask } from '../../runtime/workspace/deliver'
 import type { SandboxProvider } from '../../sandbox/types'
 import { type ErrorCode, HubError } from '../../shared/errors'
 import { hubDir, resolvePiAgentDir } from '../../shared/paths'
@@ -160,6 +162,31 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       : context.json({ ok: true, decisions: listDecisions(db, view.task.goalId) })
   })
 
+  /**
+   * 交付（PRD §6.12.4）：用户显式选一次交付方式。
+   *
+   * 迁移后这里与 CLI 的 `--delivery` 同级：branch-only 保留分支、patch-export 导出补丁、
+   * auto-merge 需要项目配置（当前拒绝并说明原因）。
+   */
+  app.post('/api/v1/tasks/:id/deliver', async (context) => {
+    const body = await context.req.json<{ mode?: unknown }>().catch((): { mode?: unknown } => ({}))
+    const mode = body.mode ?? 'branch-only'
+    if (!isDeliveryMode(mode)) {
+      return context.json(
+        {
+          code: 'INVALID_INPUT',
+          message: '交付方式只能是 branch-only / patch-export / auto-merge',
+        },
+        400,
+      )
+    }
+    try {
+      return context.json({ ok: true, delivery: deliverTask(db, context.req.param('id'), mode) })
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
   /* 澄清卡片要 options 才能渲染成按钮：答案必须精确命中选项，手打文本会被拒。 */
   app.get('/api/v1/clarifications/:id', (context) => {
     const clarification = getClarification(db, context.req.param('id'))
@@ -171,8 +198,20 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   app.post('/api/v1/chat/threads', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     const body = await context.req
-      .json<{ title?: string; worktree?: string; permissionMode?: string }>()
-      .catch((): { title?: string; worktree?: string; permissionMode?: string } => ({}))
+      .json<{
+        title?: string
+        worktree?: string
+        permissionMode?: string
+        runSettings?: unknown
+      }>()
+      .catch(
+        (): {
+          title?: string
+          worktree?: string
+          permissionMode?: string
+          runSettings?: unknown
+        } => ({}),
+      )
     /* 产品规则：新建对话必须选工作区。不选就不给它一个“默认到 cwd”的机会。 */
     if (body.worktree === undefined || body.worktree.trim() === '') {
       return context.json(
@@ -185,6 +224,9 @@ export function createHttpApp(options: HttpAppOptions): Hono {
         ...(body.title === undefined ? {} : { title: body.title }),
         ...(body.worktree === undefined ? {} : { worktree: body.worktree }),
         ...(isPermissionMode(body.permissionMode) ? { permissionMode: body.permissionMode } : {}),
+        ...(body.runSettings === undefined
+          ? {}
+          : { runSettings: normalizeRunSettings(body.runSettings) }),
       })
       return context.json({ ok: true, thread }, 201)
     } catch (error) {
@@ -252,13 +294,20 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   app.patch('/api/v1/chat/threads/:id', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     const body = await context.req
-      .json<{ title?: unknown; archived?: unknown; permissionMode?: unknown; worktree?: unknown }>()
+      .json<{
+        title?: unknown
+        archived?: unknown
+        permissionMode?: unknown
+        worktree?: unknown
+        runSettings?: unknown
+      }>()
       .catch(
         (): {
           title?: unknown
           archived?: unknown
           permissionMode?: unknown
           worktree?: unknown
+          runSettings?: unknown
         } => ({}),
       )
     try {
@@ -278,6 +327,13 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       }
       if (typeof body.worktree === 'string' && body.worktree.trim() !== '') {
         thread = options.chat.setWorkspace(context.req.param('id'), body.worktree)
+      }
+      /* 运行设置（验收命令 / 可用 Agent / 预算）只影响后续回合。 */
+      if (body.runSettings !== undefined) {
+        thread = options.chat.setRunSettings(
+          context.req.param('id'),
+          normalizeRunSettings(body.runSettings),
+        )
       }
       return context.json({ ok: true, thread })
     } catch (error) {

@@ -223,6 +223,12 @@ export const api = {
   approvals: () => request<{ approvals: ApprovalRow[] }>('/api/v1/approvals'),
   approve: (id: string) => request(`/api/v1/approvals/${id}/approve`, { method: 'POST' }),
   reject: (id: string) => request(`/api/v1/approvals/${id}/reject`, { method: 'POST' }),
+  /** 交付（PRD §6.12.4）：用户显式选一次交付方式。 */
+  deliverTask: (id: string, mode: DeliveryMode) =>
+    request<{ ok: true; delivery: DeliveryResult }>(`/api/v1/tasks/${id}/deliver`, {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    }),
 }
 
 export interface ModelConfigView {
@@ -300,9 +306,43 @@ export interface ChatThread {
   /** 会话工作区（daemon 上的绝对路径）；缺失表示不可执行。 */
   worktree?: string
   permissionMode: PermissionMode
+  /** 运行设置：验收命令 / 可用 Agent / 预算（ADR 0029 §2.4）。 */
+  runSettings?: ChatRunSettings
   archivedAt?: string
   createdAt: string
   updatedAt: string
+}
+
+/** 与后端 `domain/chat.ts` 的 ChatRunSettings 同构。 */
+export interface ChatRunSettings {
+  /** 验收命令：退出码 0 为通过。空 = 只有默认的 diffScope。 */
+  verifyCommands: string[]
+  /** 允许参与运行的 Agent 名称；空 = 全部。 */
+  agents: string[]
+  /** Brain 回合预算；null = 默认。token 上限由后端默认值补齐。 */
+  budget: {
+    maxActions?: number
+    timeoutMs?: number
+  } | null
+}
+
+export const DEFAULT_RUN_SETTINGS: ChatRunSettings = {
+  verifyCommands: [],
+  agents: [],
+  budget: null,
+}
+
+/** 交付方式（PRD §6.12.4）。同一次运行可以选一次。 */
+export type DeliveryMode = 'branch-only' | 'patch-export' | 'auto-merge'
+
+export interface DeliveryResult {
+  mode: DeliveryMode
+  branch?: string
+  commitSha?: string
+  patchRef?: string
+  files: number
+  added: number
+  removed: number
 }
 
 /** 会话权限档；语义与后端 `PERMISSION_MODES` 一致。 */
@@ -391,6 +431,11 @@ export const chatApi = {
     request<{ thread: ChatThread }>(`/api/v1/chat/threads/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ worktree }),
+    }),
+  setRunSettings: (id: string, runSettings: ChatRunSettings) =>
+    request<{ thread: ChatThread }>(`/api/v1/chat/threads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ runSettings }),
     }),
   thread: (id: string, options: { limit?: number; before?: string } = {}) => {
     const params = new URLSearchParams()

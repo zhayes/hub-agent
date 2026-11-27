@@ -24,6 +24,7 @@ import { MIGRATION_022_REMOTE_TASK_CLOSED_AT } from './migrations/022-remote-tas
 import { MIGRATION_023_A2A_PEER_CERT } from './migrations/023-a2a-peer-cert'
 import { MIGRATION_024_REMOTE_EXECUTION_ARTIFACTS } from './migrations/024-remote-execution-artifacts'
 import { MIGRATION_025_CHAT_THREAD_WORKSPACE } from './migrations/025-chat-thread-workspace'
+import { MIGRATION_026_CHAT_RUN_SETTINGS } from './migrations/026-chat-run-settings'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -52,6 +53,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_023_A2A_PEER_CERT,
   MIGRATION_024_REMOTE_EXECUTION_ARTIFACTS,
   MIGRATION_025_CHAT_THREAD_WORKSPACE,
+  MIGRATION_026_CHAT_RUN_SETTINGS,
 ]
 
 export interface MigrateResult {

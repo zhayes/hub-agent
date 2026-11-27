@@ -18,10 +18,12 @@ import {
   type AuthMethodView,
   api,
   type ChatMessage,
+  type ChatRunSettings,
   type ChatThread,
   type ChatThreadSummary,
   type ClarificationView,
   chatApi,
+  DEFAULT_RUN_SETTINGS,
   getToken,
   type PermissionMode,
   type ProbeResultView,
@@ -32,6 +34,7 @@ import { deriveAttention } from '../../shared/attention'
 import { relativeTime, shortenId } from '../../shared/format'
 import { type Locale, type MessageKey, statusKey, type Translator } from '../../shared/i18n'
 import { agentBadge, type DockAgent, RunDock, type RunPhase } from './RunDock'
+import { RunSettingsDialog } from './RunSettingsDialog'
 import {
   forgetThread,
   readCachedSummaries,
@@ -55,6 +58,8 @@ export interface ChatViewProps {
   tasks: TaskRow[]
   /** 待批的审批（来自全局 store）；dock 要能就地拍板，不能只给个链接。 */
   approvals: ApprovalRow[]
+  /** 已注册 Agent：运行设置里选「可用 Agent」（扇出范围）要用。 */
+  agents: AgentRow[]
   onOpenThread: (id: string) => void
   onOpenTask: (id: string) => void
   /** 当前 thread 被删除/归档后回到空态。 */
@@ -104,6 +109,7 @@ export function ChatView(props: ChatViewProps) {
   /* 新会话必须先选工作区；已打开的会话用自己的 worktree。 */
   const [workspace, setWorkspace] = createSignal<string>('')
   const [permissionMode, setPermissionMode] = createSignal<PermissionMode>(readPermissionMode())
+  const [runSettingsOpen, setRunSettingsOpen] = createSignal(false)
   const [picking, setPicking] = createSignal(false)
   const [hasMore, setHasMore] = createSignal(false)
   const [thinkingMs, setThinkingMs] = createSignal(0)
@@ -591,6 +597,25 @@ export function ChatView(props: ChatViewProps) {
 
   /* 用户目录缩成 `~`：路径是给人看的，不是给 shell 看的。 */
   const shortPath = (path: string): string => path.replace(/^\/Users\/[^/]+/, '~')
+
+  const runSettingsDirty = (): boolean => {
+    const settings = thread()?.runSettings ?? DEFAULT_RUN_SETTINGS
+    return (
+      settings.verifyCommands.length > 0 || settings.agents.length > 0 || settings.budget !== null
+    )
+  }
+
+  /* 保存运行设置：只影响后续回合，所以存完刷新线程即可，不碰正在跑的那个。 */
+  const saveRunSettings = (settings: ChatRunSettings): void => {
+    const current = thread()
+    if (current === undefined) return
+    setRunSettingsOpen(false)
+    void chatApi
+      .setRunSettings(current.id, settings)
+      .then((result) => setThread(result.thread))
+      .then(() => loadThreads())
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
+  }
 
   /* 权限档 → 文案：头部副行与输入框下方的 chip 共用。 */
   const permissionKey = (
@@ -1548,6 +1573,26 @@ export function ChatView(props: ChatViewProps) {
                     <option value="full">{props.t('permissionFull')}</option>
                   </select>
                 </label>
+                {/* 运行设置（ADR 0029 §2.4）：验收命令 / 可用 Agent / 预算。
+                    非默认时带一个小圆点，否则没人记得自己改过。 */}
+                <button
+                  type="button"
+                  class="inline-flex h-6 items-center gap-[5px] rounded-control border border-line-strong px-2 text-badge font-medium text-ink-3 transition-colors hover:border-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
+                  title={props.t('runSettings')}
+                  aria-label={props.t('runSettings')}
+                  disabled={thread() === undefined}
+                  onClick={() => setRunSettingsOpen(true)}
+                >
+                  <Icon name="settings" size={12} class="shrink-0" />
+                  <span class="max-[560px]:hidden">{props.t('runSettings')}</span>
+                  <Show when={runSettingsDirty()}>
+                    <span
+                      class="size-1.5 rounded-full bg-ink-2"
+                      aria-hidden="true"
+                      title={props.t('runSettingsCustom')}
+                    />
+                  </Show>
+                </button>
                 <span class="flex-1" />
                 <span class="hidden items-center gap-[5px] text-badge text-ink-3 min-[560px]:inline-flex">
                   <kbd class="rounded border border-line px-1 text-[10px] leading-4">⏎</kbd>
@@ -1568,6 +1613,15 @@ export function ChatView(props: ChatViewProps) {
             </div>
           </div>
         </form>
+
+        <RunSettingsDialog
+          open={runSettingsOpen()}
+          onClose={() => setRunSettingsOpen(false)}
+          settings={thread()?.runSettings ?? DEFAULT_RUN_SETTINGS}
+          agents={props.agents}
+          t={props.t}
+          onSave={saveRunSettings}
+        />
       </section>
 
       <aside

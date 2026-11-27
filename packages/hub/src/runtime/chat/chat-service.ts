@@ -2,7 +2,8 @@ import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import type { AcpExecutionEvent } from '../../adapters/acp/event'
 import type { BrainDelta, ChatTurn, OrchestratorBrain } from '../../brain/types'
-import type { ChatMessage, ChatProgressStage, ChatThread } from '../../domain/chat'
+import type { ChatMessage, ChatProgressStage, ChatRunSettings, ChatThread } from '../../domain/chat'
+import { DEFAULT_RUN_SETTINGS } from '../../domain/chat'
 import type { Approval } from '../../domain/entities'
 import {
   asChatMessageId,
@@ -39,6 +40,7 @@ import { failTask } from '../recovery/fail'
 import { resumeExecution } from '../resume-execution'
 import { completeTaskAfterDelivery } from '../workspace/finalize'
 import { collectAgentOutputs } from './agent-outputs'
+import { brainBudget, scopeAgents, verificationChecks } from './run-settings'
 
 export interface ChatServiceOptions {
   db: Db
@@ -73,6 +75,7 @@ export interface CreateThreadInput {
   /** 会话工作区（绝对路径，必须已存在）。**必填**：没有它会拒绝执行，绝不回落到 cwd。 */
   worktree?: string
   permissionMode?: PermissionMode
+  runSettings?: ChatRunSettings
 }
 
 export interface PostMessageInput {
@@ -179,7 +182,23 @@ export class ChatService {
       title: input.title?.trim().slice(0, 120) || 'New thread',
       ...(worktree === undefined ? {} : { worktree }),
       ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      ...(input.runSettings === undefined ? {} : { runSettings: input.runSettings }),
     })
+  }
+
+  /**
+   * 改运行设置（验收命令 / 可用 Agent / 预算）。只影响后续回合。
+   *
+   * 正在跑的回合不追溯：换掉验收命令去影响已派发的执行，等于事后改判。
+   */
+  setRunSettings(id: string, settings: ChatRunSettings): ChatThread {
+    const threadId = asChatThreadId(id)
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
+    }
+    updateChatThread(this.options.db, threadId, { runSettings: settings })
+    return getChatThread(this.options.db, threadId) ?? thread
   }
 
   /**
@@ -314,7 +333,17 @@ export class ChatService {
       updateChatThread(this.options.db, threadId, { title: text.slice(0, 72) })
     }
 
-    const agent = this.pickAgent(input.agentName)
+    const allowed = scopeAgents(listAgents(this.options.db), thread.runSettings)
+    if (allowed.length === 0) {
+      appendChatMessage(this.options.db, {
+        threadId,
+        role: 'assistant',
+        kind: 'error',
+        content: '运行设置里允许的 Agent 都已不存在，请重新选择可用 Agent。',
+      })
+      throw new HubError('NO_AGENT_AVAILABLE', '运行设置里允许的 Agent 不存在', { threadId: id })
+    }
+    const agent = input.agentName === undefined ? allowed[0] : this.pickAgent(input.agentName)
     if (agent === undefined) {
       appendChatMessage(this.options.db, {
         threadId,
@@ -323,6 +352,19 @@ export class ChatService {
         content: 'No Agent is registered. Add one with `hubagent agent add`.',
       })
       throw new HubError('NO_AGENT_AVAILABLE', '没有可用的 Agent', { threadId: id })
+    }
+    /* 设置里只放行了部分 Agent 时，显式点名的那个也必须在名单里。 */
+    if (!allowed.some((item) => item.name === agent.name)) {
+      const names = allowed.map((item) => item.name).join(' / ')
+      appendChatMessage(this.options.db, {
+        threadId,
+        role: 'assistant',
+        kind: 'error',
+        content: `该会话只允许 ${names}；要交给 ${agent.name} 请先在运行设置里放行它。`,
+      })
+      throw new HubError('ACTION_REJECTED', `${agent.name} 不在该会话的可用 Agent 里`, {
+        threadId: id,
+      })
     }
 
     this.start(threadId, text, agent.name, userMessage, conversation)
@@ -353,7 +395,7 @@ export class ChatService {
       kind: 'text',
       content: answer,
     })
-    const agent = this.pickAgent()
+    const agent = this.pickScopedAgent(thread)
     if (agent === undefined) {
       throw new HubError('NO_AGENT_AVAILABLE', '没有可用的 Agent', { threadId: id })
     }
@@ -500,7 +542,7 @@ export class ChatService {
     if (lastUser === undefined) {
       throw new HubError('ACTION_REJECTED', 'thread has no user message', { threadId: id })
     }
-    const agent = this.pickAgent(agentName)
+    const agent = this.pickScopedAgent(thread, agentName)
     if (agent === undefined) {
       throw new HubError('NO_AGENT_AVAILABLE', '没有可用的 Agent', { threadId: id })
     }
@@ -577,6 +619,19 @@ export class ChatService {
 
   private pickAgent(name?: string) {
     return name === undefined ? listAgents(this.options.db)[0] : resolveAgent(this.options.db, name)
+  }
+
+  /**
+   * 在会话的可用 Agent 范围里挑一个（澄清应答 / 续跑用）。
+   * 范围外的名字就当没有：与发送消息时的校验保持同一口径。
+   */
+  private pickScopedAgent(thread: ChatThread, name?: string) {
+    const allowed = scopeAgents(listAgents(this.options.db), thread.runSettings)
+    if (allowed.length === 0) return undefined
+    if (name === undefined) return allowed[0]
+    const picked = this.pickAgent(name)
+    if (picked === undefined) return undefined
+    return allowed.some((agent) => agent.name === picked.name) ? picked : undefined
   }
 
   private start(
@@ -927,6 +982,10 @@ export class ChatService {
     try {
       const agent = resolveAgent(db, agentName)
       const agents = listAgents(db)
+      /* 会话级运行设置：验收命令 / 可用 Agent / 预算（ADR 0029 §2.4）。 */
+      const settings = getChatThread(db, threadId)?.runSettings ?? DEFAULT_RUN_SETTINGS
+      const scoped = scopeAgents(agents, settings)
+      const budget = brainBudget(settings)
       const sink = this.createEventSink(threadId, agentName)
       const analysis = appendChatMessage(db, {
         threadId,
@@ -941,12 +1000,13 @@ export class ChatService {
         provider: this.options.provider,
         brain: this.options.brain,
         agent,
-        availableAgents: agents,
+        availableAgents: scoped,
         objective,
         conversation,
         onBrainDelta: brainStream.onDelta,
         ...this.workspaceOf(threadId),
-        checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
+        checks: verificationChecks(settings),
+        ...(budget === undefined ? {} : { budget }),
         clientVersion: this.options.clientVersion,
         completeOnSuccess: true,
         ...(this.options.remote === undefined ? {} : { remote: this.options.remote }),

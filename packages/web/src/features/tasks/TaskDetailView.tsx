@@ -1,8 +1,9 @@
-import { For, Show } from 'solid-js'
+import { createSignal, For, Show } from 'solid-js'
 import { Button, buttonClass } from '../../components/ui/Button'
 import { Icon } from '../../components/ui/Icon'
 import { toast } from '../../components/ui/Toaster'
-import type { AgentRow, Decision, TaskView } from '../../shared/api'
+import type { AgentRow, Decision, DeliveryResult, TaskView } from '../../shared/api'
+import { api } from '../../shared/api'
 import { type AttentionItem, approvalToAttention } from '../../shared/attention'
 import { formatDuration, relativeTime, shortenId } from '../../shared/format'
 import { type Locale, statusKey, type Translator } from '../../shared/i18n'
@@ -68,6 +69,9 @@ function parseTaskEvent(raw: string, goalId: string): TaskEvent | undefined {
 }
 
 export function TaskDetailView(props: TaskDetailViewProps) {
+  const [delivering, setDelivering] = createSignal(false)
+  const [delivered, setDelivered] = createSignal<DeliveryResult>()
+
   const pending = (): AttentionItem[] =>
     props.view.approvals
       .filter((approval) => approval.status === 'pending')
@@ -223,6 +227,21 @@ export function TaskDetailView(props: TaskDetailViewProps) {
     }
   }
 
+  /* 交付（PRD §6.12.4）：验收通过之后才谈「这份产出怎么拿走」。
+     只给 patch-export —— branch-only 本来就是默认结果（分支保留在原处），
+     auto-merge 需要项目配置，接口会拒绝并说明原因。 */
+  const exportPatch = async (): Promise<void> => {
+    setDelivering(true)
+    try {
+      const result = await api.deliverTask(props.view.task.id, 'patch-export')
+      setDelivered(result.delivery)
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDelivering(false)
+    }
+  }
+
   return (
     <div class="flex min-h-0 flex-1 flex-col">
       <header class="flex-none px-5 pt-[18px] pb-3.5 max-[860px]:px-4 max-[860px]:pt-3.5 max-[860px]:pb-2.5">
@@ -320,6 +339,35 @@ export function TaskDetailView(props: TaskDetailViewProps) {
                 </Show>
               </div>
             )}
+          </Show>
+
+          {/* 判决通过后给「把改动拿走」这一步：交付是用户显式动作（PRD §6.12.4）。 */}
+          <Show
+            when={
+              phase() === 'done' &&
+              checks().length > 0 &&
+              failedChecks().length === 0 &&
+              (evidenceExecution(props.view)?.evidence?.diff ?? '') !== ''
+            }
+          >
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={delivering()}
+                onClick={() => void exportPatch()}
+              >
+                <Icon name="copy" size={13} />
+                {delivering() ? props.t('taskExporting') : props.t('taskExportPatch')}
+              </Button>
+              <Show when={delivered()}>
+                {(value) => (
+                  <span class={`${metaLine} truncate font-mono`} title={value().patchRef ?? ''}>
+                    {props.t('taskPatchExported', { path: value().patchRef ?? '' })}
+                  </span>
+                )}
+              </Show>
+            </div>
           </Show>
 
           <ol class="mt-[18px] list-none p-0">
