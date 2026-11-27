@@ -2,6 +2,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
+import {
+  pickDirectory as nativePickDirectory,
+  type PickDirectoryOutcome,
+} from '../../agent-host/native-picker'
 import { asChatThreadId } from '../../domain/ids'
 import { isPermissionMode } from '../../domain/status'
 import { acceptExecution, rejectExecution } from '../../runtime/acceptance'
@@ -49,6 +53,11 @@ export interface HttpAppOptions {
   provider?: SandboxProvider
   /** 探测用的运行目录；缺省取 HUBAGENT_HOME */
   home?: string
+  /**
+   * 系统目录选择框；缺省用原生实现（macOS）。测试注入假实现以便不起 GUI。
+   * 注意：它**不接受路径参数**，只能返回用户在系统框里选的目录。
+   */
+  pickDirectory?: (options?: { prompt?: string }) => Promise<PickDirectoryOutcome>
 }
 
 export function createHttpApp(options: HttpAppOptions): Hono {
@@ -189,6 +198,35 @@ export function createHttpApp(options: HttpAppOptions): Hono {
     }
   })
 
+  /**
+   * 弹系统目录选择框（新增会话选工作区）。
+   *
+   * 刻意**不收任何路径参数**：它只能返回用户在系统框里亲手选的目录，
+   * 因此不可能被用来探测服务器上的任意目录。
+   */
+  app.post('/api/v1/fs/pick-directory', async (context) => {
+    const picker =
+      options.pickDirectory ??
+      ((pickerOptions?: { prompt?: string }) => nativePickDirectory(pickerOptions))
+    const outcome = await picker({ prompt: '选择这个对话的工作区' })
+    switch (outcome.kind) {
+      case 'picked':
+        return context.json({ ok: true, path: outcome.path })
+      case 'cancelled':
+        return context.json({ ok: true, cancelled: true })
+      case 'busy':
+        return context.json({ code: 'PICKER_BUSY', message: '已有一个选择框在等待用户操作' }, 409)
+      case 'unsupported':
+        return context.json(
+          {
+            code: 'UNSUPPORTED_PLATFORM',
+            message: '当前平台没有系统目录选择框，请手动填写路径',
+          },
+          501,
+        )
+    }
+  })
+
   app.get('/api/v1/chat/threads', (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     const limit = Number.parseInt(context.req.query('limit') ?? '50', 10)
@@ -214,8 +252,15 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   app.patch('/api/v1/chat/threads/:id', async (context) => {
     if (options.chat === undefined) return context.json({ code: 'NOT_IMPLEMENTED' }, 501)
     const body = await context.req
-      .json<{ title?: unknown; archived?: unknown }>()
-      .catch((): { title?: unknown; archived?: unknown } => ({}))
+      .json<{ title?: unknown; archived?: unknown; permissionMode?: unknown; worktree?: unknown }>()
+      .catch(
+        (): {
+          title?: unknown
+          archived?: unknown
+          permissionMode?: unknown
+          worktree?: unknown
+        } => ({}),
+      )
     try {
       let thread = options.chat.getThread(context.req.param('id'))?.thread
       if (thread === undefined) {
@@ -226,6 +271,13 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       }
       if (body.archived === true) {
         thread = options.chat.archiveThread(context.req.param('id'))
+      }
+      /* 切换权限档 / 补齐工作区（旧会话）。都只影响后续回合。 */
+      if (isPermissionMode(body.permissionMode)) {
+        thread = options.chat.setPermissionMode(context.req.param('id'), body.permissionMode)
+      }
+      if (typeof body.worktree === 'string' && body.worktree.trim() !== '') {
+        thread = options.chat.setWorkspace(context.req.param('id'), body.worktree)
       }
       return context.json({ ok: true, thread })
     } catch (error) {

@@ -56,6 +56,51 @@ export function writeUnsavedDraft(value: string): void {
   unsavedDraft = value
 }
 
+const PERMISSION_KEY = 'hubagent.chat.permissionMode'
+const RECENT_WORKSPACES_KEY = 'hubagent.chat.recentWorkspaces'
+
+/** 上次选的权限档（新建会话时的默认值）。 */
+export function readPermissionMode(): 'read-only' | 'workspace-write' | 'full' {
+  try {
+    const value = localStorage.getItem(PERMISSION_KEY)
+    return value === 'read-only' || value === 'full' || value === 'workspace-write'
+      ? value
+      : 'workspace-write'
+  } catch {
+    return 'workspace-write'
+  }
+}
+
+export function writePermissionMode(mode: 'read-only' | 'workspace-write' | 'full'): void {
+  try {
+    localStorage.setItem(PERMISSION_KEY, mode)
+  } catch {
+    // 隐私模式：只是记不住偏好，不影响本次会话。
+  }
+}
+
+/** 最近用过的 5 个工作区，供新建会话时一键选。 */
+export function readRecentWorkspaces(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_WORKSPACES_KEY)
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+export function rememberWorkspace(path: string): void {
+  const next = [path, ...readRecentWorkspaces().filter((item) => item !== path)].slice(0, 5)
+  try {
+    localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(next))
+  } catch {
+    // 同上。
+  }
+}
+
 export function rememberThread(id: string): void {
   try {
     localStorage.setItem(LAST_THREAD_KEY, id)

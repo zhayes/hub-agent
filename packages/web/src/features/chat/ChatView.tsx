@@ -21,6 +21,7 @@ import {
   type ClarificationView,
   chatApi,
   getToken,
+  type PermissionMode,
   type ProbeResultView,
   type TaskRow,
   type TaskView,
@@ -31,10 +32,14 @@ import {
   forgetThread,
   readCachedSummaries,
   readCachedThread,
+  readPermissionMode,
+  readRecentWorkspaces,
   readUnsavedDraft,
   rememberThread,
+  rememberWorkspace,
   writeCachedSummaries,
   writeCachedThread,
+  writePermissionMode,
   writeUnsavedDraft,
 } from './store'
 
@@ -96,6 +101,10 @@ export function ChatView(props: ChatViewProps) {
   const [text, setText] = createSignal(readUnsavedDraft())
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal('')
+  /* 新会话必须先选工作区；已打开的会话用自己的 worktree。 */
+  const [workspace, setWorkspace] = createSignal<string>('')
+  const [permissionMode, setPermissionMode] = createSignal<PermissionMode>(readPermissionMode())
+  const [picking, setPicking] = createSignal(false)
   const [hasMore, setHasMore] = createSignal(false)
   const [thinkingMs, setThinkingMs] = createSignal(0)
   const [menuIndex, setMenuIndex] = createSignal(0)
@@ -291,9 +300,45 @@ export function ChatView(props: ChatViewProps) {
     }, 1200)
   }
 
-  const newThread = async (): Promise<void> => {
+  /** 弹系统目录框；取消不报错。 */
+  const chooseWorkspace = async (): Promise<string | undefined> => {
+    if (picking()) return undefined
+    setPicking(true)
+    setError('')
     try {
-      const created = await chatApi.create()
+      const result = await chatApi.pickDirectory()
+      if (result.path === undefined) return undefined
+      setWorkspace(result.path)
+      rememberWorkspace(result.path)
+      /* 旧会话（迁移前没有工作区）选完后立即补上，否则它永远不能执行。 */
+      const current = thread()
+      if (current !== undefined && (current.worktree ?? '') === '') {
+        const updated = await chatApi.setWorkspace(current.id, result.path)
+        setThread(updated.thread)
+      }
+      return result.path
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return undefined
+    } finally {
+      setPicking(false)
+    }
+  }
+
+  /** 当前会话的工作区：已打开会话用它自己的，新建会话用草稿里的。 */
+  const currentWorkspace = (): string => thread()?.worktree ?? workspace()
+
+  const newThread = async (): Promise<void> => {
+    const chosen = currentWorkspace() === '' ? await chooseWorkspace() : currentWorkspace()
+    if (chosen === undefined || chosen === '') {
+      setError(props.t('workspaceRequired'))
+      return
+    }
+    try {
+      const created = await chatApi.create({
+        worktree: chosen,
+        ...(permissionMode() === 'workspace-write' ? {} : { permissionMode: permissionMode() }),
+      })
       await loadThreads()
       setMobileThreads(false)
       props.onOpenThread(created.thread.id)
@@ -370,7 +415,17 @@ export function ChatView(props: ChatViewProps) {
     try {
       let id = thread()?.id
       if (id === undefined) {
-        const created = await chatApi.create(value.slice(0, 72))
+        /* 新建会话必先有工作区；没有就弹系统目录框，取消则不发。 */
+        const chosen = currentWorkspace() === '' ? await chooseWorkspace() : currentWorkspace()
+        if (chosen === undefined || chosen === '') {
+          setError(props.t('workspaceRequired'))
+          return
+        }
+        const created = await chatApi.create({
+          worktree: chosen,
+          title: value.slice(0, 72),
+          ...(permissionMode() === 'workspace-write' ? {} : { permissionMode: permissionMode() }),
+        })
         id = created.thread.id
         props.onOpenThread(id)
       }
@@ -1274,6 +1329,70 @@ export function ChatView(props: ChatViewProps) {
                 </For>
               </div>
             </Show>
+            {/* 工作区 + 权限档：新建会话必须先选文件夹；执行中不允许切换。 */}
+            <div class="mb-1.5 flex flex-wrap items-center gap-2 text-meta">
+              <button
+                type="button"
+                class="inline-flex min-w-0 max-w-[46ch] items-center gap-1.5 rounded-control border border-line bg-surface px-2 py-1 text-meta text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
+                title={
+                  currentWorkspace() === '' ? props.t('workspaceRequired') : currentWorkspace()
+                }
+                disabled={picking() || active()}
+                onClick={() => {
+                  void chooseWorkspace()
+                }}
+              >
+                <Icon name="file" size={14} />
+                <span class="truncate">
+                  {currentWorkspace() === '' ? props.t('chooseFolder') : currentWorkspace()}
+                </span>
+              </button>
+              <Show when={currentWorkspace() === '' && readRecentWorkspaces().length > 0}>
+                <For each={readRecentWorkspaces()}>
+                  {(path) => (
+                    <button
+                      type="button"
+                      class="truncate rounded-control px-1.5 py-0.5 text-badge text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                      title={path}
+                      onClick={() => {
+                        setWorkspace(path)
+                        rememberWorkspace(path)
+                      }}
+                    >
+                      {path.split('/').filter(Boolean).at(-1) ?? path}
+                    </button>
+                  )}
+                </For>
+              </Show>
+              <span class="flex-1" />
+              <label class="sr-only" for="chat-permission">
+                {props.t('workspace')}
+              </label>
+              <select
+                id="chat-permission"
+                class="rounded-control border border-line bg-surface px-2 py-1 text-meta text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                value={thread()?.permissionMode ?? permissionMode()}
+                disabled={active()}
+                onChange={(event) => {
+                  const next = event.currentTarget.value as PermissionMode
+                  setPermissionMode(next)
+                  writePermissionMode(next)
+                  const current = thread()
+                  if (current !== undefined) {
+                    void chatApi
+                      .setPermission(current.id, next)
+                      .then(() => loadThreads())
+                      .catch((cause: unknown) =>
+                        setError(cause instanceof Error ? cause.message : String(cause)),
+                      )
+                  }
+                }}
+              >
+                <option value="read-only">{props.t('permissionReadOnly')}</option>
+                <option value="workspace-write">{props.t('permissionWorkspaceWrite')}</option>
+                <option value="full">{props.t('permissionFull')}</option>
+              </select>
+            </div>
             <textarea
               id="chat-composer"
               rows="2"
@@ -1302,7 +1421,7 @@ export function ChatView(props: ChatViewProps) {
                 class="grid size-9 flex-none place-items-center rounded-full bg-ink text-canvas transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:bg-subtle disabled:text-ink-3 disabled:hover:opacity-100"
                 aria-label={props.t('send')}
                 title={props.t('send')}
-                disabled={busy() || active() || text().trim() === ''}
+                disabled={busy() || active() || text().trim() === '' || picking()}
               >
                 <Icon name="arrowUp" size={16} />
               </button>

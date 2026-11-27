@@ -273,10 +273,16 @@ export interface ChatThread {
   goalId?: string
   taskId?: string
   status: string
+  /** 会话工作区（daemon 上的绝对路径）；缺失表示不可执行。 */
+  worktree?: string
+  permissionMode: PermissionMode
   archivedAt?: string
   createdAt: string
   updatedAt: string
 }
+
+/** 会话权限档；语义与后端 `PERMISSION_MODES` 一致。 */
+export type PermissionMode = 'read-only' | 'workspace-write' | 'full'
 
 export interface ChatThreadSummary extends ChatThread {
   messageCount: number
@@ -336,10 +342,31 @@ export interface ClarificationView {
 
 export const chatApi = {
   threads: () => request<{ threads: ChatThreadSummary[] }>('/api/v1/chat/threads'),
-  create: (title?: string) =>
+  /** 新建会话**必须**带工作区（产品规则）。 */
+  create: (input: { worktree: string; title?: string; permissionMode?: PermissionMode }) =>
     request<{ thread: ChatThread }>('/api/v1/chat/threads', {
       method: 'POST',
-      body: JSON.stringify(title === undefined ? {} : { title }),
+      body: JSON.stringify({
+        worktree: input.worktree,
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      }),
+    }),
+  /** 弹系统目录选择框（daemon 侧）；不收路径参数。 */
+  pickDirectory: () =>
+    request<{ ok: boolean; path?: string; cancelled?: boolean }>('/api/v1/fs/pick-directory', {
+      method: 'POST',
+      body: '{}',
+    }),
+  setPermission: (id: string, permissionMode: PermissionMode) =>
+    request<{ thread: ChatThread }>(`/api/v1/chat/threads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ permissionMode }),
+    }),
+  setWorkspace: (id: string, worktree: string) =>
+    request<{ thread: ChatThread }>(`/api/v1/chat/threads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ worktree }),
     }),
   thread: (id: string, options: { limit?: number; before?: string } = {}) => {
     const params = new URLSearchParams()

@@ -244,6 +244,36 @@ export class ChatService {
     return getChatThread(this.options.db, threadId) ?? thread
   }
 
+  /** 切换会话权限档；只影响后续回合，不追溯正在跑的执行。 */
+  setPermissionMode(id: string, mode: PermissionMode): ChatThread {
+    const threadId = asChatThreadId(id)
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
+    }
+    if (thread.permissionMode !== mode) {
+      updateChatThread(this.options.db, threadId, { permissionMode: mode })
+    }
+    return getChatThread(this.options.db, threadId) ?? thread
+  }
+
+  /** 给旧会话补齐工作区（迁移前创建的会话没有 worktree）。 */
+  setWorkspace(id: string, worktree: string): ChatThread {
+    const threadId = asChatThreadId(id)
+    const thread = getChatThread(this.options.db, threadId)
+    if (thread === undefined) {
+      throw new HubError('NOT_FOUND', `thread not found: ${id}`, { threadId: id })
+    }
+    if (this.active.has(id)) {
+      throw new HubError('ACTION_REJECTED', 'thread already has an active run', { threadId: id })
+    }
+    const value = assertWorkspace(worktree.trim())
+    if (thread.worktree !== value) {
+      updateChatThread(this.options.db, threadId, { worktree: value })
+    }
+    return getChatThread(this.options.db, threadId) ?? thread
+  }
+
   deleteThread(id: string): void {
     const threadId = asChatThreadId(id)
     if (this.active.has(id)) {
