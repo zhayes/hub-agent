@@ -16,6 +16,9 @@ import type { Db } from '../storage/db'
 export interface RemoteTaskRef {
   id: string
   goalId: string
+  /** 发起这单委托的本地 Task / Subtask；对账时用来自愈式建 Execution。 */
+  taskId?: string
+  subtaskId?: string
   /** 建立本地 Execution 后回填；提交阶段可空。 */
   localExecutionId?: string
   peerId: string
@@ -34,6 +37,8 @@ export interface RemoteTaskRef {
 interface RemoteTaskRefRow {
   id: string
   goal_id: string
+  task_id: string | null
+  subtask_id: string | null
   local_execution_id: string | null
   peer_id: string
   idempotency_key: string
@@ -51,6 +56,8 @@ function toRef(row: RemoteTaskRefRow): RemoteTaskRef {
   return {
     id: row.id,
     goalId: row.goal_id,
+    ...(row.task_id === null ? {} : { taskId: row.task_id }),
+    ...(row.subtask_id === null ? {} : { subtaskId: row.subtask_id }),
     ...(row.local_execution_id === null ? {} : { localExecutionId: row.local_execution_id }),
     peerId: row.peer_id,
     idempotencyKey: row.idempotency_key,
@@ -67,6 +74,8 @@ function toRef(row: RemoteTaskRefRow): RemoteTaskRef {
 
 export interface RememberRemoteTaskInput {
   goalId: string
+  taskId?: string
+  subtaskId?: string
   peerId: string
   idempotencyKey: string
   remoteTaskId: string
@@ -95,16 +104,18 @@ export function rememberRemoteTask(
   const result = db
     .prepare(
       `INSERT OR IGNORE INTO remote_task_refs (
-         id, goal_id, peer_id, idempotency_key, remote_task_id,
+         id, goal_id, task_id, subtask_id, peer_id, idempotency_key, remote_task_id,
          context_id, message_id, observed_state, event_cursor, created_at, last_seen_at
        ) VALUES (
-         @id, @goalId, @peerId, @idempotencyKey, @remoteTaskId,
+         @id, @goalId, @taskId, @subtaskId, @peerId, @idempotencyKey, @remoteTaskId,
          @contextId, @messageId, @observedState, @eventCursor, @createdAt, @lastSeenAt
        )`,
     )
     .run({
       id,
       goalId: input.goalId,
+      taskId: input.taskId ?? null,
+      subtaskId: input.subtaskId ?? null,
       peerId: input.peerId,
       idempotencyKey: input.idempotencyKey,
       remoteTaskId: input.remoteTaskId,

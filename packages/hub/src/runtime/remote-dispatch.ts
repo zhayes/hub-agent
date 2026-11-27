@@ -4,6 +4,7 @@ import type { MutualTlsMaterial } from '../adapters/a2a/mtls'
 import { HubError } from '../shared/errors'
 import type { Db } from '../storage/db'
 import type { DispatchExecutor, DispatchIntent, DispatchOutcome } from './dispatch/types'
+import { ensureRemoteExecution } from './remote-execution'
 import { findRemoteTaskByIdempotencyKey, rememberRemoteTask } from './remote-task'
 
 /**
@@ -85,6 +86,8 @@ export function createRemoteDispatchExecutor(
 
     rememberRemoteTask(options.db, {
       goalId: intent.goalId,
+      taskId: intent.taskId,
+      subtaskId: intent.subtaskId,
       peerId: spec.peerId,
       idempotencyKey: intent.idempotencyKey,
       remoteTaskId: sent.taskId,
@@ -93,6 +96,11 @@ export function createRemoteDispatchExecutor(
       observedState: fromTaskState(sent.state),
       ...(options.now === undefined ? {} : { now: options.now }),
     })
+
+    /* 立刻建本地 Execution：Brain 的快照里才会有这条子任务，UI 也才看得到。
+       崩在这一步之前也没关系：对账会用同一份 ref 自愈式补建。 */
+    const ref = findRemoteTaskByIdempotencyKey(options.db, intent.idempotencyKey)
+    if (ref !== undefined) ensureRemoteExecution(options.db, ref)
 
     return { ok: true }
   }

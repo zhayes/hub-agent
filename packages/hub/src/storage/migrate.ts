@@ -22,6 +22,7 @@ import { MIGRATION_020_A2A_TABLES } from './migrations/020-a2a-tables'
 import { MIGRATION_021_REMOTE_TASK_REFS } from './migrations/021-remote-task-refs'
 import { MIGRATION_022_REMOTE_TASK_CLOSED_AT } from './migrations/022-remote-task-closed-at'
 import { MIGRATION_023_A2A_PEER_CERT } from './migrations/023-a2a-peer-cert'
+import { MIGRATION_024_REMOTE_EXECUTION_ARTIFACTS } from './migrations/024-remote-execution-artifacts'
 
 /** 迁移按顺序追加；只增不改。 */
 export const MIGRATIONS: readonly Migration[] = [
@@ -48,6 +49,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_021_REMOTE_TASK_REFS,
   MIGRATION_022_REMOTE_TASK_CLOSED_AT,
   MIGRATION_023_A2A_PEER_CERT,
+  MIGRATION_024_REMOTE_EXECUTION_ARTIFACTS,
 ]
 
 export interface MigrateResult {

@@ -440,7 +440,7 @@ Restate 是候选的 durable execution 层，不是 A2A Adapter，也不自带�
 
 - `test/unit/a2a-bidirectional.test.ts`：两个独立运行时（各自 SQLite + 真实 `startA2aServer` 入站面 + Peer token）通过真实 HTTP/JSON-RPC **互相委托**：A→B 与 B→A 各自“落派发意图 → 提交 → 对账到终态 → 各产出一条决策点”；并验证「同一幂等键重放不会第二次委托」「重复对账不重复产出决策点」。
 
-未落地：`local_execution_id` 回填、远端结果 → 本地 Execution 状态映射、交付物 manifest（`remote_artifacts`）与本地验收。Brain 目前已能选远程目标，但远端结果尚未落成本地 Execution，所以“混合 Plan 的验收闭环”（A3 门禁）仍差这一段。
+未落地：交付物**应用**与基于应用的命令验收（`git apply` + `runVerification` 跑在宿主 worktree），以及 `remote_artifacts.verified_at` 的真实填写。目前远端 `COMPLETED` 默认判 `manual_required`（见下节），不会自动成功。
 
 **交付物 manifest（`remote_artifacts`）尚未建表**：§4.1.1 冻结了字段，但按“建表随实现同一个 PR”的约定，它属于远程交付物阶段（A3 验收/交付），不在本次提交范围；当前 `remote_task_refs` 只记录执行状态关联，不代表已能接收代码交付物。
 
@@ -475,6 +475,22 @@ ADR 0026 要求“启用 Relay 之前必须补上 mTLS”。这一步已完成�
 验证：`test/unit/brain-remote.test.ts`（6 条）——已知/未知 peerId、无 peers 时一律拒、二选一互斥、端到端只提交一次且落意图+关联、回合 `waiting_remote`、未配置 remote 时拒绝且不产生任何派发。
 
 仍未做：远端结果落成本地 Execution（`local_execution_id` 回填 + PRD §7.6.1 状态映射）、交付物 manifest 与本地验收（§7.7）。
+
+### 远端结果落成本地 Execution（2026-11-27）
+
+补上 A3 的最后一段：远端“完成”不再只是一个观测值，而是落成可验收的本地执行记录。
+
+- 迁移 `024`：`remote_task_refs` 补 `task_id`/`subtask_id`（对账时自愈式建 Execution）；新建 `remote_artifacts` manifest 表（只存元数据，不存内容）。
+- `runtime/remote-execution.ts`：
+  - `ensureRemoteExecution`：用 `deriveExecutionId(idempotencyKey)` 确定性派生，幂等且自愈（崩在“已提交远端、未建 Execution”之间也能补）；子任务走 `ready → assigned → running`。`agentId = remote:<peerId>`，表明它不是本机进程。
+  - `mapRemoteStateToExecution`：PRD §7.6.1 出站列；**`completed` 不映射成 succeeded**（返回 running，必须过本地验收）。
+  - `settleRemoteExecution`：写交付物 manifest → 跑（可注入的）本地验收 → 写 `verification_runs` + 证据 → 收敛 Execution/Subtask/Task 状态。
+- **fail-closed 默认**：不传验收器 → `manual_required` → Execution `waiting_input`，子任务与 Task 同步 `waiting_input`；绝不把远端自述当本地成功。`pass` 必须带至少一条通过的检查（Domain 会拒绝空 pass，这里先降级不报错）。
+- `runtime/remote-reconcile.ts`：终态对账在**同一事务**内完成“观测 + 交付物 + 验收 + 关单 + 决策点”；单条脏数据只记 `failed`，不卡死整轮。
+
+验证：`test/unit/remote-execution.test.ts`（5 条）——状态映射表、无验收器时 `manual_required` + `waiting_input`、带检查的 `pass` → `succeeded` + 证据、空检查的 `pass` 被降级、运行中不产生验收。
+
+仍差：P0 未实现“**把产物应用到宿主 worktree 并跑命令检查**”，所以代码类交付物只能走人工验收；`manual_required` 之后的“人类接受”入口（Clarification → 状态收敛）也仍是既有缺口。
 
 ### A5 核心验收场景
 

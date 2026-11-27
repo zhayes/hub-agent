@@ -1736,6 +1736,8 @@ A2A 负责双方的任务通信，内部 Task Graph 不要求暴露给远程 Age
 | `REJECTED` | `Execution → failed`，`failureCategory = remote_rejected` | 远端拒收且未执行，与执行失败分开统计 |
 | `UNSPECIFIED` / 未知 | `Execution → unknown` | ADR 0010：unknown 不自动重试，交人工/策略 |
 
+**实现口径（2026-11-27）**：`runtime/remote-execution.ts` 已按上表映射；`Execution.agentId` 记为 `remote:<peerId>` 以区分本机进程。`COMPLETED` **不会**直接变 `succeeded`：先写交付物 manifest，再跑本地验收；未提供验收器时判 `manual_required`（`Execution → waiting_input`，子任务与 Task 同步），因此“远端成功”只能由本地证据转成成功。
+
 ### 7.6.2 入站：本机接收远端委托
 
 | 本地推进 | 对外 `TaskState` |

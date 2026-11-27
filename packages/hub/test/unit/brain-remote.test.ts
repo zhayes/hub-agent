@@ -219,7 +219,13 @@ describe('Brain 选远程目标：runtime 只提交不阻塞', () => {
     const refs = listRemoteTasks(database, result.goalId)
     expect(refs).toHaveLength(1)
     expect(refs[0]?.remoteTaskId).toBe('rt-remote-1')
-    expect(refs[0]?.localExecutionId).toBeUndefined()
+    /* 提交时就已经建好本地 Execution 并回填关联：Brain 快照里能看见这条子任务。 */
+    expect(refs[0]?.localExecutionId).toBeDefined()
+    const execution = database
+      .prepare('SELECT status, agent_id FROM executions WHERE id = ?')
+      .get(refs[0]?.localExecutionId) as { status: string; agent_id: string } | undefined
+    expect(execution?.status).toBe('running')
+    expect(execution?.agent_id).toBe('remote:peer-b')
     expect(
       findRemoteTaskByIdempotencyKey(database, intents[0]?.idempotencyKey ?? '')?.observedState,
     ).toBe('submitted')

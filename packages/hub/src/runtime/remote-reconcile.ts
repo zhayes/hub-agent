@@ -5,7 +5,9 @@ import { fromTaskState } from '../adapters/a2a/mapping'
 import { isTerminalRemoteState } from '../domain/status'
 import type { Db } from '../storage/db'
 import { enqueueDecisionPoint } from './decision-queue'
+import type { RemoteArtifactForm } from './remote-artifact'
 import type { ConnectRemote, ResolvePeerEndpoint } from './remote-dispatch'
+import { type RemoteSettlementArtifact, settleRemoteExecution } from './remote-execution'
 import {
   closeRemoteTask,
   listRemoteTasksNeedingPoll,
@@ -91,6 +93,7 @@ export async function reconcileRemoteTasks(
         /* 远端已没有这个任务：关单并交人工，不重发（PRD §7.6.3）。 */
         options.db.transaction(() => {
           closeRemoteTask(options.db, { id: ref.id, observedState: 'unknown', now })
+          settleRemoteExecution(options.db, { ref, observed: 'unknown', now })
           enqueueDecisionPoint(options.db, {
             goalId: ref.goalId,
             reason: 'remote_task_lost',
@@ -107,8 +110,42 @@ export async function reconcileRemoteTasks(
 
     const observed = fromTaskState(task.status?.state ?? 0)
     const cursor = task.status?.timestamp
+    const artifacts = settlementArtifactsOf(task)
 
     if (isTerminalRemoteState(observed)) {
+      try {
+        options.db.transaction(() => {
+          observeRemoteTask(options.db, {
+            id: ref.id,
+            observedState: observed,
+            ...(cursor === undefined ? {} : { eventCursor: cursor }),
+            now,
+          })
+          /* 先落本地 Execution（含交付物与验收），再关单。全在同一个事务里：
+             崩在中间整体回滚，不会出现“远端终态但本地没结果”的半状态。 */
+          settleRemoteExecution(options.db, {
+            ref,
+            observed,
+            artifacts,
+            now,
+          })
+          closeRemoteTask(options.db, { id: ref.id, now })
+          enqueueDecisionPoint(options.db, {
+            goalId: ref.goalId,
+            reason: 'remote_task_terminal',
+            dedupeKey: `remote:${ref.id}:terminal`,
+            payload: refPayload(ref, observed),
+          })
+        })()
+        report.terminal.push(ref.id)
+      } catch (error) {
+        /* 单条脏数据不能卡死整轮对账；下轮重试（事务已回滚）。 */
+        report.failed.push({ id: ref.id, error: messageOf(error) })
+      }
+      continue
+    }
+
+    try {
       options.db.transaction(() => {
         observeRemoteTask(options.db, {
           id: ref.id,
@@ -116,29 +153,60 @@ export async function reconcileRemoteTasks(
           ...(cursor === undefined ? {} : { eventCursor: cursor }),
           now,
         })
-        /* 终态即停止轮询；结论仍以 observed_state + 本地验收为准。 */
-        closeRemoteTask(options.db, { id: ref.id, now })
-        enqueueDecisionPoint(options.db, {
-          goalId: ref.goalId,
-          reason: 'remote_task_terminal',
-          dedupeKey: `remote:${ref.id}:terminal`,
-          payload: refPayload(ref, observed),
-        })
+        /* 运行中/等待输入等中间态也要落到本地 Execution（PRD §7.6.1）。 */
+        settleRemoteExecution(options.db, { ref, observed, now })
       })()
-      report.terminal.push(ref.id)
-      continue
+      report.polled.push(ref.id)
+    } catch (error) {
+      report.failed.push({ id: ref.id, error: messageOf(error) })
     }
-
-    observeRemoteTask(options.db, {
-      id: ref.id,
-      observedState: observed,
-      ...(cursor === undefined ? {} : { eventCursor: cursor }),
-      now,
-    })
-    report.polled.push(ref.id)
   }
 
   return report
+}
+
+/**
+ * A2A `Task.artifacts` → 本地 manifest 输入。
+ *
+ * 只在 metadata 显式声明 `form` 时采信；否则按是否含 diff 推断，**不猜测**签者与 hash。
+ */
+function settlementArtifactsOf(task: {
+  artifacts?: readonly unknown[]
+}): RemoteSettlementArtifact[] {
+  const artifacts = task.artifacts ?? []
+  return artifacts.flatMap((raw) => {
+    if (typeof raw !== 'object' || raw === null) return []
+    const record = raw as {
+      artifactId?: unknown
+      metadata?: unknown
+      parts?: unknown
+    }
+    const artifactId = typeof record.artifactId === 'string' ? record.artifactId : undefined
+    if (artifactId === undefined || artifactId === '') return []
+
+    const declared = formOf(record.metadata)
+    const parts = Array.isArray(record.parts) ? record.parts : []
+    const texts = parts
+      .map((part) => {
+        const content = (part as { content?: { $case?: string; value?: unknown } } | null)?.content
+        return content?.$case === 'text' && typeof content.value === 'string' ? content.value : ''
+      })
+      .filter((text) => text !== '')
+
+    const looksLikePatch = texts.some(
+      (text) => text.startsWith('diff --git') || text.includes('\n--- '),
+    )
+    const form = declared ?? (looksLikePatch ? 'patch' : 'analysis')
+    return [{ artifactId, form }]
+  })
+}
+
+function formOf(metadata: unknown): RemoteArtifactForm | undefined {
+  if (typeof metadata !== 'object' || metadata === null) return undefined
+  const form = (metadata as Record<string, unknown>)['form']
+  return form === 'patch' || form === 'commit' || form === 'bundle' || form === 'analysis'
+    ? form
+    : undefined
 }
 
 function refPayload(ref: RemoteTaskRef, observedState: string): Record<string, unknown> {
