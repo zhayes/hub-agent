@@ -56,6 +56,34 @@ export function rejectExecution(db: Db, input: RejectExecutionInput): Acceptance
   })
 }
 
+/**
+ * 澄清答案 → 人工验收（把“人在控制台回答”接成状态收敛）。
+ *
+ * 只在**确实是验收闸门**时生效，否则返回 `undefined`、什么都不改：
+ * - 澄清必须绑定 `executionId`；
+ * - 选项必须恰好包含 `accept` / `reject`；
+ * - 该执行必须真的在 `waiting_input`。
+ *
+ * 三个条件同时成立才动作，所以普通 `decide` 问题（哪怕选项里有 accept）不会被误当成验收。
+ */
+export function applyClarificationAnswer(
+  db: Db,
+  input: { executionId?: string; options: readonly string[]; answer: string },
+): AcceptanceResult | undefined {
+  if (input.executionId === undefined) return undefined
+  if (!(input.options.includes('accept') && input.options.includes('reject'))) return undefined
+
+  const execution = loadState(db).executions[asExecutionId(input.executionId)]
+  if (execution?.status !== 'waiting_input') return undefined
+
+  return input.answer === 'accept'
+    ? acceptExecution(db, { executionId: input.executionId, note: 'accepted via clarification' })
+    : rejectExecution(db, {
+        executionId: input.executionId,
+        reason: 'rejected via clarification',
+      })
+}
+
 function decideExecution(
   db: Db,
   input: { executionId: string; accept: boolean; note?: string },

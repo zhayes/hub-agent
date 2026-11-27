@@ -3,6 +3,7 @@ import { asTimestamp } from '../domain/ids'
 import { HubError } from '../shared/errors'
 import { newId } from '../shared/id'
 import type { Db } from '../storage/db'
+import { applyClarificationAnswer } from './acceptance'
 
 interface ClarificationRow {
   id: string
@@ -149,6 +150,14 @@ export function answerClarification(
      SET status = 'answered', answer = ?, answered_by = 'human', answered_at = ?
      WHERE id = ?`,
   ).run(input.answer, answeredAt, input.questionId)
+
+  /* 如果这是人工验收闸门（选项 accept/reject + 执行在 waiting_input），答案就是决定：
+     直接收敛状态并唤醒 Brain；不合闸门则什么都不做。 */
+  applyClarificationAnswer(db, {
+    ...(expectedExecution === undefined ? {} : { executionId: expectedExecution }),
+    options,
+    answer,
+  })
   return {
     ...toClarification(row),
     status: 'answered',

@@ -9,6 +9,11 @@ import {
   asTimestamp,
 } from '../../src/domain/ids'
 import { acceptExecution, rejectExecution } from '../../src/runtime/acceptance'
+import {
+  answerClarification,
+  createClarification,
+  getClarification,
+} from '../../src/runtime/clarify'
 import { listDecisionPoints } from '../../src/runtime/decision-queue'
 import { type Db, openDatabase } from '../../src/storage/db'
 import { migrate } from '../../src/storage/migrate'
@@ -183,5 +188,101 @@ describe('人工验收：waiting_input → 收敛', () => {
       at,
     }).state
     expect(() => acceptExecution(running, { executionId: 'e1' })).toThrow(/不在等待人工验收状态/)
+  })
+})
+
+describe('澄清答案 → 人工验收（人在控制台回答）', () => {
+  function gate(database: Db, options: string[] = ['accept', 'reject']) {
+    return createClarification(database, {
+      goalId: 'g1',
+      kind: 'decide',
+      executionId: 'e1',
+      question: '远端说完成了，但本地无法自动验收，接受还是拒绝？',
+      options,
+    })
+  }
+
+  it('回答 accept → 执行/子任务成功、Task 回 running、产生决策点', () => {
+    const database = db()
+    seedWaitingExecution(database)
+    const clarification = gate(database)
+
+    answerClarification(database, {
+      questionId: clarification.id,
+      executionId: 'e1',
+      answer: 'accept',
+    })
+
+    expect(getClarification(database, clarification.id)?.status).toBe('answered')
+    expect(statuses(database)).toEqual({
+      execution: 'succeeded',
+      subtask: 'succeeded',
+      task: 'running',
+    })
+    expect(listDecisionPoints(database, 'g1').map((point) => point.reason)).toEqual([
+      'human_accepted',
+    ])
+  })
+
+  it('回答 reject → 三态收敛为 failed', () => {
+    const database = db()
+    seedWaitingExecution(database)
+    const clarification = gate(database)
+
+    answerClarification(database, {
+      questionId: clarification.id,
+      executionId: 'e1',
+      answer: 'reject',
+    })
+
+    expect(statuses(database)).toEqual({
+      execution: 'failed',
+      subtask: 'failed',
+      task: 'failed',
+    })
+  })
+
+  it('选项不是 accept/reject 的普通澄清只记录答案，不动执行', () => {
+    const database = db()
+    seedWaitingExecution(database)
+    const clarification = gate(database, ['yes', 'no'])
+
+    answerClarification(database, {
+      questionId: clarification.id,
+      executionId: 'e1',
+      answer: 'yes',
+    })
+
+    expect(getClarification(database, clarification.id)?.status).toBe('answered')
+    expect(statuses(database)).toEqual({
+      execution: 'waiting_input',
+      subtask: 'waiting_input',
+      task: 'waiting_input',
+    })
+    expect(listDecisionPoints(database, 'g1')).toEqual([])
+  })
+
+  it('执行不在 waiting_input 时，即使回答 accept 也不收敛', () => {
+    const database = db()
+    seedWaitingExecution(database)
+    const clarification = gate(database)
+
+    /* 先让验收失效：执行被收回 running。 */
+    let state = loadState(database)
+    state = appendEvent(database, state, {
+      type: 'execution.status',
+      executionId: EXEC,
+      to: 'running',
+      at,
+    }).state
+
+    answerClarification(database, {
+      questionId: clarification.id,
+      executionId: 'e1',
+      answer: 'accept',
+    })
+
+    expect(loadState(database).executions[EXEC]?.status).toBe('running')
+    expect(listDecisionPoints(database, 'g1')).toEqual([])
   })
 })

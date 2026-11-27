@@ -552,10 +552,11 @@ token = "outbound-token"  # 或给 [a2a.remotePeers.tls]（certFile/keyFile/caFi
   - `succeeded` 必须有证据：执行没有远端证据时，以“人工作出的依据”充当证据；已有 `a2a:<peer>/<task>` 证据则保留不覆盖。
 - `settleRemoteExecution` 判 `manual_required` 时创建一条 `kind='decide'` 的澄清，选项固定为 `accept` / `reject`，并绑定 `executionId`；所以人能看到“为什么需要我”，也知道该回答什么。
 - 入口：`POST /api/v1/executions/:id/accept`（可选 `note`）与 `POST /api/v1/executions/:id/reject`（可选 `reason`），鉴权与其它本地 API 一致。
+- **澄清答案也生效**：`answerClarification` 在记录答案后调用 `applyClarificationAnswer`——只有当「绑定 `executionId` + 选项恰好含 `accept`/`reject` + 执行真在 `waiting_input`」三条同时成立时，才把它当作验收闸门并收敛状态；普通 `decide` 问题（哪怕选项里有 accept）不会被误伤。所以控制台/聊天里直接回答 `accept` / `reject` 就能推进任务，不需要另一套按钮。
 
-验证：`test/unit/acceptance.test.ts`（4）——接受后的验收记录/三态收敛/决策点、拒绝的失败收敛、重复接受被拒、不存在或非等待态被拒；`test/unit/remote-execution.test.ts` 追加断言：`manual_required` 会留下 options 为 `['accept','reject']` 且绑定 executionId 的澄清。
+验证：`test/unit/acceptance.test.ts`（8）——接受后的验收记录/三态收敛/决策点、拒绝的失败收敛、重复接受被拒、不存在或非等待态被拒；**澄清答案路径**：`accept` → 收敛 + 决策点、`reject` → 三态失败、普通选项只记录不动作、执行不在 `waiting_input` 时回答 `accept` 也不收敛。`test/unit/remote-execution.test.ts` 追加断言：`manual_required` 会留下 options 为 `['accept','reject']` 且绑定 executionId 的澄清。
 
-仍未做：Web 控制台的接受/拒绝按钮（API 已就绪）；CLI 子命令；澄清答案（`answer=accept`）还没有自动串到 `acceptExecution`（需要先把对话路由与执行关联起来）。
+仍未做：Web 控制台的接受/拒绝按钮（API 与澄清答案都已就绪）；CLI 子命令。
 
 ### A5 核心验收场景
 
