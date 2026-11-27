@@ -36,6 +36,27 @@ export interface AttentionSource {
   tasks: readonly TaskRow[]
 }
 
+/**
+ * 一条待批的审批 → 一条「需要你」。
+ * 任务详情页要就地渲染同一个决策体（dock/浮层/详情页三处共用一份语义），
+ * 所以映射只能有一处，不能各写一遍再漂移。
+ */
+export function approvalToAttention(approval: ApprovalRow, taskTitle?: string): AttentionItem {
+  return {
+    id: `approval:${approval.id}`,
+    kind: 'approval',
+    taskId: approval.taskId,
+    approvalId: approval.id,
+    title: approval.reason,
+    resource: approval.resource,
+    risk: approval.riskLevel,
+    ...(approval.action === undefined ? {} : { action: approval.action }),
+    ...(approval.decisionMode === undefined ? {} : { decisionMode: approval.decisionMode }),
+    ...(approval.expiresAt === undefined ? {} : { expiresAt: approval.expiresAt }),
+    ...(taskTitle === undefined ? {} : { taskTitle }),
+  }
+}
+
 export function deriveAttention(source: AttentionSource): AttentionItem[] {
   const items: AttentionItem[] = []
   const titleOf = (taskId: string): string | undefined =>
@@ -43,20 +64,7 @@ export function deriveAttention(source: AttentionSource): AttentionItem[] {
 
   for (const approval of source.approvals) {
     if (approval.status !== 'pending') continue
-    const taskTitle = titleOf(approval.taskId)
-    items.push({
-      id: `approval:${approval.id}`,
-      kind: 'approval',
-      taskId: approval.taskId,
-      approvalId: approval.id,
-      title: approval.reason,
-      resource: approval.resource,
-      risk: approval.riskLevel,
-      ...(approval.action === undefined ? {} : { action: approval.action }),
-      ...(approval.decisionMode === undefined ? {} : { decisionMode: approval.decisionMode }),
-      ...(approval.expiresAt === undefined ? {} : { expiresAt: approval.expiresAt }),
-      ...(taskTitle === undefined ? {} : { taskTitle }),
-    })
+    items.push(approvalToAttention(approval, titleOf(approval.taskId)))
   }
 
   for (const task of source.tasks) {

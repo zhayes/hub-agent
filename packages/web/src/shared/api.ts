@@ -86,11 +86,26 @@ export interface ApprovalRow {
 
 export interface TaskView {
   task: { id: string; goalId: string; title: string; status: string; description: string }
-  subtasks: Array<{ id: string; title: string; status: string; required: boolean }>
+  subtasks: Array<{
+    id: string
+    title: string
+    status: string
+    required: boolean
+    /** 已分派的 Agent；未分派时缺省。后端一直有，只是这里以前没声明。 */
+    assignedAgentId?: string
+  }>
   executions: Array<{
     id: string
     status: string
     attempt: number
+    /** 谁跑的这一次尝试。 */
+    agentId?: string
+    subtaskId?: string
+    /** 失败归因：协议 / Agent 自身 / 资源 / 验收未过 / 预算用尽。 */
+    failureCategory?: 'protocol' | 'agent' | 'resource' | 'verification' | 'budget'
+    createdAt?: string
+    startedAt?: string
+    finishedAt?: string
     evidence?: {
       branch?: string
       commitSha?: string
@@ -105,6 +120,7 @@ export interface TaskView {
     id: string
     executionId: string
     verdict: string
+    createdAt?: string
     checks: Array<{
       checkId: string
       kind: string

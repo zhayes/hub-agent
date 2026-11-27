@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shortenId } from '../src/shared/format'
+import { formatDuration, shortenId } from '../src/shared/format'
 
 describe('shortenId', () => {
   it('keeps the type prefix and the distinguishing tail of a ULID', () => {
@@ -15,5 +15,21 @@ describe('shortenId', () => {
 
   it('falls back to head and tail for opaque ids', () => {
     expect(shortenId('abcdefghijklmnop')).toBe('abcdef…mnop')
+  })
+})
+
+describe('formatDuration', () => {
+  it('speaks in minutes once past a minute', () => {
+    expect(formatDuration(134_000)).toBe('2m14s')
+    expect(formatDuration(60_000)).toBe('1m00s')
+  })
+
+  it('keeps sub-minute runs in seconds', () => {
+    expect(formatDuration(0)).toBe('0s')
+    expect(formatDuration(45_400)).toBe('45s')
+  })
+
+  it('switches to hours for long runs', () => {
+    expect(formatDuration(3_720_000)).toBe('1h02m')
   })
 })
