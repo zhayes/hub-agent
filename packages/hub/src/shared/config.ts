@@ -25,6 +25,67 @@ export const ConfigSchema = z.object({
       level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     })
     .prefault({}),
+  /**
+   * 跨机器 A2A（ADR 0026 / PLAN-A2A）。
+   *
+   * - `peers`：**入站**身份（别人调我时要出示的 token / 已绑定的证书指纹）；
+   * - `remotePeers`：**出站**目标（Brain 可以委托给谁，以及怎么连）。
+   *
+   * 证书只给**文件路径**，不在配置里内联 PEM；token 只存配置，不进库。
+   */
+  a2a: z
+    .object({
+      /** 默认关闭；启用后是独立端口 + 独立鉴权。 */
+      enabled: z.boolean().default(false),
+      /** 0 = 由系统分配（测试/临时环境用）。 */
+      port: z.number().int().min(0).max(65535).optional(),
+      host: z.string().min(1).optional(),
+      publicUrl: z.string().min(1).optional(),
+      peers: z
+        .array(
+          z.object({
+            displayName: z.string().min(1),
+            token: z.string().min(1),
+            certFingerprint: z.string().min(1).optional(),
+          }),
+        )
+        .default([]),
+      /** 入站 TLS；非回环 host 必须配（否则启动时拒绝）。 */
+      tls: z
+        .object({
+          keyFile: z.string().min(1),
+          certFile: z.string().min(1),
+          caFile: z.string().min(1).optional(),
+          /** true = 双向 TLS，身份来自客户端证书。 */
+          requireClientCert: z.boolean().default(false),
+        })
+        .optional(),
+      /** 出站目标：Brain 可以按 `id` 选择委托给它。 */
+      remotePeers: z
+        .array(
+          z.object({
+            /** 本机给对端起的名字；Brain 在 delegate.peerId 里用的就是它。 */
+            id: z.string().min(1),
+            displayName: z.string().min(1),
+            url: z
+              .string()
+              .min(1)
+              .refine((value) => /^https?:\/\//.test(value), 'url 必须以 http(s):// 开头'),
+            token: z.string().min(1).optional(),
+            capabilities: z.unknown().optional(),
+            tls: z
+              .object({
+                certFile: z.string().min(1),
+                keyFile: z.string().min(1),
+                caFile: z.string().min(1).optional(),
+                serverName: z.string().min(1).optional(),
+              })
+              .optional(),
+          }),
+        )
+        .default([]),
+    })
+    .prefault({}),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

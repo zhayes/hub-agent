@@ -28,6 +28,7 @@ import { loadState } from '../../storage/queries/state'
 import { appendEvent } from '../../storage/write/events'
 import { runAcpWithRetry } from '../acp-retry'
 import { listAgents, resolveAgent, setAgentStatus } from '../agent-registry'
+import type { RunGoalWithBrainOptions } from '../brain-run'
 import { runGoalWithBrain } from '../brain-run'
 import { answerClarification } from '../clarify'
 import { failTask } from '../recovery/fail'
@@ -41,6 +42,8 @@ export interface ChatServiceOptions {
   worktree?: string
   /** 测试注入；缺省由 runGoalWithBrain 走 createBrainFromEnv（Pi）。 */
   brain?: OrchestratorBrain
+  /** 可委托的远程对端（A3）：给了 Brain 才能在 delegate 里用 peerId。 */
+  remote?: RunGoalWithBrainOptions['remote']
 }
 
 export interface CreateThreadInput {
@@ -870,6 +873,7 @@ export class ChatService {
         checks: [{ kind: 'diffScope', allowedPaths: ['.'] }],
         clientVersion: this.options.clientVersion,
         completeOnSuccess: true,
+        ...(this.options.remote === undefined ? {} : { remote: this.options.remote }),
         onProgress: (step) => {
           appendChatMessage(db, {
             threadId,

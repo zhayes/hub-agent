@@ -501,6 +501,45 @@ ADR 0026 要求“启用 Relay 之前必须补上 mTLS”。这一步已完成�
 
 验证：`test/unit/remote-verify.test.ts`（7 条，真实 git 仓库）——干净应用→pass、应用后不通过→fail、重复应用→`already-applied`、基线不一致→`rejected`+fail、无 patch 无检查→`manual_required`、规格解析；`test/unit/remote-execution.test.ts` 新增 1 条验证 `verify` 钩子贯通（钩子收到交付物、pass → Execution succeeded）。
 
+### 生产接线：配置驱动的 A2A（2026-11-27）
+
+之前只有测试能注入出站对端；现在 `startHub` 会读 `config.toml`，所以 `ha web` / `hubagentd` 真的能跑跨机器委托。
+
+```toml
+[a2a]
+enabled = true            # 默认 false；开启后才监听
+port = 7789               # 0 = 系统分配
+host = "0.0.0.0"         # 非回环必须配 [a2a.tls]
+
+[a2a.tls]                 # 只给文件路径，不内联 PEM
+keyFile  = "/etc/hub/server.key"
+certFile = "/etc/hub/server.crt"
+caFile   = "/etc/hub/ca.crt"      # 配了才校验证书链
+requireClientCert = true          # true = mTLS，身份来自客户端证书
+
+[[a2a.peers]]             # 入站身份：别人调我时出示的
+    displayName = "peer-a"
+token = "inbound-token"
+certFingerprint = "aabb…"  # 可选，mTLS 模式用
+
+[[a2a.remotePeers]]       # 出站目标：Brain 可以委托给谁
+id = "peer-b"             # Brain 在 delegate.peerId 里用这个
+url = "https://b.example:7789/a2a"
+token = "outbound-token"  # 或给 [a2a.remotePeers.tls]（certFile/keyFile/caFile/serverName）
+```
+
+接线行为：
+
+- **入站**：`options.a2a` 显式传入时优先（测试/嵌入），否则用配置；`enabled=false` 就完全不监听。
+- **出站**：`remotePeers` → `loadRemotePeers`，token 与证书**只在配置里**、只在执行时使用，不进数据库、不进派发 payload；证书文件**启动时一次性读取**，缺失即启动失败。
+- **Brain 看得到对端**：`peers`（仅 id / 名字 / 能力）经 `createChatService` 送进 `runGoalWithBrain`，所以控制台对话里 Brain 能选 `peerId`。
+- **对账 + 验收**：`runSchedulerTick` 带上 `reconcile: { resolvePeer, verify }`；验收器用 `AgentHost`（因此经 `SandboxProvider`）应用 patch 并跑本地检查。
+- **fail-fast**：remotePeer 既无 token 也无证书、`id` 重复、证书文件缺失 → daemon 拒绝启动。
+
+验证：`test/unit/config-a2a.test.ts`（3）、`test/unit/remote-endpoints.test.ts`（5）、`test/unit/hub-a2a-config.test.ts`（3：配置启用入站面并拉到卡片、非法出站配置拒启、只配出站不会把入站面带起来）。
+
+仍未做：CLI 没有 `ha a2a peer add` 之类的配对/发证命令（现在靠手写配置 + `regenerate` 风格的外部证书）；`manual_required` 的人工接受入口仍缺。
+
 ### A5 核心验收场景
 
 1. A 本机 Brain 规划并行任务：一个本地 ACP，一个远程 HubAgent；结果汇合后由 A 本地验收。

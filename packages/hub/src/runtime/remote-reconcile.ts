@@ -226,8 +226,26 @@ function settlementArtifactsOf(task: {
       (text) => text.startsWith('diff --git') || text.includes('\n--- '),
     )
     const form = declared ?? (looksLikePatch ? 'patch' : 'analysis')
-    return [{ artifactId, form }]
+    /* 内容只随返回值在内存里传给验收器（应用 patch 需要正文），不写入 manifest。 */
+    const content = texts.join('\n')
+    return [
+      {
+        artifactId,
+        form,
+        ...(content === '' ? {} : { content }),
+        ...(mediaTypeOf(parts) === undefined ? {} : { mediaType: mediaTypeOf(parts) }),
+      },
+    ]
   })
+}
+
+/** 取第一个 part 声明的 mediaType（SDK 的 Part 上有这个字段）。 */
+function mediaTypeOf(parts: readonly unknown[]): string | undefined {
+  for (const part of parts) {
+    const mediaType = (part as { mediaType?: unknown } | null)?.mediaType
+    if (typeof mediaType === 'string' && mediaType !== '') return mediaType
+  }
+  return undefined
 }
 
 function formOf(metadata: unknown): RemoteArtifactForm | undefined {

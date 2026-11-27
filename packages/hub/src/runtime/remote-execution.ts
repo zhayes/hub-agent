@@ -154,6 +154,8 @@ export interface RemoteSettlementArtifact {
   baseRef?: string
   baseCommit?: string
   lockDigest?: string
+  /** 内联文本内容（patch 的 diff 正文）；只在内存里传给验收器，**不入库**。 */
+  content?: string
 }
 
 export interface RemoteVerifyResult {

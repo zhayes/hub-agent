@@ -1,16 +1,28 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
+import { AgentHost } from '../../agent-host/agent-host'
 import { createChatService } from '../../runtime/chat/chat-service'
 import { type RecoveryReport, scanRecovery } from '../../runtime/recovery/scan'
+import { loadRemotePeers } from '../../runtime/remote-endpoints'
+import type { ReconcileRemotesOptions } from '../../runtime/remote-reconcile'
+import { createRemoteVerifier } from '../../runtime/remote-verify'
 import { createLocalAcpExecutor } from '../../runtime/scheduler/local-executor'
 import { runSchedulerTick } from '../../runtime/scheduler/tick'
 import { createSrtProvider } from '../../sandbox/srt-driver'
+import { loadConfig } from '../../shared/config'
 import { HubError } from '../../shared/errors'
 import { acquireLock } from '../../shared/lock'
-import { dbPath, hubDir, lockPath, resolvePiAgentDir, tokenPath } from '../../shared/paths'
+import {
+  configPath,
+  dbPath,
+  hubDir,
+  lockPath,
+  resolvePiAgentDir,
+  tokenPath,
+} from '../../shared/paths'
 import { openDatabase } from '../../storage/db'
 import { migrate } from '../../storage/migrate'
 import { type A2aServerHandle, type A2aTlsOptions, startA2aServer } from '../a2a/server'
@@ -115,6 +127,10 @@ function listenOn(
 
 export async function startHub(options: StartHubOptions): Promise<HubHandle> {
   const home = options.home ?? hubDir()
+  /* 配置是 a2a 的唯一来源（入站 peer / TLS / 出站目标）；文件不存在就用默认值。 */
+  const loadedConfig = await loadConfig(configPath(home))
+  const a2aConfig = loadedConfig.config.a2a
+
   const lock = await acquireLock(home, lockPath(home))
   const db = openDatabase(dbPath(home))
   migrate(db)
@@ -134,11 +150,19 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
   const webBuilt = existsSync(webIndex)
   const webBuiltAt = webBuilt ? statSync(webIndex).mtime.toISOString() : undefined
   const provider = createSrtProvider()
+  /* 出站对端：证书文件启动时一次性读取，缺失即启动失败（fail-fast）。 */
+  const remote =
+    a2aConfig.remotePeers.length === 0 ? undefined : loadRemotePeers(a2aConfig.remotePeers)
+  const remoteHost: AgentHost | undefined =
+    remote === undefined ? undefined : new AgentHost({ provider })
   const chat = createChatService({
     db,
     provider,
     clientVersion: options.version,
     worktree: options.worktree ?? process.cwd(),
+    ...(remote === undefined
+      ? {}
+      : { remote: { peers: remote.peers, resolvePeer: remote.resolvePeer } }),
   })
   const app = createHttpApp({
     db,
@@ -184,20 +208,22 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
   keepAlive.unref?.()
 
   /* A2A 入站面：默认关；显式开启后是**独立监听器 + 独立鉴权**（ADR 0026）。
-     开启失败就不启动 daemon——运营者明确要求了它，静默降级比启动失败更危险。 */
+     开启失败就不启动 daemon——运营者明确要求了它，静默降级比启动失败更危险。
+     测试可以显式传 `options.a2a` 覆盖配置，生产走配置文件。 */
+  const a2aOptions = options.a2a ?? (a2aConfig.enabled ? a2aFromConfig(a2aConfig) : undefined)
   let a2a: A2aServerHandle | undefined
-  if (options.a2a?.enabled === true) {
+  if (a2aOptions?.enabled === true) {
     try {
       a2a = await startA2aServer({
         db,
         provider,
         version: options.version,
         worktree: options.worktree ?? process.cwd(),
-        ...(options.a2a.port === undefined ? {} : { port: options.a2a.port }),
-        ...(options.a2a.host === undefined ? {} : { host: options.a2a.host }),
-        ...(options.a2a.publicUrl === undefined ? {} : { publicUrl: options.a2a.publicUrl }),
-        ...(options.a2a.peers === undefined ? {} : { peers: options.a2a.peers }),
-        ...(options.a2a.tls === undefined ? {} : { tls: options.a2a.tls }),
+        ...(a2aOptions.port === undefined ? {} : { port: a2aOptions.port }),
+        ...(a2aOptions.host === undefined ? {} : { host: a2aOptions.host }),
+        ...(a2aOptions.publicUrl === undefined ? {} : { publicUrl: a2aOptions.publicUrl }),
+        ...(a2aOptions.peers === undefined ? {} : { peers: a2aOptions.peers }),
+        ...(a2aOptions.tls === undefined ? {} : { tls: a2aOptions.tls }),
       })
     } catch (error) {
       clearInterval(keepAlive)
@@ -216,12 +242,25 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
      首轮异步启动，不拖延监听；单次失败只记不抛，不能把 daemon 带下去。
      关闭时要等在途 tick 收尾——否则它可能在 db 关掉之后才回来。 */
   const localExecutor = createLocalAcpExecutor({ db, provider })
+  /* 远端对账：只有配了出站对端才启用；验收器带 AgentHost（因此经 SandboxProvider）。 */
+  const reconcile =
+    remote === undefined || remoteHost === undefined
+      ? undefined
+      : {
+          resolvePeer: remote.resolvePeer,
+          verify: remoteVerifyHook({
+            verifier: createRemoteVerifier({ db, host: remoteHost }),
+          }),
+        }
   let closing = false
   let inFlight: Promise<void> | undefined
   const tick = async (): Promise<void> => {
     if (closing) return
     try {
-      await runSchedulerTick(db, { createExecutor: () => localExecutor })
+      await runSchedulerTick(db, {
+        createExecutor: () => localExecutor,
+        ...(reconcile === undefined ? {} : { reconcile }),
+      })
     } catch {
       // 调度失败留给下一轮重试；持久化状态本身是完整的。
     }
@@ -252,6 +291,7 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
     await inFlight?.catch(() => undefined)
     await a2a?.close().catch(() => undefined)
     await new Promise<void>((resolve) => listening?.server.close(() => resolve()))
+    await remoteHost?.dispose().catch(() => undefined)
     await provider.dispose().catch(() => undefined)
     db.close()
     await lock.release()
@@ -269,5 +309,81 @@ export async function startHub(options: StartHubOptions): Promise<HubHandle> {
     ...(webBuiltAt === undefined ? {} : { webBuiltAt }),
     ...(a2a === undefined ? {} : { a2a: { url: a2a.url, port: a2a.port, host: a2a.host } }),
     close,
+  }
+}
+
+/**
+ * 配置里的 a2a 段 → 监听面参数（证书从文件读）。
+ *
+ * 只在这里做一次读取：文件缺失时启动失败，与“开启失败就不启动 daemon”一致。
+ */
+function a2aFromConfig(config: {
+  port?: number | undefined
+  host?: string | undefined
+  publicUrl?: string | undefined
+  peers: ReadonlyArray<{ displayName: string; token: string; certFingerprint?: string }>
+  tls?:
+    | {
+        keyFile: string
+        certFile: string
+        caFile?: string | undefined
+        requireClientCert?: boolean | undefined
+      }
+    | undefined
+}): NonNullable<StartHubOptions['a2a']> {
+  return {
+    enabled: true,
+    ...(config.port === undefined ? {} : { port: config.port }),
+    ...(config.host === undefined ? {} : { host: config.host }),
+    ...(config.publicUrl === undefined ? {} : { publicUrl: config.publicUrl }),
+    peers: [...config.peers],
+    ...(config.tls === undefined
+      ? {}
+      : {
+          tls: {
+            key: readTlsFile(config.tls.keyFile, 'a2a.tls.keyFile'),
+            cert: readTlsFile(config.tls.certFile, 'a2a.tls.certFile'),
+            ...(config.tls.caFile === undefined
+              ? {}
+              : { ca: readTlsFile(config.tls.caFile, 'a2a.tls.caFile') }),
+            ...(config.tls.requireClientCert === true ? { requireClientCert: true } : {}),
+          },
+        }),
+  }
+}
+
+function readTlsFile(path: string, key: string): Buffer {
+  try {
+    return readFileSync(path)
+  } catch (error) {
+    throw new HubError('CONFIG_INVALID', `${key} 读不到：${path}`, {
+      path,
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * 把“应用 patch + 跑本地检查”的验收器接成对账钩子。
+ *
+ * 交付物内容只在内存里传递（`content`），不落库；manifest 只存元数据。
+ */
+function remoteVerifyHook(input: {
+  verifier: ReturnType<typeof createRemoteVerifier>
+}): NonNullable<ReconcileRemotesOptions['verify']> {
+  return async ({ ref, executionId, artifacts }) => {
+    const patch = artifacts.find(
+      (artifact) =>
+        artifact.form === 'patch' && artifact.content !== undefined && artifact.content !== '',
+    )
+    const result = await input.verifier({
+      ref,
+      executionId,
+      ...(patch === undefined || patch.content === undefined
+        ? {}
+        : { patch: { content: patch.content, filename: `${patch.artifactId}.patch` } }),
+    })
+    if (result === undefined) return undefined
+    return { verdict: result.verdict, checks: result.checks }
   }
 }
