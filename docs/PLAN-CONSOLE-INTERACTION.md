@@ -1,6 +1,6 @@
 # HubAgent Console 交互重构计划
 
-- **状态：** P2（壳层 + Graphite 令牌）、P3（活数据）、P4（浮层队列）、P5（运行详情）、P6（对话降噪）、P7（Agent 资产）、P9（收口）已落地；P8（五项能力迁移）部分落地（2026-11-28，剩 `auto-merge` 与契约级预算）
+- **状态：** P2（壳层 + Graphite 令牌）、P3（活数据）、P4（浮层队列）、P5（运行详情）、P6（对话降噪）、P7（Agent 资产）、P9（收口）已落地；P8（能力迁移）**四项已完成**，预算与 auto-merge 经 ADR 0031 移出范围（2026-11-28）
 - **日期：** 2026-11-28
 - **范围：** `packages/web`（信息架构、导航、页面交互、注意力模型）+ 控制台必须接管的 CLI 能力
 - **不在范围：** 后端状态机与契约、A2A/网络页（尚未实现）
@@ -632,7 +632,8 @@ textarea 无边框、`min-height 48`、`padding 2/4`、行高 1.5。
 
 #### 3.8.14 运行设置与交付（P8）
 
-三个「只有 CLI 才能设」的旋钮进会话（`chat_threads.run_settings`），交付是任务页的一次显式动作。
+两个「只有 CLI 才能设」的旋钮进会话（`chat_threads.run_settings`），交付是任务页的一次显式动作。
+**没有预算面板**：成本/用量在运行时没有计量源，旋钮只能是摆设（ADR 0031）。
 
 | 项 | 规格 |
 |---|---|
@@ -640,16 +641,15 @@ textarea 无边框、`min-height 48`、`padding 2/4`、行高 1.5。
 | 只影响之后的回合 | 面板首行直说；正在跑的回合不被改写（事后改验收命令等于事后改判） |
 | 可用 Agent | 复选 chips；**一个都不勾 = 全部**。它只是「Brain 能在谁里派单」的范围，不是手动拆派 |
 | 验收命令 | 多行输入 + 添加/移除；退出码 0 为通过（超时 10 分钟，与 CLI 一致）。**不填时只剩 diffScope**，面板里直说「那证明不了任务做成了」 |
-| 预算 | 两个数字：回合超时（分钟）、回合最多动作；留空 = 默认。token 上限用运行时默认值补齐，不在前端再存一份 |
 | 后台执行 | 不给开关：控制台本来就在 daemon 侧跑（`void this.run`），面板里说明“关掉页面不会中断” |
-| 交付 | 验收通过 + 有补丁时，判决条下方给「导出补丁」（`patch-export`），结果路径**留在页面上**而不是一闪而过的 toast；`branch-only` 是默认结果，不需要动作；`auto-merge` 按钮不提供 |
+| 交付 | 验收通过 + 有补丁时，判决条下方给「导出补丁」（`patch-export`），结果路径**留在页面上**而不是一闪而过的 toast；`branch-only` 是默认结果，不需要动作 |
 
-**未做（写清楚，不要当成做完了）：**
+**不做（ADR 0031，已从口径里删掉，不是欠账）：**
 
-- `auto-merge`：需要项目级 `targetRef` 与 `autoMerge`（PRD §6.12.4 前置），项目记录里没有 → 接口返回 `DELIVERY_CONFLICT` 并说明原因。
-- 契约级预算（`maxWallClockMs` / `maxTokens` / `maxCostUsd`）：今天只在 `promptTimeoutMs` 上落地；`maxTokens`/`maxCostUsd` 仍未执行。
-- 交付记录只落在接口返回值与页面上，没有进证据表。
-- **因此 ADR 0029 §2.4 的硬门禁仍未满足：`ha run` 不得关闭。**
+- **预算**：会话级预算旋钮已移除。运行时保留不可配置的护栏（回合动作数 16、token 估算上限、回合 90s；委派墙钟），但它们服务于“不让进程挂死”，不是费用控制。
+- **`auto-merge`**：从交付模式与类型里删除；依赖未落地的 `targetRef` / `autoMerge`，且把“是否进主干”从人手里拿走。
+- **交付记录表**：不建。结果随响应返回，补丁路径由 `taskId` 确定性推回；任务是否完成由 `completeTaskAfterDelivery` 表达。
+- **门禁状态**：ADR 0029 §2.4 收窄为四项且均已可用；`ha run` 本体的关闭是另一轮工作（ADR 0031 §5）。
 
 ---
 
@@ -731,7 +731,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | **P5 运行详情** ✅ | 已完成：`TasksView.tsx` 拆成 `TaskListView` + `TaskDetailView`（含 `EvidenceNode`、`TaskAttempt`、纯派生 `verdict.ts`）；竖向证据脊柱；diff/check 提到一级；失败节点内联动作（两个，端点所限）；列表降为深链入口 | 四态渲染评审（明暗 × 1440/390）；键盘可达（节点是按钮，Enter 展开）；US-007/008 走查（判决取自 Runtime 检查，最新一轮为准） | 2.5d |
 | **P6 对话降噪** ✅ | 已完成：`verdict`/`stopReason` 映射成中文（`runtime/labels.ts`）；过程流去框去横线、箭头在左、悬停图标换箭头、三态默认；dock 上移到输入框上方（卡片 + Agent 行 + 审批 + 剩余数）；会话列表默认收起（`⌘K` 可达）；上下文栏仅在有关联任务时占位 | chat e2e 全绿；591 单测；真实 daemon 上跑一轮多 Agent 任务（**尚未做**） | 3.5d |
 | **P7 Agent 资产** ✅ | 已完成：`AgentsPage` 把两页合成一个目的地（分段控件从顶栏移到页面内，窄屏也能切）；接入行改用 §3.8.5 行规格；两处空态都给可执行的下一步（链接 + CLI 命令）；unsupported 卡中文化且补齐诊断；顺手修掉 HUD 窄屏叠在一块（`left-1/2` shrink-to-fit 把可用宽砍半、`w-72` 卡片溢出） | 零 Agent 路径走通（e2e）；3D unsupported 卡完整（明暗 × 1440/390）；320px 无横向溢出 | 1d |
-| **P8 五项能力迁移** 〰️ | **部分完成**（见 §6.1）：验收命令 / 可用 Agent（扇出范围）/ 预算上限 进会话运行设置；后台执行已成立（`void this.run` 在 daemon 侧跑）并写进 UI；交付策略落成任务页的一次显式「导出补丁」 | 已验：三项设置端到端（单测 16 + e2e 2）；后台执行与补丁导出有 e2e。**未达门禁**：`auto-merge` 与契约级预算（`maxTokens`/`maxCostUsd`）仍未执行 → **`ha run` 不得关闭** | 2–3d |
+| **P8 能力迁移** ✅ | **四项全部可用**：验收命令 / 可用 Agent（扇出范围）进会话运行设置；后台执行已成立（`void this.run` 在 daemon 侧）并写进 UI；交付落成任务页的一次显式「导出补丁」。第五项（预算）经 ADR 0031 判定为**产品不做**：运行时没有计量源，`maxTokens`/`maxCostUsd` 已从契约删除；同步删除未落地的 `auto-merge` | 四项有单测 + e2e；预算与交付模式按 ADR 0031 减法（不是欠账）。`ha run` 本体仍未关闭，属独立一轮 | 2–3d |
 | **P9 收口** ✅ | 已完成：UI-SPEC §9 十项全部达成（对比度由 `pnpm contrast` 守，修掉 `success` 4.47 与 `line-control` 1.8 两处真问题）；视觉回归覆盖 7 个目的地 × 3 宽度 × 2 主题（`/agents` 3D 只跑 axe）；10k 历史加渲染窗口（本机实测首屏 36.4s → 1.3s、最坏长任务 17.6s → 393ms）；画廊移出 `features/` 并加门面守卫测试；设置页对齐 720 量度；修掉任务详情页两个 `h1` | `pnpm verify` + 视觉回归 + `fonts:write` 全绿 | 1d |
 
 合计约 **13–14 人日**（P5 渲染评审反复可能 +1–2 天）。
@@ -753,13 +753,14 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | 任务详情（P5） | 拆成 `TaskListView` / `TaskDetailView` + `EvidenceNode` + `TaskAttempt` + 纯派生 `verdict.ts`（可单测）；判决条、竖向证据脊柱、检查表一级可见、失败节点就地动作 | 失败节点只有**两个**动作（重试/取消没有端点，不放假按钮）；事件是 SSE 最近 30 条，不是完整审计时间线 |
 | 任务列表（P5） | 降为深链入口（不再有左「队列」列，与 app bar 的注意力计数不重复）；行规格进 §3.8.12 | 行里没有 Agent 数 / diffstat——列表接口未给，不编 |
 | Agent 页（P7） | 新增 `features/agents/AgentsPage`：两个路由共用一个页壳 + 页内分段；顶栏不再挂分段（也不再重复页名）；接入行与任务行同一套规格；unsupported 卡经 `officeT` 中文化 | 现场/接入 仍是两条路由（书签与深链不变），不是一条路由的 query；961px 以下的镜头预设被隐藏（office 模块自己的移动端 HUD 复核仍欠） |
-| 运行设置（P8） | `chat_threads.run_settings`（迁移 026，一列 JSON）+ `runtime/chat/run-settings.ts`：验收命令 → `checks`、可用 Agent → `availableAgents`、预算 → `BrainBudget`。UI 是输入框旁的「运行设置」弹层，非默认时带一个中性小圆点 | 预算只给了「回合超时」与「最多动作」两个旋钮，`maxInputTokens`/`maxOutputTokens` 用运行时默认值；**不填验收命令时仍只有 diffScope**（已写进面板与本节） |
-| 交付（P8） | `POST /api/v1/tasks/:id/deliver` + 任务页「导出补丁」：`branch-only` 只回报分支；`patch-export` 写 `~/.hubagent/artifacts/<taskId>.patch` | **`auto-merge` 直接拒绝**：PRD 要求项目配置 `targetRef` + `autoMerge`，项目记录里还没有这两个字段；没有 `delivery` 表级记录（只有返回值与页面上的路径）|
+| 运行设置（P8） | `chat_threads.run_settings`（迁移 026，一列 JSON）+ `runtime/chat/run-settings.ts`：验收命令 → `checks`、可用 Agent → `availableAgents`。UI 是输入框旁的「运行设置」弹层，非默认时带一个中性小圆点 | **没有预算**：会话级预算旋钮已按 ADR 0031 删除；运行时护栏（动作数/token 估算/回合超时）保留为常量 |
+| 交付（P8） | `POST /api/v1/tasks/:id/deliver` + 任务页「导出补丁」：`branch-only` 只回报分支；`patch-export` 写 `~/.hubagent/artifacts/<taskId>.patch` | **`auto-merge` 已删除**（不仅是拒绝）：模式、前置条件引擎与 `diffPatch` 一并移除；不建交付记录表（ADR 0031）|
 | 后台执行（P8） | 核实已成立：`ChatService.start` 是 `void this.run(...)`，运行在 daemon 侧，关页面不中断；面板里直说 | 没有单独开关：控制台里它本来就是后台的，不需要一个“假开关” |
 | Agent 分段（P7 的一半） | app bar 里 `/agents` 与 `/registry` 合成一个目的地：现场 / 接入分段，导航只留一个“Agent” | 两个页面本体未合并，仍是两条路由；分段控件窄屏隐藏（320px 装不下），接入从现场空态链接可达 |
 | 验收 | `pnpm typecheck` / `lint`（零 error）/ `test:unit` / `test:e2e` / `build:web` / `arch` / `contrast` / 视觉 + axe **全绿**（用例数以 `pnpm verify` 实际输出为准）；四态与 Agent 页五态截图（明暗 × 1440/390）+ 运行设置弹层截图对照 | **没在真实 daemon + 真实 Agent 上跑过**（仍是最大未验项）；视觉基线与覆盖面已在 P9 补齐（见下条） |
 | 收口（P9） | `scripts/contrast.mjs` 进 `pnpm verify`，把「对比度脚本可测」从口号变成门禁；`packages/web/test/{ui-boundary,spacing-scale}.test.ts` 两条守卫（门面/间距刻度）；`tests/e2e/transcript-window.spec.ts` 守住 10k 历史的 DOM 行数与长任务；`ChatView` 加 200 回合渲染窗口（多出的仍在内存，一键展开）；画廊从 `features/dev/` 移到 `src/dev/`；设置页从 `max-w-[980px]` 两栏收到 `mx-auto max-w-[720px]` + `[140px,1fr]`；任务详情页顶栏页名降为 `span`（消除两个 `h1`） | 间距没有真的回到纯 4px 网格：已批准稿的 18/14/22/9 保留，改成「4px + 审核例外 + 单测看守」（见决策 AD）；`line-control` 提亮后全局边框变重一档，已确认可接受 |
 | 审批页（P9 收尾） | 待批项改用 `DecisionBody`（与浮层/dock 同源），已处理降为只读行；页宽 880 → 720 | 待批多条时会有多个 primary 按钮（旧版也如此，未新增问题）；没有分页，待批很多时是一长列 |
+| 减法（ADR 0031） | 删掉三件“看起来有、其实没有”的东西：① 会话预算旋钮 + `ChatRunSettings.budget` + `brainBudget()`；② `delegate_task.budget` 的 `maxTokens` / `maxCostUsd`；③ `auto-merge` 模式 + 前置条件引擎（`runtime/workspace/delivery.ts` 整份）+ 无消费者的 `diffPatch`。`session.ts` 的交付改成直接 `revParse` 回报 `branch-only` | 成本可见性没了（V1 看不到 token/费用）；`ha run` 本体未关闭，门禁只是不再阻塞 |
 
 ### 6.2 视觉稿的优先级（哪块以哪份稿为准）
 
@@ -805,7 +806,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | **设置 `/settings`** | v2 + §4 量度 | ✅ 已对齐：`mx-auto max-w-[720px]` + `[140px,1fr]` 两栏（标签列收窄，控件不再贴左缘、右侧不留大片空白） | — |
 | 视觉基线 `tests/visual` | — | ✅ 已重做：7 个目的地像素（42 张）+ 8 个目的地 axe；`/agents` 只跑 axe | 基线不入库，跨平台需本地重建 |
 
-> 结论：**全部目的地（壳层 / 对话 / 任务 / 审批 / Agent / 设置）已对齐设计稿**；视觉回归与 axe 覆盖到每个目的地。P8 的两项能力门禁仍未关闭（见 §6 与 ADR 0029 §2.4）。
+> 结论：**全部目的地（壳层 / 对话 / 任务 / 审批 / Agent / 设置）已对齐设计稿**；视觉回归与 axe 覆盖到每个目的地。P8 的四项能力均已可用，预算与 auto-merge 经 ADR 0031 移出范围；`ha run` 本体的关闭是独立一轮（ADR 0031 §5）。
 
 ---
 
@@ -846,7 +847,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | 风险 | 触发 | 应对 |
 |---|---|---|
 | `ChatView.tsx` 2657 行，改结构会淹没评审 | P6 | 先机械拆分渲染器（纯重构 + 截图零差异），再改行为 |
-| 关闭 CLI 创建早于 Web 接管五项能力 | P8 | 硬门禁：P8 完成前 `ha run` 必须仍可用（**当前仍部分完成，见 §6.1**） |
+| 关闭 CLI 创建早于 Web 接管能力 | P8 | 硬门禁：四项全部可用前 `ha run` 保持可用（**已达成，ADR 0031**） |
 | SSE 重取风暴 | P3 | 去抖 + 单飞 + 页面不可见时暂停 |
 | 中文文案漏字静默回退系统字体 | 每阶段 | 新增字符串同 PR 跑 `fonts:write` |
 | 改路由破坏深链与既有 e2e | P2 | 路径不改名，只改分组 |
@@ -888,12 +889,14 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | Y | 失败的运行给几个动作 | **已定（P5）**：两个——`回到对话继续修`（实底）+ `复制失败详情`。重试/取消运行在 V1.7 没有端点，不画假按钮；宁可少一个动作，也不给一个点了没反应的 |
 | Z | 任务列表保留「左队列 + 右详情」还是降为深链 | **已定（P5）**：降为深链入口。注意力计数已归 app bar，再摆一条常驻队列等于同一件事数两遍；列表只做「找到那次运行」 |
 | AA | 现场/接入 的分段放顶栏还是页面里 | **已定（P7）**：页面里。顶栏 ≤560px 会藏掉分段，那时手机上就无法切换；页面内分段任何宽度都在，且与顶栏页签同一套样式。代价是顶栏只剩页签（不再表达分段），页名对该页退回 `visually-hidden` |
-| AB | 验收命令 / 预算 / 可用 Agent 存哪里 | **已定（P8）**：会话级一列 JSON。它们永远是整份读写，没有按字段查询的需求；拆成四列只会让加一个设置就要一次迁移。坏值由 `parseRunSettings` 退到默认值 |
+| AB | 验收命令 / 可用 Agent 存哪里 | **已定（P8）**：会话级一列 JSON。它们永远是整份读写，没有按字段查询的需求；拆成多列只会让加一个设置就要一次迁移。坏值由 `parseRunSettings` 退到默认值（旧数据里的 `budget` 字段被忽略） |
 | AC | 交付方式是会话设置还是页面动作 | **已定（P8）**：页面动作。PRD §6.12.4 的第一优先级就是「用户单次显式指定」；做成会话默认值反而要回答“哪一次运行用了哪种模式”，而没有交付记录表时无法回答 |
 | AD | 间距刻度是「严格 4px」还是「4px + 审核例外」 | **已定（P9）**：4px 网格 + 一组明确列出的例外（2/3/5/7 光学校正、9/14/18/22 来自已批准稿、26 过程流缩进），由 `spacing-scale.test.ts` 看守新增值。理由：为对齐清单去改已评审的视觉稿是本末倒置，而“靠人记例外”又必然漂移——把当前这套固化、让新增值变红，才是可守的 |
 | AE | 长历史用分页还是渲染窗口 | **已定（P9）**：两者都要。分页（100 条/页）解决“传输与首屏请求”，渲染窗口（200 回合 + `content-visibility`）解决“已拉下来的长度无上限”。只有分页时 1000 条一次建 1000 个行组件（实测最长任务 ~1s）；只加 `content-visibility` 时首屏仍 18.7s |
 | AF | 3D 舞台是否参与像素回归 | **已定（P9）**：不参与。WebGL 场景非确定（光照/时序/GPU 差异），像素比对只会制造假失败；`/agents` 只跑 axe，像素用 `?unsupported=1` 的确定性阻断态 |
 | AG | 审批页是复用决策体还是做成只读回看 | **已定（P9）**：待批项复用 `DecisionBody`，已处理项只读。同一个审批对象在浮层、dock、任务详情、审批页必须长得一样，这是同一份语义的四个容器（决策 K）；只读回看只适用于**已经处理完**的那些 |
+| AH | 预算控制与 auto-merge 要不要做 | **已定（ADR 0031）**：都不做，并且是**减法**——删字段、删模式、删代码，不是“挂着门禁等以后”。理由：运行时没有用量/费用计量，`maxTokens`/`maxCostUsd` 从来没有被执行过；`auto-merge` 依赖未落地的项目字段，且与「人确认」的产品前提冲突 |
+| AI | 约束护栏是否也跟着删 | **已定（ADR 0031）**：不。墙钟、回合动作数、token 估算上限保留为**不可配置的常量**——它们防的是进程挂死，不是费用。把“不需要成本预算”误解为“不需要超时”会让 daemon 卡在一次不返回的回合里 |
 
 ---
 
@@ -903,7 +906,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 |---|---|---|
 | [ADR 0029](adr/0029-attention-first-console.md) | ✅ 已新增 | 注意力优先 IA、Web 单入口、CLI 例外、五项能力门禁、被否方案、复审触发 |
 | [adr/README.md](adr/README.md) | ✅ 已登记 | 0029 行 |
-| [PRD.md](PRD.md) | ✅ 已改 | 版本升 V1.7 + 修订要点；FR-CLI-01 降级；§9.1 CLI 定性；§9.2 能力清单定性；§10.1 第 1 步；附录 C 新增"被 ADR 推翻需就地更新"规则 |
+| [PRD.md](PRD.md) | ✅ 已改 | 版本升 V1.7 + 修订要点；FR-CLI-01 降级；§9.1 CLI 定性；§9.2 能力清单定性；§10.1 第 1 步；附录 C 新增"被 ADR 推翻需就地更新"规则。**V1.8**：§6.12.4 交付只留两种模式、§6.13 改“执行护栏”、§13.5.2 与 §11.11 删预算字段、TC-017 收窄、§11.14 UsageRecord 标 V1 不实现 |
 | [PLAN.md](PLAN.md) | ✅ 已改 | M9 范围收窄；`run` 按诊断入口阅读；原则 P3 改为「入口最后关闭」；M11 指向本计划 |
 | [README.md](../README.md) | ✅ 已改 | 「跑一个任务」改为控制台入口；命令表标注 `ha run` 为诊断入口 |
 | [docs/README.md](README.md) | ✅ 已登记 | 本文件进索引 |
@@ -911,4 +914,5 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | [WEB-CONSOLE-PLAN.md](WEB-CONSOLE-PLAN.md) | ✅ 已标注被取代（2026-11-27） | 只作历史记录，导航与页面结构以 ADR 0029 + 本计划为准 |
 | [PLAN-CHAT-UX.md](PLAN-CHAT-UX.md) | ✅ 已标注被 P6 取代 | 对话页布局改为单栏 + dock + 无框过程流；本文只留“状态保持/消息层级” |
 | [adr/0030](adr/0030-graphite-visual-layer.md) | ✅ 已新增 | Graphite 令牌、颜色语义收窄、被否方案、复审触发 |
+| [adr/0031](adr/0031-only-promise-what-runs.md) | ✅ 已新增 | 不做成本预算与 auto-merge；只承诺能执行的护栏；被否方案 A–E；复审触发 |
 | [AGENTS.md](../AGENTS.md) | ✅ 已改（P9） | web 目录地图补 `app/`、`dev/`、`styles/`，features 改成实际七个，`components/ui` 标注门面约束 |

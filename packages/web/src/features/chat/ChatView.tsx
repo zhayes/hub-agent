@@ -600,9 +600,7 @@ export function ChatView(props: ChatViewProps) {
 
   const runSettingsDirty = (): boolean => {
     const settings = thread()?.runSettings ?? DEFAULT_RUN_SETTINGS
-    return (
-      settings.verifyCommands.length > 0 || settings.agents.length > 0 || settings.budget !== null
-    )
+    return settings.verifyCommands.length > 0 || settings.agents.length > 0
   }
 
   /* 保存运行设置：只影响后续回合，所以存完刷新线程即可，不碰正在跑的那个。 */

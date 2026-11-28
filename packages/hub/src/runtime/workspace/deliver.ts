@@ -12,11 +12,12 @@ import { getTaskEvidence } from '../../storage/queries/evidence'
  * 控制台里交付是**用户的一次显式动作**（任务页的「导出补丁」），不是会话设置：
  * 同一个任务的两次运行，用户可能一次想留分支、一次只想要 patch。
  *
- * 三种模式的现状（诚实版）：
+ * 两种模式（PRD §6.12.4）：
  * - `branch-only`：默认。分支与 worktree 已经保留着，这里只回报它在哪里。
  * - `patch-export`：把补丁写到 `~/.hubagent/artifacts/<taskId>.patch`，路径回报给用户。
- * - `auto-merge`：**拒绝**。PRD 要求项目配置 `targetRef` 与 `autoMerge` 才允许合并，
- *   而项目记录里还没有这两个字段；宁可不合并，也不在这里猜目标分支。
+ *
+ * 没有 auto-merge：把改动合进主干是人根据判断该不该做的事，不是编排器的职责。
+ * 它也依赖项目级 `targetRef` / `autoMerge` 两个根本不存在的字段（ADR 0031）。
  */
 
 export interface DeliverResult {
@@ -91,14 +92,6 @@ export function deliverTask(db: Db, taskId: string, mode: DeliveryMode): Deliver
     throw new HubError('ACTION_REJECTED', '这个任务没有可交付的改动', { taskId })
   }
   const totals = totalsOf(source)
-
-  if (mode === 'auto-merge') {
-    throw new HubError(
-      'DELIVERY_CONFLICT',
-      'auto-merge 需要项目配置 targetRef 与 autoMerge；当前未配置，已拒绝合并',
-      { taskId },
-    )
-  }
 
   if (mode === 'patch-export') {
     if (source.diff === '') {

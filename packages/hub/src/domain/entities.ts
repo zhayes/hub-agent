@@ -185,8 +185,6 @@ export interface DelegationContract {
   }
   budget: {
     maxWallClockMs: number
-    maxTokens?: number
-    maxCostUsd?: number
   }
   policy: {
     allowRedelegate: boolean

@@ -2,7 +2,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { DEFAULT_BRAIN_BUDGET } from '../../src/brain/types'
 import { DEFAULT_RUN_SETTINGS, normalizeRunSettings } from '../../src/domain/chat'
 import {
   asAgentId,
@@ -17,7 +16,7 @@ import { emptyState } from '../../src/domain/machine'
 import { createHttpApp } from '../../src/interfaces/http/app'
 import type { AgentRecord } from '../../src/runtime/agent-registry'
 import { ChatService } from '../../src/runtime/chat/chat-service'
-import { brainBudget, scopeAgents, verificationChecks } from '../../src/runtime/chat/run-settings'
+import { scopeAgents, verificationChecks } from '../../src/runtime/chat/run-settings'
 import { deliverTask } from '../../src/runtime/workspace/deliver'
 import type { SandboxProvider } from '../../src/sandbox/types'
 import { type Db, openDatabase } from '../../src/storage/db'
@@ -55,7 +54,7 @@ const agent = (name: string): AgentRecord =>
   ({ name, command: name, networkMode: 'agent-managed' }) as unknown as AgentRecord
 
 describe('normalizeRunSettings', () => {
-  it('默认值：不勾 Agent、不填命令、不设预算', () => {
+  it('默认值：不勾 Agent、不填命令', () => {
     expect(normalizeRunSettings(undefined)).toEqual(DEFAULT_RUN_SETTINGS)
     expect(normalizeRunSettings('nonsense')).toEqual(DEFAULT_RUN_SETTINGS)
     expect(normalizeRunSettings({ verifyCommands: 'not-an-array' })).toEqual(DEFAULT_RUN_SETTINGS)
@@ -68,13 +67,12 @@ describe('normalizeRunSettings', () => {
     expect(settings.verifyCommands).toEqual(['pnpm test:unit'])
   })
 
-  it('预算只收正整数；两个都没有就等于没设', () => {
-    expect(normalizeRunSettings({ budget: { maxActions: 0 } }).budget).toBeNull()
-    expect(normalizeRunSettings({ budget: { maxActions: -3 } }).budget).toBeNull()
-    expect(normalizeRunSettings({ budget: { maxActions: 6.9, timeoutMs: 60000 } }).budget).toEqual({
-      maxActions: 6,
-      timeoutMs: 60000,
+  it('旧数据里的 budget 字段被忽略，不让会话变成不可用', () => {
+    const settings = normalizeRunSettings({
+      verifyCommands: ['pnpm test'],
+      budget: { maxActions: 6 },
     })
+    expect(settings).toEqual({ verifyCommands: ['pnpm test'], agents: [] })
   })
 })
 
@@ -83,7 +81,6 @@ describe('run settings 落到运行时参数', () => {
     const checks = verificationChecks({
       verifyCommands: ['pnpm test:unit', 'pnpm lint'],
       agents: [],
-      budget: null,
     })
     expect(checks.map((check) => check.kind)).toEqual(['command', 'command', 'diffScope'])
     expect(checks[0]).toMatchObject({
@@ -97,18 +94,6 @@ describe('run settings 落到运行时参数', () => {
     const checks = verificationChecks(DEFAULT_RUN_SETTINGS)
     expect(checks).toHaveLength(1)
     expect(checks[0]?.kind).toBe('diffScope')
-  })
-
-  it('预算两个旋钮缺一项就用默认值补', () => {
-    expect(brainBudget(DEFAULT_RUN_SETTINGS)).toBeUndefined()
-    expect(brainBudget({ ...DEFAULT_RUN_SETTINGS, budget: { maxActions: 4 } })).toEqual({
-      ...DEFAULT_BRAIN_BUDGET,
-      maxActions: 4,
-    })
-    expect(brainBudget({ ...DEFAULT_RUN_SETTINGS, budget: { timeoutMs: 120_000 } })).toEqual({
-      ...DEFAULT_BRAIN_BUDGET,
-      timeoutMs: 120_000,
-    })
   })
 
   it('可用 Agent 是范围，不是勾选名单以外就禁用', () => {
@@ -128,12 +113,11 @@ describe('chat_threads.run_settings', () => {
     const db = freshDb()
     const created = createChatThread(db, {
       title: 't',
-      runSettings: { verifyCommands: ['pnpm test'], agents: ['Codex'], budget: { maxActions: 3 } },
+      runSettings: { verifyCommands: ['pnpm test'], agents: ['Codex'] },
     })
     expect(getChatThread(db, created.id)?.runSettings).toEqual({
       verifyCommands: ['pnpm test'],
       agents: ['Codex'],
-      budget: { maxActions: 3 },
     })
 
     updateChatThread(db, created.id, { runSettings: DEFAULT_RUN_SETTINGS })
@@ -282,12 +266,6 @@ describe('deliverTask', () => {
       delete process.env['HUBAGENT_HOME']
     }
   })
-
-  it('auto-merge 被拒绝并要求项目配置', () => {
-    const db = freshDb()
-    seedTask(db, { verdict: 'pass' })
-    expect(() => deliverTask(db, 't1', 'auto-merge')).toThrow(/auto-merge/)
-  })
 })
 
 const providerStub = (): SandboxProvider =>
@@ -316,7 +294,6 @@ describe('HTTP：运行设置与交付', () => {
         runSettings: {
           verifyCommands: ['pnpm test'],
           agents: ['Codex'],
-          budget: { maxActions: 6 },
         },
       }),
     })
@@ -324,11 +301,11 @@ describe('HTTP：运行设置与交付', () => {
     const createdBody = (await created.json()) as {
       thread: {
         id: string
-        runSettings: { verifyCommands: string[]; budget: { maxActions?: number } | null }
+        runSettings: { verifyCommands: string[]; agents: string[] }
       }
     }
     expect(createdBody.thread.runSettings.verifyCommands).toEqual(['pnpm test'])
-    expect(createdBody.thread.runSettings.budget).toEqual({ maxActions: 6 })
+    expect(createdBody.thread.runSettings.agents).toEqual(['Codex'])
 
     const patched = await app.request(`/api/v1/chat/threads/${createdBody.thread.id}`, {
       method: 'PATCH',
@@ -337,16 +314,15 @@ describe('HTTP：运行设置与交付', () => {
     })
     expect(patched.status).toBe(200)
     const patchedBody = (await patched.json()) as {
-      thread: { runSettings: { verifyCommands: string[]; agents: string[]; budget: unknown } }
+      thread: { runSettings: { verifyCommands: string[]; agents: string[] } }
     }
     expect(patchedBody.thread.runSettings).toEqual({
       verifyCommands: ['x'],
       agents: [],
-      budget: null,
     })
   })
 
-  it('交付：patch-export 返回路径，auto-merge 被拒绝并说明原因', async () => {
+  it('交付：patch-export 返回路径，auto-merge 不再是合法模式', async () => {
     const db = freshDb()
     seedTask(db, { verdict: 'pass' })
     const app = createHttpApp({ db, token: 'token' })
@@ -367,8 +343,8 @@ describe('HTTP：运行设置与交付', () => {
         headers: auth,
         body: JSON.stringify({ mode: 'auto-merge' }),
       })
-      expect(merged.status).toBeGreaterThanOrEqual(400)
-      expect(await merged.text()).toContain('auto-merge')
+      expect(merged.status).toBe(400)
+      expect(await merged.text()).toContain('branch-only')
 
       const invalid = await app.request('/api/v1/tasks/t1/deliver', {
         method: 'POST',

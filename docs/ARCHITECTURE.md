@@ -46,7 +46,7 @@
 | 长任务不阻塞 | 委派两阶段：`delegate_task` 立即返回，进度通过事件回流 |
 | 多 Agent 并发安全 | 工作区租约（`WorkspaceLease`）+ 写入路径白名单 + 单写者 |
 | 结果可验收 | 确定性验证在 Runtime 执行，证据落库，结论可回溯 |
-| 成本可控 | 预算四层（Goal/Subtask/Brain 回合/委派），LLM 只在决策点参与 |
+| 执行有界 | 墙钟 + 回合护栏（动作数/超时），LLM 只在决策点参与；不做成本计量（ADR 0031） |
 | 可解释 | 每个决策写 `DecisionRecord`，前端可查 |
 
 ### 1.2 分层视图
@@ -156,16 +156,16 @@ flowchart TD
   INPUT[校验输入与项目上下文]
   GOAL[创建 Goal 事件]
   POINT[Decision Queue<br/>去重入队并 claim]
-  SNAP[从 SQLite 状态构建快照<br/>带 stateVersion / 预算 / Agent 概况]
+  SNAP[从 SQLite 状态构建快照<br/>带 stateVersion / 护栏用量 / Agent 概况]
   BRAIN[Brain step<br/>Pi 默认，可替换]
-  CHECK{Runtime 校验动作<br/>schema · 权限 · 引用 · 预算 · 幂等}
+  CHECK{Runtime 校验动作<br/>schema · 权限 · 引用 · 护栏 · 幂等}
   ACTION{Brain intent 类型}
   CLARIFY[持久化澄清/决策请求<br/>等待用户回答]
   REPLY[直接回复<br/>不创建 Task]
   PLAN[创建 Plan / Task / Subtask]
   SELECT[Agent 选择与能力/状态筛选]
   LEASE[申请 WorkspaceLease<br/>创建或复用 worktree]
-  CONTRACT[构造 Delegation Contract<br/>允许路径 · 验收 · 预算 · idempotency key]
+  CONTRACT[构造 Delegation Contract<br/>允许路径 · 验收 · 墙钟上限 · idempotency key]
   START[AgentHost 请求 SandboxProvider<br/>沙箱缺失则拒绝启动]
   ACP[ACP initialize → session/new<br/>→ prompt]
   EVENTS[消费 ACP 事件<br/>更新进度/转写/运行状态]
@@ -179,7 +179,7 @@ flowchart TD
   VIEW[CLI / REST 查询结果<br/>Web 通过 SSE 收到失效通知]
 
   U --> AUTH --> INPUT --> GOAL --> POINT --> SNAP --> BRAIN --> CHECK
-  CHECK -->|拒绝/过期/超预算| STORE
+  CHECK -->|拒绝/过期/超护栏| STORE
   CHECK -->|通过| ACTION
   ACTION -->|request_human| CLARIFY --> STORE
   ACTION -->|reply / finish 无执行计划| REPLY --> STORE
@@ -255,7 +255,7 @@ hubagentd                     常驻守护进程（唯一写库者）
 | D6 | 前端形态 | 同源静态 SPA | 无 CORS、无跨域 token 问题、单端口 | 独立前端服务、Next.js SSR |
 | D7 | 验证位置 | Runtime 执行确定性检查 | 禁止自证、证据可落地 | 让 Brain 判断一切 |
 | D8 | 代码索引 | V1 不做语义索引 | 编码 Agent 自己读仓库，Brain 只需 repo map | 自建向量索引 |
-| D9 | 模型接入 | 经 Brain 适配层；优先 Pi provider | 可换模型/厂商、可统计成本 | 直接耦合某家 SDK |
+| D9 | 模型接入 | 经 Brain 适配层；优先 Pi provider | 可换模型/厂商 | 直接耦合某家 SDK |
 | D10 | 沙箱 | V1 不做系统沙箱 | 多数 harness 依赖写缓存/依赖目录 | 容器化执行（后续可选） |
 | D11 | HTTP 框架 | **Hono** | 心智简单、Web 标准、SSE 一等公民、类型推断好 | Fastify（插件封装有隐性作用域）、Express |
 | D12 | 前端框架 | **Solid 2.x + Vite** | 细粒度响应式匹配 SSE 高频更新；无 VDOM、运行时小 | React 19（生态最全，但需额外绑定库） |
@@ -601,7 +601,7 @@ Execution: created → starting → running → (succeeded | failed | timeout | 
 4. 同一 `WorkspaceLease` 下，`running` 的写入型 Execution 数量 ≤ 1。
 5. Task 暂停必须传播到其下所有 `running` Execution（转为 `paused` 语义由 Runtime 记录）。
 6. 终态不可逆（`completed/failed/canceled` 不再迁移）。
-7. `Task.completed` ⇒ 交付动作已落地（`branch-only` 的分支已保留 / `patch-export` 的 patch 已导出 / `auto-merge` 已合入）。**验收通过不等于完成**（PRD §6.12.4）。
+7. `Task.completed` ⇒ 交付动作已落地（`branch-only` 的分支已保留 / `patch-export` 的 patch 已导出）。**验收通过不等于完成**（PRD §6.12.4）。
 
 > **I7 是 V1.4 新增**，与 I1 同层校验：只检查子任务收敛会让“合并冲突未解决”的任务看起来完成了。
 > 落地位置：M5（证据与验收）+ M7（交付与合并）。
@@ -694,11 +694,11 @@ COMMIT
 
 - 租约入库（`workspace_leases`），带 `expires_at`，进程崩溃后由恢复扫描判定是否 `abandoned`。
 - 写入型执行结束：产出 `{ branch, commitSha, diffstat, changedFiles }`；`diffScope` 校验越界。
-- **是否合并、合并到哪由交付策略决定**（PRD §6.12.4）：默认 `branch-only`（不合并），`auto-merge` 需显式开启且满足全部前置条件；V1.0 不 `push`、不开 PR。
+- **是否合并由人决定**（PRD §6.12.4）：默认 `branch-only`（不合并），或 `patch-export` 导出补丁；`auto-merge` 已删除（ADR 0031）；V1.0 不 `push`、不开 PR。
 - 需合并时走确定性流程（`merge --no-ff` 或 cherry-pick），冲突即升级 Brain，**禁止静默覆盖**。
 - 保留每个 Execution 的基线 ref，支持回滚到基线。
 
-**M7 落地（核心库）。** `runtime/workspace/lease.ts` 实现租约互斥与过期 sweep；`git.ts` 用 `GitRunner`/`AgentHostGitRunner` 封装 worktree add/remove、`merge --no-ff`、`reset --hard`、diff patch，Runtime 不直接 `child_process`；`delivery.ts` 实现 branch-only / patch-export / auto-merge 五条件降级。不同 worktree 路径可并行，同一路径只允许一个写入者。`run` 默认 worktree 隔离：自动注册项目、建 worktree、租约、branch-only 交付并完成 Task；`task clean` 默认拒绝丢弃未提交改动。`--agents a1,a2` 走一个 Goal/Task、两个 Subtask、各自 worktree/lease，并行执行后 `merge --no-ff`；冲突抛 `DELIVERY_CONFLICT`。
+**M7 落地（核心库）。** `runtime/workspace/lease.ts` 实现租约互斥与过期 sweep；`git.ts` 用 `GitRunner`/`AgentHostGitRunner` 封装 worktree add/remove、`merge --no-ff`、`reset --hard`，Runtime 不直接 `child_process`；交付只有 `branch-only`（`session.ts` 直接用 `revParse` 回报分支与提交）与 `patch-export`（`deliver.ts`）。并行子任务之间的 `merge --no-ff` 仍由 `parallel.ts` 负责，与“交付进主干”是两件事。不同 worktree 路径可并行，同一路径只允许一个写入者。`run` 默认 worktree 隔离：自动注册项目、建 worktree、租约、branch-only 交付并完成 Task；`task clean` 默认拒绝丢弃未提交改动。`--agents a1,a2` 走一个 Goal/Task、两个 Subtask、各自 worktree/lease，并行执行后 `merge --no-ff`；冲突抛 `DELIVERY_CONFLICT`。
 
 ### 6.7 恢复扫描（重启后）
 

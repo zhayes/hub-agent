@@ -10,10 +10,13 @@ import type { Translator } from '../../shared/i18n'
 /**
  * 会话级运行设置（ADR 0029 §2.4）。
  *
- * 接管 CLI 的三个「只有命令行才能设」的旋钮：验收命令、可用 Agent（扇出范围）、
- * 预算。它们都只影响**之后的回合**，所以面板里直说，不假装能改已经跑起来的那次。
+ * 接管 CLI 的「只有命令行才能设」的两个旋钮：验收命令、可用 Agent（扇出范围）。
+ * 它们都只影响**之后的回合**，所以面板里直说，不假装能改已经跑起来的那次。
  *
- * 不在这里放交付方式：交付是任务页上的一次显式动作（PRD §6.12.4 第一优先级
+ * 没有预算：成本/用量在运行时没有计量源，旋钮只能是摆设（ADR 0031）。
+ * 回合超时与动作上限是内部护栏，不给用户调。
+ *
+ * 也不在这里放交付方式：交付是任务页上的一次显式动作（PRD §6.12.4 第一优先级
  * 就是「用户单次显式指定」），不是会话默认值。
  */
 export interface RunSettingsDialogProps {
@@ -30,14 +33,9 @@ const sectionLabel = 'text-meta font-medium text-ink-2'
 const hint = 'text-badge text-ink-3'
 const row = 'flex items-center gap-2'
 
-const minutesOf = (timeoutMs: number | undefined): string =>
-  timeoutMs === undefined ? '' : String(Math.round(timeoutMs / 60_000))
-
 export function RunSettingsDialog(props: RunSettingsDialogProps) {
   const [commands, setCommands] = createSignal<string[]>([])
   const [agents, setAgents] = createSignal<string[]>([])
-  const [minutes, setMinutes] = createSignal('')
-  const [actions, setActions] = createSignal('')
 
   /* 每次打开都从当前设置重建草稿：关掉再打开不该留着上一次没保存的改动。 */
   createEffect(
@@ -47,10 +45,6 @@ export function RunSettingsDialog(props: RunSettingsDialogProps) {
       const settings = props.settings
       setCommands([...settings.verifyCommands])
       setAgents([...settings.agents])
-      setMinutes(minutesOf(settings.budget?.timeoutMs))
-      setActions(
-        settings.budget?.maxActions === undefined ? '' : String(settings.budget.maxActions),
-      )
     },
   )
 
@@ -61,21 +55,11 @@ export function RunSettingsDialog(props: RunSettingsDialogProps) {
   }
 
   const save = (): void => {
-    const timeout = Number.parseInt(minutes(), 10)
-    const maxActions = Number.parseInt(actions(), 10)
-    const budget =
-      (Number.isFinite(timeout) && timeout > 0) || (Number.isFinite(maxActions) && maxActions > 0)
-        ? {
-            ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout * 60_000 } : {}),
-            ...(Number.isFinite(maxActions) && maxActions > 0 ? { maxActions } : {}),
-          }
-        : null
     props.onSave({
       verifyCommands: commands()
         .map((command) => command.trim())
         .filter((command) => command !== ''),
       agents: agents(),
-      budget,
     })
   }
 
@@ -161,38 +145,6 @@ export function RunSettingsDialog(props: RunSettingsDialogProps) {
           <p class={hint}>{props.t('runSettingsVerifyHint')}</p>
         </div>
 
-        {/* 预算：只给两个能说清的旋钮，token 上限由运行时默认值补齐。 */}
-        <div class={section}>
-          <span class={sectionLabel}>{props.t('runSettingsBudget')}</span>
-          <div class="flex flex-wrap items-start gap-3">
-            <label class="flex flex-col gap-1">
-              <span class={hint}>{props.t('runSettingsTimeout')}</span>
-              <input
-                class={`${fieldControl} w-28 shrink-0 tabular-nums`}
-                type="number"
-                min="1"
-                inputmode="numeric"
-                value={minutes()}
-                placeholder={props.t('runSettingsDefault')}
-                onChange={(event) => setMinutes(event.currentTarget.value)}
-              />
-            </label>
-            <label class="flex flex-col gap-1">
-              <span class={hint}>{props.t('runSettingsActions')}</span>
-              <input
-                class={`${fieldControl} w-28 shrink-0 tabular-nums`}
-                type="number"
-                min="1"
-                inputmode="numeric"
-                value={actions()}
-                placeholder={props.t('runSettingsDefault')}
-                onChange={(event) => setActions(event.currentTarget.value)}
-              />
-            </label>
-          </div>
-          <p class={hint}>{props.t('runSettingsBudgetHint')}</p>
-        </div>
-
         <p class="rounded-control border border-line bg-subtle px-2.5 py-2 text-badge text-ink-2">
           {props.t('runSettingsBackground')}
         </p>
@@ -210,8 +162,6 @@ export function RunSettingsDialog(props: RunSettingsDialogProps) {
           onClick={() => {
             setCommands([...DEFAULT_RUN_SETTINGS.verifyCommands])
             setAgents([...DEFAULT_RUN_SETTINGS.agents])
-            setMinutes('')
-            setActions('')
           }}
         >
           {props.t('runSettingsReset')}

@@ -229,7 +229,7 @@ export function TaskDetailView(props: TaskDetailViewProps) {
 
   /* 交付（PRD §6.12.4）：验收通过之后才谈「这份产出怎么拿走」。
      只给 patch-export —— branch-only 本来就是默认结果（分支保留在原处），
-     auto-merge 需要项目配置，接口会拒绝并说明原因。 */
+     合并进主干是人的判断，不在这里提供。 */
   const exportPatch = async (): Promise<void> => {
     setDelivering(true)
     try {

@@ -1,9 +1,9 @@
 # ADR 0009：工作区租约互斥，交付默认 branch-only
 
-- **状态：** 已接受（Accepted）
+- **状态：** 已接受（Accepted）；**交付模式部分被 [ADR 0031](0031-only-promise-what-runs.md) 取代**（2026-11-28）：`auto-merge` 已移除，只剩 `branch-only` / `patch-export`
 - **日期：** 2026-11-24
 - **相关：** PRD §6.12.2–§6.12.4；ARCHITECTURE §6.6；PLAN M7
-- **证据：** `lease.test.ts`、`merge.test.ts`、`delivery.test.ts`
+- **证据：** `lease.test.ts`、`merge.test.ts`（`delivery.test.ts` 已随 `delivery.ts` 删除）
 
 ---
 
@@ -43,6 +43,10 @@
 - `auto-merge` 在 V1.0 默认关闭，用户需要显式配置。
 
 ## 4. 复审触发条件
+
+> **复审结果（2026-11-28，ADR 0031）：** 交付模式从三种降为两种。`auto-merge` 依赖未落地的项目级
+> `targetRef` / `autoMerge`，且把“是否进主干”从人手里拿走，故删除；`delivery.ts` 的前置条件引擎
+> 与两段不可达分支一并移除。租约、`merge --no-ff`（并行子任务合并）与 `reset --hard` 回滚结论不变。
 
 1. M7 CLI 接线完成，`run --isolation worktree` 与 `task clean` 可用；
 2. TC-002 双 Agent 并行需要更细的路径重叠规则（文件级 vs 目录级）；

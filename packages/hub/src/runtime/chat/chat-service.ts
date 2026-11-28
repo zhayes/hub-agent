@@ -40,7 +40,7 @@ import { failTask } from '../recovery/fail'
 import { resumeExecution } from '../resume-execution'
 import { completeTaskAfterDelivery } from '../workspace/finalize'
 import { collectAgentOutputs } from './agent-outputs'
-import { brainBudget, scopeAgents, verificationChecks } from './run-settings'
+import { scopeAgents, verificationChecks } from './run-settings'
 
 export interface ChatServiceOptions {
   db: Db
@@ -982,10 +982,9 @@ export class ChatService {
     try {
       const agent = resolveAgent(db, agentName)
       const agents = listAgents(db)
-      /* 会话级运行设置：验收命令 / 可用 Agent / 预算（ADR 0029 §2.4）。 */
+      /* 会话级运行设置：验收命令 / 可用 Agent（ADR 0029 §2.4）。 */
       const settings = getChatThread(db, threadId)?.runSettings ?? DEFAULT_RUN_SETTINGS
       const scoped = scopeAgents(agents, settings)
-      const budget = brainBudget(settings)
       const sink = this.createEventSink(threadId, agentName)
       const analysis = appendChatMessage(db, {
         threadId,
@@ -1006,7 +1005,6 @@ export class ChatService {
         onBrainDelta: brainStream.onDelta,
         ...this.workspaceOf(threadId),
         checks: verificationChecks(settings),
-        ...(budget === undefined ? {} : { budget }),
         clientVersion: this.options.clientVersion,
         completeOnSuccess: true,
         ...(this.options.remote === undefined ? {} : { remote: this.options.remote }),

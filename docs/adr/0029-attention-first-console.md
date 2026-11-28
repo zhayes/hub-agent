@@ -63,17 +63,18 @@ CLI 可以直接创建任务（`ha run`），使 `task ↔ thread` 成为 0..1�
 
 ### 2.4 Web 必须接管 CLI 的既有能力（硬门禁）
 
-禁止 CLI 建任务，等于把这些能力收归控制台；不做就是功能下线。`chatApi.create` 目前只接受 `worktree / title / permissionMode`，以下五项必须在此之前补齐：
+禁止 CLI 建任务，等于把这些能力收归控制台；不做就是功能下线。`chatApi.create` 目前只接受 `worktree / title / permissionMode`，以下**四项**必须在此之前补齐：
 
-| 能力 | 今天的唯一入口 | 缺失后果 |
-|---|---|---|
-| 并行多 Agent 扇出（US-003） | `ha run --agents a,b` | 并行协作不可用 |
-| 验收命令 | `ha run --verify-command` | 用户无法定义"什么算通过"，直接打在"可验收"上 |
-| 交付策略（PRD §6.12.4） | `ha run --delivery` | 交付模式不可选 |
-| 后台执行 | `ha run --detach` | 长任务必须页面常开 |
-| 预算上限（`budget` 为契约必填） | 需确认 | 熔断入口缺失 |
+| 能力 | 今天的唯一入口 | 缺失后果 | 现状（2026-11-28） |
+|---|---|---|---|
+| 并行多 Agent 扇出（US-003） | `ha run --agents a,b` | 并行协作不可用 | ✅ 会话运行设置的「可用 Agent」 |
+| 验收命令 | `ha run --verify-command` | 用户无法定义"什么算通过"，直接打在"可验收"上 | ✅ 会话运行设置的「验收命令」 |
+| 交付策略（PRD §6.12.4） | `ha run --delivery` | 交付模式不可选 | ✅ 任务页「导出补丁」+ 自动化路径的 `branch-only` |
+| 后台执行 | `ha run --detach` | 长任务必须页面常开 | ✅ `ChatService.start` 的 `void this.run(...)` |
 
-**在五项全部可用之前，2.1 的 CLI 拒绝不得合入主干。** 顺序上先补 Web，再关 CLI。
+~~预算上限（`budget` 为契约必填）~~ —— **已移出门禁**（ADR 0031）：运行时没有用量与费用计量，`maxTokens` / `maxCostUsd` 无法执行，已从契约删除；保留的是不可配置的墙钟与回合护栏。
+
+**门禁状态：四项已可用。** 由此“先补 Web、再关 CLI”的技术前提已成立；但 `ha run` 本体尚未真正关闭（没有 `--allow-task-create` 开关，见 ADR 0031 §5），关闭入口是独立的一轮工作。
 
 ### 2.5 A2A 入站委托不属于"人类入口"
 

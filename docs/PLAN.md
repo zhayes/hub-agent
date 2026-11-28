@@ -453,9 +453,9 @@ pnpm hubagent approval list --json        # 沙箱拦截 → 自动生成审批�
 - `OrchestratorBrain` 接口：`step(snapshot) → actions`、`explain(snapshot)`
 - 快照渲染（不含原始事件流，只含派生视图）
 - 决策点队列（表驱动，单写者 + `stateVersion` 乐观并发）
-- 动作校验：schema → 权限 → 预算 → 幂等
+- 动作校验：schema → 权限 → 护栏 → 幂等
 - `DecisionRecord`：每次决策写理由
-- 预算：单回合 token / 动作数 / 超时
+- 护栏：单回合 token 估算 / 动作数 / 超时
 - 澄清 / 决策：`clarify` / `decide` 两种语义 + 答案按 `questionId + executionId` 路由（PRD §13.5.6）
 
 **验收**
@@ -476,10 +476,10 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 - `brain/pi/session.ts` / `pi-brain.ts`：Pi SDK 的 in-memory session + `OrchestratorBrain` 实现；`brain/pi/meta-tools.ts` 注册 8 个稳定元工具（只读/记录 intent）；`brain/create-brain.ts` 负责 env 选择。
 - 默认 `HUBAGENT_BRAIN_MODE=pi`；Pi 模型/认证缺失时 fail-closed，不静默退回 scripted。
 - CLI `run` 支持 `--brain-mode pi|scripted`；`--no-brain` 仍保留为 M4 固定脚本排障。
-- `brain/validate.ts`：schema → 权限/引用 → 预算 → 幂等；返回可执行动作与错误，不产生副作用。
+- `brain/validate.ts`：schema → 权限/引用 → 护栏 → 幂等；返回可执行动作与错误，不产生副作用。
 - `runtime/decision-queue.ts`：`dedupe_key UNIQUE` + 条件 claim；重复投递只派发一次；重启可续。
 - `runtime/decision-record.ts`：每次回合写 `DecisionRecord`（type / rationale / inputs / alternatives）。
-- `runtime/brain-loop.ts`：入队/claim → 快照 → step → 校验 → 记录；输入/输出 token、动作数、超时都受预算约束。
+- `runtime/brain-loop.ts`：入队/claim → 快照 → step → 校验 → 记录；输入/输出 token、动作数、超时都受护栏约束。
 - `runtime/clarify.ts`：`clarify` / `decide`，答案按 `questionId + executionId` 精确路由；有 options 时只能选其中之一。
 - `runtime/brain-run.ts`：Goal → Brain 拆计划 → Brain 委派 → 执行 → Brain accept/finish；CLI `run` 默认走 Brain，`--no-brain` 可回退 M4 固定脚本。
 - `hubagent task decisions <id>`：查看 DecisionRecord。
@@ -508,7 +508,7 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 - `WorkspaceLease`：`shared / worktree / copy`，DB 互斥 + 过期清理
 - `git worktree add` 生命周期
 - `allowedPaths` 强制 + 越界即失败
-- 交付策略：默认 `branch-only`；`patch-export`；`auto-merge` 需五个前置条件全满足（PRD §6.12.4），V1.0 不 push / 不开 PR
+- 交付：默认 `branch-only`；`patch-export`。**没有 `auto-merge`**（ADR 0031：合并进主干是人的动作），V1.0 不 push / 不开 PR
 - 确定性合并（`merge --no-ff` / cherry-pick）；冲突升级 Brain
 - 回滚到基线 ref；失败/取消现场保留与 `task clean`
 
@@ -517,21 +517,21 @@ pnpm test:unit -- clarify          # 两个并行问题回答不串（TC-018）
 ```bash
 pnpm test:unit -- lease            # 同一 worktree 同时只允许一个写入型 Execution
 pnpm test:unit -- merge            # 两分支改不同目录 → 自动合并；同文件 → 升级
-pnpm test:unit -- delivery         # 默认 branch-only；auto-merge 缺任一前置条件即降级
+pnpm test:unit -- chat-run-settings # 交付只接受两种模式；无验收结论不让交付
 pnpm hubagent run "分析依赖风险，同时检查核心代码质量" --json   # TC-002
 ```
 
 **实现进度（2026-11-24，完成）**
 
 - `runtime/workspace/lease.ts`：`shared / worktree / copy` 租约，路径重叠互斥、不同 worktree 可并行、过期 sweep、release/renew。
-- `runtime/workspace/git.ts`：`GitRunner` 抽象 + `AgentHostGitRunner`（Runtime 不直接 child_process）；worktree add/remove/prune、`merge --no-ff`、`reset --hard`、rev-parse、diff patch。
-- `runtime/workspace/delivery.ts`：`branch-only` / `patch-export` / `auto-merge`；auto-merge 五前置条件缺一即降级并记录原因。
-- 测试：`lease.test.ts` 4 个、`merge.test.ts` 2 个（不同文件合并成功/同文件冲突）、`delivery.test.ts` 4 个。
+- `runtime/workspace/git.ts`：`GitRunner` 抽象 + `AgentHostGitRunner`（Runtime 不直接 child_process）；worktree add/remove/prune、`merge --no-ff`、`reset --hard`、rev-parse。
+- 交付：`runtime/workspace/deliver.ts`（用户动作：`branch-only` / `patch-export`）；自动化路径在 `session.ts` 里直接回报 `branch-only`。
+- 测试：`lease.test.ts` 4 个、`merge.test.ts` 2 个（不同文件合并成功/同文件冲突）；交付由 `chat-run-settings.test.ts` 覆盖。
 - `run` 默认 `worktree` 隔离：自动注册项目、建 worktree、acquire lease、执行、branch-only 交付、Task completed；`--isolation shared` 可回退。
 - `task clean` 默认拒绝丢弃未提交改动，`--force` 才清理；worktree 的 git 元数据只放行 objects/worktrees/refs/logs，不给 hooks/config。
 - TC-002 双 Agent 并行：`--agents a1,a2`，一个 Goal/Task、两个 Subtask、各自 worktree/lease，并行执行后 `merge --no-ff`；不同文件成功，同文件冲突 `DELIVERY_CONFLICT`。
 - 本地实测：两 Agent 改 `src/a.txt` / `src/b.txt`，两个 merge 成功，Task completed；`task clean` 删除两个 worktree。
-- `auto-merge` / `patch-export` 策略库已完成；CLI 默认 branch-only，显式项目级 auto-merge 开关留给 M9 设置页。
+- `auto-merge` / `patch-export` 策略库已完成；CLI 默认 branch-only。（**2026-11-28 修订**：`auto-merge` 已按 ADR 0031 删除，`delivery.ts` 一并移除。）
 
 `pnpm verify` 全绿（用例数与模块数以实际输出为准）。
 
@@ -547,7 +547,7 @@ pnpm hubagent run "分析依赖风险，同时检查核心代码质量" --json  
 
 - 升级路径：协议重试 → 同 Agent 重试 → 换 Agent → 重规划 → 询问用户（阈值可配）
 - 副作用核验：有 diff 的失败先核验再决定
-- 无进展检测：无事件超时、等价计划重复、diff 震荡、预算异常
+- 无进展检测：无事件超时、等价计划重复、diff 震荡
 - 幂等：`idempotencyKey` 去重（TC-010）
 - 重启恢复扫描（TC-005 / TC-012）
 
@@ -563,7 +563,7 @@ pnpm test:unit -- idempotency      # 重复投递 → 只有一个 Execution
 
 - `runtime/recovery/failure.ts`：失败分类 + 升级链（协议重试 2 → 同 Agent → 换 Agent → 重规划 2 → 用户），`sandbox_denied` 不计失败，`unknown` 不重试。
 - `runtime/recovery/side-effect.ts`：`none/partial/complete/unknown` 副作用分类；有 diff 先核验。
-- `runtime/recovery/no-progress.ts`：事件超时、等价计划、diff 震荡、预算异常、重复工具调用；配合 `pauseTask` 暂停现场。
+- `runtime/recovery/no-progress.ts`：事件超时、等价计划、diff 震荡、重复工具调用；配合 `pauseTask` 暂停现场。（**注**：目前只有单测覆盖，尚未接入调度循环；`budgetUsed/budgetLimit` 两个参数没有数据源（ADR 0031）。）
 - `runtime/recovery/idempotency.ts`：`idempotencyKey` 派生 + `delegation_contracts` 唯一约束；`runAcpTask` 已接入，重复投递拒绝新 Execution。
 - `runtime/recovery/scan.ts`：重启扫描把非终态 Execution 收敛为 `unknown` 并写恢复决策点；`hubagentd` 启动时执行。
 - `runtime/recovery/pause.ts`：Task/Execution/Subtask 暂停与反向恢复。
@@ -699,7 +699,7 @@ pnpm verify   # 已包含 web typecheck + build
 | TC-014 沙箱边界 | M3 | 已有可执行脚本 |
 | TC-015 Brain 可替换性 | M6 | 契约层 + `scripted-brain` 跑通 TC-001 |
 | TC-016 Brain 越权被拒 | M6 | 无 DB 句柄 / 无写权限 / 动作被拒可审计 |
-| TC-017 预算熔断 | M6 + M8 | 三档预算；暂停≠失败 |
+| TC-017 执行护栏 | M6 + M8 | 两档：委派墙钟 / Brain 回合（动作数与 token 估算）；暂停≠失败（ADR 0031） |
 | TC-018 澄清恢复与并发不串 | M6 | `clarify` / `decide` + 答案路由 |
 | TC-006 / TC-007 | V1.1 / V1.2 | 不在 V1.0 |
 

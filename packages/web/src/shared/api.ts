@@ -319,21 +319,15 @@ export interface ChatRunSettings {
   verifyCommands: string[]
   /** 允许参与运行的 Agent 名称；空 = 全部。 */
   agents: string[]
-  /** Brain 回合预算；null = 默认。token 上限由后端默认值补齐。 */
-  budget: {
-    maxActions?: number
-    timeoutMs?: number
-  } | null
 }
 
 export const DEFAULT_RUN_SETTINGS: ChatRunSettings = {
   verifyCommands: [],
   agents: [],
-  budget: null,
 }
 
 /** 交付方式（PRD §6.12.4）。同一次运行可以选一次。 */
-export type DeliveryMode = 'branch-only' | 'patch-export' | 'auto-merge'
+export type DeliveryMode = 'branch-only' | 'patch-export'
 
 export interface DeliveryResult {
   mode: DeliveryMode

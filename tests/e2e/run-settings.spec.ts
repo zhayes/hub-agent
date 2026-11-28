@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-/* P8：运行设置（验收命令 / 可用 Agent / 预算）与交付（导出补丁）。 */
+/* P8：运行设置（验收命令 / 可用 Agent）与交付（导出补丁）。 */
 
 const token = 'e2e-token'
 const now = new Date().toISOString()
@@ -13,7 +13,7 @@ const thread = {
   status: 'completed',
   worktree: '/tmp/ws',
   permissionMode: 'workspace-write',
-  runSettings: { verifyCommands: [], agents: [], budget: null },
+  runSettings: { verifyCommands: [], agents: [] },
   createdAt: now,
   updatedAt: now,
 }
@@ -81,8 +81,6 @@ test('run settings take over the CLI-only knobs and persist per thread', async (
   await dialog.getByRole('checkbox', { name: 'Codex' }).check()
   await dialog.getByRole('button', { name: 'Add a command' }).click()
   await dialog.getByRole('textbox', { name: 'Verification commands' }).fill('pnpm test:unit')
-  await dialog.getByLabel(/min per turn/).fill('3')
-  await dialog.getByLabel(/actions per turn/).fill('8')
   await dialog.getByRole('button', { name: 'Save', exact: true }).click()
 
   await expect(dialog).toBeHidden()
@@ -92,14 +90,11 @@ test('run settings take over the CLI-only knobs and persist per thread', async (
       runSettings: {
         verifyCommands: ['pnpm test:unit'],
         agents: ['Codex'],
-        budget: { timeoutMs: 180000, maxActions: 8 },
       },
     })
 })
 
-test('a passing run can export its patch, and auto-merge is refused with a reason', async ({
-  page,
-}) => {
+test('a passing run can export its patch', async ({ page }) => {
   const iso = new Date().toISOString()
   const task = {
     id: 'task1',
@@ -151,15 +146,6 @@ test('a passing run can export its patch, and auto-merge is refused with a reaso
     if (path === '/api/v1/tasks/task1/deliver') {
       const body = request.postDataJSON() as { mode: string }
       delivered = body.mode
-      if (body.mode === 'auto-merge') {
-        return route.fulfill({
-          status: 409,
-          json: {
-            code: 'DELIVERY_CONFLICT',
-            message: 'auto-merge 需要项目配置 targetRef 与 autoMerge；当前未配置，已拒绝合并',
-          },
-        })
-      }
       return route.fulfill({
         json: {
           ok: true,

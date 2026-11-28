@@ -183,9 +183,8 @@ export const delegationContractSchema = z.object({
     baseRef: z.string().optional(),
   }),
   budget: z.object({
+    /* 只有墙钟：它真的能执行。token / 成本没有计量源，不写进契约（ADR 0031）。 */
     maxWallClockMs: z.number().int().positive(),
-    maxTokens: z.number().int().positive().optional(),
-    maxCostUsd: z.number().positive().optional(),
   }),
   policy: z.object({
     allowRedelegate: z.boolean(),

@@ -5,10 +5,15 @@ import type { SandboxNetworkMode, SandboxProvider } from '../../sandbox/types'
 import { HubError } from '../../shared/errors'
 import { newId } from '../../shared/id'
 import { hubDir } from '../../shared/paths'
-import type { Db } from '../../storage/db'
-import { type DeliveryResult, executeDelivery } from './delivery'
+import { type Db } from '../../storage/db'
 import { completeTaskAfterDelivery } from './finalize'
-import { addWorktree, createAgentHostGitRunner, type GitRunner, removeWorktree } from './git'
+import {
+  addWorktree,
+  createAgentHostGitRunner,
+  type GitRunner,
+  removeWorktree,
+  revParse,
+} from './git'
 import { acquireLease, leasesForExecution, releaseLease } from './lease'
 import { ensureProject, getProject } from './project'
 
@@ -100,21 +105,33 @@ function gitWritePaths(repoRoot: string, executionId: string): string[] {
   ]
 }
 
+/**
+ * 交付：把这次运行的分支与提交回报出去（`branch-only`）。
+ *
+ * 这是唯一发生在自动化路径上的“交付”：分支和 worktree 本来就在原处，
+ * 不需要写文件、不用改 ref。`patch-export` 是用户在任务页上的显式动作
+ * （`deliver.ts`），不会在这里被自动触发。
+ */
+export interface WorktreeDelivery {
+  mode: 'branch-only'
+  branch: string
+  commitSha?: string
+}
+
 export async function finalizeWorktreeSession(
   db: Db,
   session: WorktreeSession,
   result: { taskId?: string; goalId: string; verdict: string },
-): Promise<DeliveryResult | undefined> {
+): Promise<WorktreeDelivery | undefined> {
   try {
     /* 只回复、没建任务的对话回合没有东西可交付，但租约仍要在这里释放。 */
     if (result.taskId === undefined || result.verdict !== 'pass') return undefined
-    const delivery = await executeDelivery({
+    const commitSha = await revParse(session.gitRunner, session.repoRoot, session.branch)
+    const delivery: WorktreeDelivery = {
       mode: 'branch-only',
-      runner: session.gitRunner,
-      repoRoot: session.repoRoot,
       branch: session.branch,
-      baseRef: 'HEAD',
-    })
+      ...(commitSha === undefined ? {} : { commitSha }),
+    }
     completeTaskAfterDelivery(db, result.taskId, result.goalId)
     return delivery
   } finally {

@@ -145,18 +145,3 @@ export async function revParse(
   const result = await runner.run(['-C', repoRoot, 'rev-parse', ref], repoRoot)
   return result.ok ? result.stdout.trim() : undefined
 }
-
-export async function diffPatch(
-  runner: GitRunner,
-  repoRoot: string,
-  baseRef: string,
-  sourceRef: string,
-): Promise<string> {
-  const result = await runner.run(['-C', repoRoot, 'diff', `${baseRef}..${sourceRef}`], repoRoot)
-  if (!result.ok) {
-    throw new HubError('DELIVERY_CONFLICT', `导出 patch 失败：${baseRef}..${sourceRef}`, {
-      stderr: result.stderr,
-    })
-  }
-  return result.stdout
-}

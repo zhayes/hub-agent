@@ -165,8 +165,8 @@ export function createHttpApp(options: HttpAppOptions): Hono {
   /**
    * 交付（PRD §6.12.4）：用户显式选一次交付方式。
    *
-   * 迁移后这里与 CLI 的 `--delivery` 同级：branch-only 保留分支、patch-export 导出补丁、
-   * auto-merge 需要项目配置（当前拒绝并说明原因）。
+   * 只有两种：branch-only 保留分支、patch-export 导出补丁。
+   * 合并进主干是人的动作，不提供 auto-merge（ADR 0031）。
    */
   app.post('/api/v1/tasks/:id/deliver', async (context) => {
     const body = await context.req.json<{ mode?: unknown }>().catch((): { mode?: unknown } => ({}))
@@ -175,7 +175,7 @@ export function createHttpApp(options: HttpAppOptions): Hono {
       return context.json(
         {
           code: 'INVALID_INPUT',
-          message: '交付方式只能是 branch-only / patch-export / auto-merge',
+          message: '交付方式只能是 branch-only / patch-export',
         },
         400,
       )
