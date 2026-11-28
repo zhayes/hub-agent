@@ -85,6 +85,12 @@ export function TaskListView(props: TaskListViewProps) {
   return (
     <div class="min-h-0 flex-1 overflow-y-auto px-5 pt-3.5 pb-10 max-[860px]:px-4 max-[860px]:pt-2.5">
       <div class="mx-auto w-full max-w-[720px]">
+        <header class="flex items-baseline justify-between gap-3 pt-1 pb-2">
+          <h1 class="text-section text-ink">{props.t('tasks')}</h1>
+          <Show when={props.tasks.length > 0}>
+            <span class="text-badge tabular-nums text-ink-3">{props.tasks.length}</span>
+          </Show>
+        </header>
         <Show when={props.tasks.length > 0}>
           <div class={filterRow}>
             <For each={['all', 'running', 'waiting', 'failed', 'done'] as const}>

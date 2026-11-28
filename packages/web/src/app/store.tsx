@@ -8,10 +8,13 @@ import {
   useContext,
 } from 'solid-js'
 import { toast } from '../components/ui/Toaster'
+import { readCachedSummaries, writeCachedSummaries } from '../features/chat/store'
 import {
   type AgentRow,
   type ApprovalRow,
   api,
+  type ChatThreadSummary,
+  chatApi,
   type Decision,
   getToken,
   type TaskRow,
@@ -26,6 +29,8 @@ export interface AppStore {
   tasks: Accessor<TaskRow[]>
   agents: Accessor<AgentRow[]>
   approvals: Accessor<ApprovalRow[]>
+  /** Conversation summaries; the sidebar and the chat both read this one list. */
+  threads: Accessor<ChatThreadSummary[]>
   selected: Accessor<TaskView | undefined>
   decisions: Accessor<Decision[]>
   events: Accessor<string[]>
@@ -38,6 +43,7 @@ export interface AppStore {
   theme: ThemeController
   t: Translator
   refresh: () => Promise<void>
+  refreshThreads: () => Promise<void>
   openTask: (id: string, clearError?: boolean) => Promise<void>
   decide: (id: string, action: 'approve' | 'reject') => Promise<void>
   setLocale: (locale: Locale) => void
@@ -60,6 +66,7 @@ export function AppProvider(props: { children: JSX.Element }) {
   const [tasks, setTasks] = createSignal<TaskRow[]>([])
   const [agents, setAgents] = createSignal<AgentRow[]>([])
   const [approvals, setApprovals] = createSignal<ApprovalRow[]>([])
+  const [threads, setThreads] = createSignal<ChatThreadSummary[]>(readCachedSummaries() ?? [])
   const [selected, setSelected] = createSignal<TaskView>()
   const [decisions, setDecisions] = createSignal<Decision[]>([])
   const [events, setEvents] = createSignal<string[]>([])
@@ -101,19 +108,35 @@ export function AppProvider(props: { children: JSX.Element }) {
     if (getToken() === '') return
     try {
       setError('')
-      const [taskResult, agentResult, approvalResult] = await Promise.all([
+      const [taskResult, agentResult, approvalResult, threadResult] = await Promise.all([
         api.tasks(),
         api.agents(),
         api.approvals(),
+        chatApi.threads(),
       ])
       setTasks(taskResult.tasks)
       setAgents(agentResult.agents)
       setApprovals(approvalResult.approvals)
+      setThreads(threadResult.threads)
+      writeCachedSummaries(threadResult.threads)
       setLastSyncedAt(new Date().toISOString())
       /* 只刷新已经打开的那张详情：不再“列表一变就自动选中第一条”。
          自动选中会把“看一下任务页”变成“改了当前上下文”，是隐藏副作用。 */
       const current = selected()
       if (current !== undefined) await openTask(current.task.id, false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  /* 侧栏在发送、重命名、归档、删除之后要立刻看到变化：单独刷新会话摘要，
+     不重取任务与审批。 */
+  const refreshThreads = async (): Promise<void> => {
+    if (getToken() === '') return
+    try {
+      const result = await chatApi.threads()
+      setThreads(result.threads)
+      writeCachedSummaries(result.threads)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -193,6 +216,7 @@ export function AppProvider(props: { children: JSX.Element }) {
     tasks,
     agents,
     approvals,
+    threads,
     selected,
     decisions,
     events,
@@ -204,6 +228,7 @@ export function AppProvider(props: { children: JSX.Element }) {
     theme,
     t,
     refresh,
+    refreshThreads,
     openTask,
     decide,
     setLocale,

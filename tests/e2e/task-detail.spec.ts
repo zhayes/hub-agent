@@ -157,27 +157,30 @@ test('task detail keeps the verdict next to its evidence and approves in place',
 
   await page.goto('/tasks/task1')
 
-  /* 结论在页头，证据（diffstat 与失败的那条检查）紧挨着它（§5.4 / US-008）。 */
-  await expect(page.getByRole('heading', { name: 'Fix login redirect loop' })).toBeVisible()
-  await expect(page.getByText('Verification failed', { exact: true })).toBeVisible()
-  await expect(page.getByText('+2', { exact: true })).toBeVisible()
-  await expect(page.getByText('pnpm test:unit', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('artifacts/test.log', { exact: true })).toBeVisible()
+  /* 结论在运行详情顶部，证据（diffstat 与失败的那条检查）紧挨着它（§5.4 / US-008）。 */
+  const panel = page.getByRole('complementary', { name: 'Task progress' })
+  await expect(
+    panel.getByRole('heading', { name: 'Fix login redirect loop', level: 2 }),
+  ).toBeVisible()
+  await expect(panel.getByText('Verification failed', { exact: true })).toBeVisible()
+  await expect(panel.getByText('+2', { exact: true })).toBeVisible()
+  await expect(panel.getByText('pnpm test:unit', { exact: true }).first()).toBeVisible()
+  await expect(panel.getByText('artifacts/test.log', { exact: true })).toBeVisible()
   /* 来源对话是双向可达的那一半（§4.3）。 */
-  await expect(page.getByRole('link', { name: /From conversation/ })).toBeVisible()
+  await expect(panel.getByRole('link', { name: /From conversation/ })).toBeVisible()
 
   /* 脊柱节点是按钮：键盘能展开，不是只有鼠标能点。 */
-  const plan = page.getByRole('button', { name: /Plan/ })
+  const plan = panel.getByRole('button', { name: /Plan/ })
   await expect(plan).toHaveAttribute('aria-expanded', 'false')
   await plan.focus()
   await page.keyboard.press('Enter')
   await expect(plan).toHaveAttribute('aria-expanded', 'true')
 
   /* 审批就地做：不跳页，也不再问一遍。 */
-  await page.getByRole('button', { name: 'Allow once' }).click()
+  await panel.getByRole('button', { name: 'Allow once' }).click()
   await expect.poll(() => approved).toBe(1)
 
-  await page.getByRole('link', { name: /From conversation/ }).click()
+  await panel.getByRole('link', { name: /From conversation/ }).click()
   await expect(page).toHaveURL(/\/chat\/t1$/)
 })
 

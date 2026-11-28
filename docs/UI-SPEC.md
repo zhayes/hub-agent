@@ -140,7 +140,7 @@
   - popover：`--shadow-popover` + 1px 线；
   - dialog：`--shadow-dialog` + 1px 线。
   - 静置卡片与面板**不加阴影**。
-- **外壳：** app bar 50px（≤860px 48px）+ 移动端底部条 52px；**无 rail**（ADR 0029 §2.2）；断点 1100 / 860 / 560。
+- **外壳：** 左侧工作区栏 268px（≤960px 收成抽屉）+ 中栏（flex，720px 内容量度居中）+ 右侧运行详情 320–760px（可拖，≤1100px 盖住中栏）；**无顶栏**（ADR 0032）；断点 1100 / 960 / 860 / 560。
 
 ---
 
@@ -170,7 +170,7 @@
 | StreamingText | 末尾 8px 淡入 + 光标 | streaming / done | 不做逐字假流 |
 | PromptBar | 54px 起；Run/Ask；`@`、`/` | focus / busy | IME 安全 |
 | CodeBlock / Diff | 11.5px mono，行号，unified diff | — | 替换现有 `<pre>` |
-| ContextCards | 证据/验收/决策卡片（`ChatView` 的 `<aside>`） | empty / filled | 右侧 Context 栏，**仅当会话关联任务时**出现（窄屏隐藏） |
+| ContextCards | 证据/验收/决策卡片（`ChatView` 的 `<aside>`） | empty / filled | 由右栏 `InspectorPanel` 承接：只有当用户点开运行/文件时出现（≤1100px 覆盖中栏），见 ADR 0032 |
 
 ---
 

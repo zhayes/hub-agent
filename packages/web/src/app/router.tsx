@@ -23,6 +23,7 @@ const routes: RouteDefinition[] = [
       { path: '/registry', component: RegistryRoute },
       { path: '/approvals', component: ApprovalsRoute },
       { path: '/settings', component: SettingsRoute },
+      { path: '/settings/:section', component: SettingsRoute },
       { path: '*404', component: NotFoundRoute },
     ],
   },

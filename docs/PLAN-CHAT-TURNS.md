@@ -32,6 +32,8 @@
 
 ### 右侧资源阅读器
 
+> **2026-11-28 变更（ADR 0032）：**阅读器的宿主从 `ChatView` 的 `<aside>` 改为外壳的右栏 `app/InspectorPanel.tsx`，并用完整的 `TaskDetailView`（判决 + 证据 + 审批）替掉旧的摘要面板；`/tasks/:id` 深链打开的也是它，对话不卸载。接口与安全约束（第 36–38 行）不变。
+
 - 面板状态 `overview | task | file`，带「返回」；点产物自动展开。
 - 任务视图复用 `GET /api/v1/tasks/:id`：子任务、执行（attempt/状态/改动文件）、验收项。
 - 文件视图：`GET /api/v1/tasks/:id/file?path=`，只允许该任务 `evidence.changedFiles` 内的路径；根目录取最新 execution 的 lease worktree（不存在则 project root）；拒绝绝对路径/`..`、realpath 必须落在根内、≤512KB、NUL 判二进制。

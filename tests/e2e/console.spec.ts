@@ -104,7 +104,9 @@ test('chat stream appends pushed messages without polling', async ({ page }) => 
   await expect(page.getByText('Pushed over the stream')).toBeVisible()
 })
 
-test('composer slash menu and pane resize are keyboard reachable', async ({ page }) => {
+test('composer slash menu is keyboard reachable and conversations live in the sidebar', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
@@ -117,15 +119,10 @@ test('composer slash menu and pane resize are keyboard reachable', async ({ page
   await page.keyboard.press('Escape')
   await expect(page.getByRole('listbox')).toBeHidden()
 
-  const leftSplitter = page.getByRole('separator', { name: 'Threads' })
-  /* 会话历史是抽屉（E 稿）：不占正文列，所以没有列分隔条。 */
-  await expect(leftSplitter).toHaveCount(0)
-  await page.getByRole('button', { name: 'Conversations' }).first().click()
-  const drawer = page.getByRole('dialog', { name: 'Conversations' })
-  await expect(drawer).toBeVisible()
-  await expect(drawer.getByRole('button', { name: /Fix login redirect loop/ })).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(drawer).toBeHidden()
+  /* 会话列表是常驻左栏，不再是抽屉：换会话不需要多一次开抽屉。 */
+  const sidebar = page.getByRole('complementary', { name: 'HubAgent' })
+  await expect(sidebar.getByRole('button', { name: /Fix login redirect loop/ })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Conversations' })).toHaveCount(0)
 })
 
 test('approving from the approvals page confirms with a toast', async ({ page }) => {
@@ -202,8 +199,8 @@ test('route-based chat, tasks navigation, theme and language controls', async ({
 
   await page.getByRole('button', { name: '中文' }).click()
   // The locale switch renames the controls; the shell must stay mounted and usable.
-  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
-  await expect(page.getByRole('link', { name: '对话' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '通用' })).toBeVisible()
 })
 
 test('attention control opens the decision queue and resolves in place', async ({ page }) => {
@@ -263,7 +260,7 @@ test('attention control opens the decision queue and resolves in place', async (
   await expect(sheet.getByText('1 more')).toHaveCount(0)
 })
 
-test('task evidence opens in the side viewer, not in the header', async ({ page }) => {
+test('task evidence opens in the run detail pane, not in the header', async ({ page }) => {
   await page.unroute('**/api/v1/**')
   const withStep = [
     messages[0],
@@ -298,16 +295,16 @@ test('task evidence opens in the side viewer, not in the header', async ({ page 
   })
 
   await page.goto('/chat/t1')
-  const context = page.getByRole('complementary', { name: 'Thread context' })
-  /* 右侧只在要看证据时出现（v9 头部没有图标按钮）。 */
-  await expect(context).toBeHidden()
+  const panel = page.getByRole('complementary', { name: 'Task progress' })
+  /* 右栏只在要看证据时出现（头部只有一个开关）。 */
+  await expect(panel).toHaveCount(0)
 
   const chat = page.getByRole('region', { name: 'Chat' })
   await chat.getByRole('button', { name: /Fix login redirect loop/ }).first().click()
-  await expect(context).toBeVisible()
-  await expect(context.getByRole('button', { name: 'Back' })).toBeVisible()
+  await expect(panel).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Fix login redirect loop', level: 2 })).toBeVisible()
 
-  await context.getByRole('button', { name: 'Back' }).click()
+  await panel.getByRole('button', { name: 'Close details' }).click()
   await expect(
     page.getByRole('textbox', { name: 'Ask anything, or describe the work…' }),
   ).toBeVisible()
@@ -364,12 +361,12 @@ test('settings model list adds a provider through the dialog', async ({ page }) 
     },
   })
 
-  await page.goto('/settings')
+  await page.goto('/settings/model')
   // 空列表直接给 DeepSeek 预填项（不落盘）
   await expect(page.getByRole('button', { name: 'Configure' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Add provider' }).click()
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Add provider' })
   await expect(dialog).toBeVisible()
   // The suggested preset is pre-filled, not saved behind the user's back.
   await expect(dialog.getByLabel('Provider ID', { exact: true })).toHaveValue('deepseek')
@@ -405,10 +402,10 @@ test('deleting a provider asks first, then removes it', async ({ page }) => {
     },
   })
 
-  await page.goto('/settings')
+  await page.goto('/settings/model')
   await page.getByRole('button', { name: 'Delete' }).first().click()
 
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Delete provider' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText(/The key and model settings for Alpha/)).toBeVisible()
   await dialog.getByRole('button', { name: 'Delete' }).click()
@@ -419,22 +416,25 @@ test('deleting a provider asks first, then removes it', async ({ page }) => {
   await expect(page.getByText('Beta', { exact: true })).toBeVisible()
 })
 
-test('the conversation drawer leaves the transcript full width', async ({ page }) => {
-  await page.setViewportSize({ width: 1456, height: 900 })
+test('a phone opens the sidebar as an overlay instead of squeezing the transcript', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/chat/t1')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
-  /* 抽屉是浮层：正文宽度不受它影响，关掉之后也回到同一宽度。 */
+  /* 窄屏没有常驻左栏：正文先占满，需要时再把侧栏召出来。 */
   const transcript = await page.getByRole('region', { name: 'Chat' }).boundingBox()
-  await page.getByRole('button', { name: 'Conversations' }).first().click()
-  const drawer = page.getByRole('dialog', { name: 'Conversations' })
+  await expect(page.getByRole('complementary', { name: 'HubAgent' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Sidebar' }).first().click()
+  const drawer = page.getByRole('dialog', { name: 'Primary navigation' })
   await expect(drawer).toBeVisible()
   const behind = await page.getByRole('region', { name: 'Chat' }).boundingBox()
   expect(Math.abs((behind?.width ?? 0) - (transcript?.width ?? 0))).toBeLessThan(2)
 
   await page.keyboard.press('Escape')
   await expect(drawer).toBeHidden()
-  await expect(page.getByRole('textbox', { name: /Ask anything/ })).toBeVisible()
 })
 
 test('below 1100px the context pane reserves no empty gutter', async ({ page }) => {
@@ -598,11 +598,10 @@ test('registry scans the built-in catalog and adopts an agent', async ({ page })
   })
 
   await page.goto('/registry')
-  /* Agent 是一个目的地、两个分段：页名由分段控件承担，不再重复一个“接入”标题。 */
-  await expect(page.getByRole('link', { name: 'Connect', exact: true })).toHaveAttribute(
-    'aria-current',
-    'page',
-  )
+  /* `/registry` 是旧地址：会 replace 到设置里的「Agent 接入」一节。 */
+  await expect(page).toHaveURL(/\/settings\/agents$/)
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Connect' })).toBeVisible()
   await expect(page.getByText('DSH')).toBeVisible()
   await expect(page.getByText(/Missing: codex-acp/)).toBeVisible()
 
@@ -610,7 +609,7 @@ test('registry scans the built-in catalog and adopts an agent', async ({ page })
   await expect(page.getByText('dsh is connected.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Agent details' }).first().click()
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Agent details' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText('ELECTRON_RUN_AS_NODE=1')).toBeVisible()
   await page.keyboard.press('Escape')

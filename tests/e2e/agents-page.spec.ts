@@ -52,24 +52,22 @@ test.beforeEach(async ({ page }) => {
   }, token)
 })
 
-test('both agent segments stay reachable in the page, even on a phone', async ({ page }) => {
-  /* 分段控件在页面里而不是顶栏：顶栏 ≤560px 会把它藏掉，那时手机上就切不了分段。 */
+test('agent activity stays in the center pane and onboarding lives in settings', async ({
+  page,
+}) => {
+  /* 现场是目的地（左栏一项），接入属于配置（设置里的一节），两者不再并列成分段。 */
   await page.setViewportSize({ width: 390, height: 820 })
   await page.route('**/api/v1/**', harness(presence.agents, emptyScan))
   await page.goto('/agents')
 
-  const stage = page.getByRole('link', { name: 'Stage', exact: true })
-  const access = page.getByRole('link', { name: 'Connect', exact: true })
-  await expect(stage).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Agent activity', exact: true })).toBeVisible()
+
+  const access = page.getByRole('link', { name: 'Agent access', exact: true })
   await expect(access).toBeVisible()
-  await expect(stage).toHaveAttribute('aria-current', 'page')
-
-  /* 顶栏只留一份页名（目的地页签 + 页内分段），不重复成“Agents Agents”。 */
-  await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toHaveCount(1)
-
   await access.click()
-  await expect(page).toHaveURL(/\/registry$/)
-  await expect(access).toHaveAttribute('aria-current', 'page')
+
+  await expect(page).toHaveURL(/\/settings\/agents$/)
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Connect' })).toBeVisible()
 })
 
@@ -80,7 +78,8 @@ test('an empty floor leads straight to connecting an agent', async ({ page }) =>
   await expect(page.getByText('No agents on the floor yet.')).toBeVisible()
   await page.getByRole('link', { name: 'Connect an agent' }).click()
 
-  await expect(page).toHaveURL(/\/registry$/)
+  /* 旧地址 `/registry` 会 replace 到设置里的接入一节：书签不失效，也不维护第二个入口。 */
+  await expect(page).toHaveURL(/\/settings\/agents$/)
   await expect(page.getByText('No connectable agents found on this machine.')).toBeVisible()
   /* 零 Agent 时给的是能执行的那一步：CLI 注册命令，不是一句“再试试”。 */
   await expect(page.getByText('hubagent agent add --name <name> --cmd "<command>"')).toBeVisible()

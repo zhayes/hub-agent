@@ -16,6 +16,7 @@ import ExternalLink from '@lucide/solid/icons/external-link'
 import Eye from '@lucide/solid/icons/eye'
 import EyeOff from '@lucide/solid/icons/eye-off'
 import FileCode from '@lucide/solid/icons/file-code'
+import Folder from '@lucide/solid/icons/folder'
 import Globe from '@lucide/solid/icons/globe'
 import KeyRound from '@lucide/solid/icons/key-round'
 import ListTodo from '@lucide/solid/icons/list-todo'
@@ -38,7 +39,6 @@ import Trash2 from '@lucide/solid/icons/trash'
 import TriangleAlert from '@lucide/solid/icons/triangle-exclamation-point'
 import Wrench from '@lucide/solid/icons/wrench'
 import X from '@lucide/solid/icons/x'
-import type { JSX } from '@solidjs/web'
 import { Dynamic } from '@solidjs/web'
 
 /**
@@ -69,6 +69,7 @@ export type IconName =
   | 'eye'
   | 'eyeOff'
   | 'file'
+  | 'folder'
   | 'globe'
   | 'key'
   | 'message'
@@ -110,6 +111,7 @@ const icons: Record<IconName, LucideIcon> = {
   eye: Eye,
   eyeOff: EyeOff,
   file: FileCode,
+  folder: Folder,
   globe: Globe,
   key: KeyRound,
   message: MessageSquare,

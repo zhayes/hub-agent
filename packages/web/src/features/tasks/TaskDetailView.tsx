@@ -258,9 +258,11 @@ export function TaskDetailView(props: TaskDetailViewProps) {
             )}
           </Show>
 
-          <h1 class="mt-1 text-[17px] font-semibold leading-[1.35] tracking-[-0.006em] text-ink max-[860px]:text-[16px]">
+          {/* 运行详情住在右栏（`/tasks/:id` 也是打开它），页面的一级标题属于中栏，
+              所以这里只能是 h2：同一页出现两个 h1 会让读屏目录重复。 */}
+          <h2 class="mt-1 text-[17px] font-semibold leading-[1.35] tracking-[-0.006em] text-ink max-[860px]:text-[16px]">
             {props.view.task.title}
-          </h1>
+          </h2>
 
           <Show
             when={

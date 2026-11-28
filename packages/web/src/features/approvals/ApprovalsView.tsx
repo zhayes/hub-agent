@@ -41,6 +41,9 @@ export function ApprovalsView(props: ApprovalsViewProps) {
 
   return (
     <section class={page} aria-label={props.t('approvals')}>
+      <header class="flex items-baseline justify-between gap-3 pb-3">
+        <h1 class="text-section text-ink">{props.t('approvals')}</h1>
+      </header>
       <Show
         when={pending().length > 0 || settled().length > 0}
         fallback={<p class={emptyState}>{props.t('noApprovals')}</p>}
