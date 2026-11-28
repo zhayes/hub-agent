@@ -490,6 +490,7 @@ decided   switch claude-code → codex, same patch plus a jar-sync test
 ### 3.8 UI 规范（可实施口径，代码即事实）
 
 > **用途：** 以后任何人（或 agent）改控制台，以本节的数值实现，不再翻设计稿。
+> **2026-11-28 变更（ADR 0033）：** 表面语言已改为「零线条 + 色阶分区 + 三栏就地折叠」，口径见 `docs/UI-SPEC.md` §12。**本节仍是当前代码的实况**；§12 落地时随代码一起改写本节，不要只改一处。
 > **来源：** `docs/design/comps/v2.css`（Graphite 令牌 + 会话骨架）、`v9.css`（过程流/dock）、`e.html`（壳层与抽屉）。
 > **代码位置：** `packages/web/src/styles/tokens.css`（唯一色源）、`app/AppLayout.tsx`（壳）、`features/chat/*`（对话页）、`features/inbox/*`（决策）。
 
