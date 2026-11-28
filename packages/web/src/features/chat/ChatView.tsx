@@ -40,7 +40,6 @@ import {
   readCachedSummaries,
   readCachedThread,
   readPermissionMode,
-  readRecentWorkspaces,
   readUnsavedDraft,
   rememberThread,
   rememberWorkspace,
@@ -339,23 +338,23 @@ export function ChatView(props: ChatViewProps) {
   /** 当前会话的工作区：已打开会话用它自己的，新建会话用草稿里的。 */
   const currentWorkspace = (): string => thread()?.worktree ?? workspace()
 
-  const newThread = async (): Promise<void> => {
-    const chosen = currentWorkspace() === '' ? await chooseWorkspace() : currentWorkspace()
+  /**
+   * 开一个「还没有会话记录」的草稿：先选目录，然后回到空对话页。
+   *
+   * 这里**不写库**。以前点“新会话”就 `POST /chat/threads`，结果历史里堆一堆
+   * 空的 “New thread”——那些不是会话，只是被点过。真正建线程发生在第一条消息
+   * 发送时（`send`），标题也从那句话里取。
+   */
+  const startDraft = async (): Promise<void> => {
+    const chosen = await chooseWorkspace()
     if (chosen === undefined || chosen === '') {
       setError(props.t('workspaceRequired'))
       return
     }
-    try {
-      const created = await chatApi.create({
-        worktree: chosen,
-        ...(permissionMode() === 'workspace-write' ? {} : { permissionMode: permissionMode() }),
-      })
-      await loadThreads()
-      setDrawerOpen(false)
-      props.onOpenThread(created.thread.id)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
+    setWorkspace(chosen)
+    rememberWorkspace(chosen)
+    setDrawerOpen(false)
+    clearCurrentThread()
   }
 
   const clearCurrentThread = (): void => {
@@ -642,11 +641,30 @@ export function ChatView(props: ChatViewProps) {
           (approval) => approval.status === 'pending' && approval.taskId === item.taskId,
         ).length
 
+  /* 历史只算“有内容”的会话：空线程（迁移前点“新会话”留下的）不算历史，也不占位置。 */
   const filteredThreads = (): ChatThreadSummary[] => {
     const needle = query().toLowerCase()
-    return threads().filter((item) =>
-      `${item.title} ${item.lastMessage ?? ''}`.toLowerCase().includes(needle),
+    return threads().filter(
+      (item) =>
+        item.messageCount > 0 &&
+        `${item.title} ${item.lastMessage ?? ''}`.toLowerCase().includes(needle),
     )
+  }
+
+  /**
+   * 按工作区分组：同一个目录的会话归在一起。
+   * 组的顺序就是该组里最近一条会话的顺序（`filteredThreads` 已按更新时间倒序），
+   * 不另算一次排序，避免两个来源对不上。
+   */
+  const threadGroups = (): Array<{ path: string; items: ChatThreadSummary[] }> => {
+    const groups = new Map<string, ChatThreadSummary[]>()
+    for (const item of filteredThreads()) {
+      const key = item.worktree ?? ''
+      const existing = groups.get(key)
+      if (existing === undefined) groups.set(key, [item])
+      else existing.push(item)
+    }
+    return [...groups.entries()].map(([path, items]) => ({ path, items }))
   }
 
   const contextTask = (): TaskRow | undefined => {
@@ -791,7 +809,7 @@ export function ChatView(props: ChatViewProps) {
       return
     }
     setText('')
-    if (item.id === 'new') void newThread()
+    if (item.id === 'new') void startDraft()
     else if (item.id === 'context') setPane(!rightCollapsed())
   }
 
@@ -1079,122 +1097,145 @@ export function ChatView(props: ChatViewProps) {
               onClick={() => setDrawerOpen(false)}
             />
           </div>
-          <input
-            ref={(el) => {
-              searchEl = el
-            }}
-            class="mx-3 mb-2 h-8 rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
-            type="search"
-            aria-label={props.t('searchThreads')}
-            placeholder={props.t('searchThreads')}
-            value={query()}
-            onInput={(event) => setQuery(event.currentTarget.value)}
-          />
+          <div class="flex flex-none items-center gap-1.5 px-3 pb-2">
+            {/* 新建在搜索框左边：先选目录，不建会话（见 startDraft）。 */}
+            <IconButton
+              icon="plus"
+              label={props.t('newThread')}
+              onClick={() => void startDraft()}
+            />
+            <input
+              ref={(el) => {
+                searchEl = el
+              }}
+              class="h-8 min-w-0 flex-1 rounded-control border border-line bg-surface px-2.5 text-meta text-ink placeholder:text-ink-3 focus-visible:border-transparent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+              type="search"
+              aria-label={props.t('searchThreads')}
+              placeholder={props.t('searchThreads')}
+              value={query()}
+              onInput={(event) => setQuery(event.currentTarget.value)}
+            />
+          </div>
           <div
             class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2"
             onScroll={() => {
               if (menuFor() !== undefined) setMenuFor(undefined)
             }}
           >
-            <For each={filteredThreads()}>
-              {(item) => (
-                <div
-                  class={`group relative rounded-panel ${
-                    thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'
-                  }`}
-                >
-                  <Show
-                    when={renamingId() === item.id}
-                    fallback={
-                      <button
-                        type="button"
-                        class="flex w-full min-w-0 flex-col gap-[3px] px-2.5 py-2 pr-9 text-left"
-                        onClick={() => {
-                          setDrawerOpen(false)
-                          props.onOpenThread(item.id)
-                        }}
-                        title={item.title}
+            <For each={threadGroups()}>
+              {(group) => (
+                <>
+                  <div class="px-2.5 pt-2 pb-1 text-badge font-medium text-ink-3">
+                    <span class="block truncate" title={group.path === '' ? undefined : group.path}>
+                      {group.path === '' ? props.t('noWorkspaceLabel') : shortPath(group.path)}
+                    </span>
+                  </div>
+                  <For each={group.items}>
+                    {(item) => (
+                      <div
+                        class={`group relative rounded-panel ${
+                          thread()?.id === item.id ? 'bg-active' : 'hover:bg-hover'
+                        }`}
                       >
-                        <span
-                          class={`truncate text-meta text-ink ${
-                            thread()?.id === item.id ? 'font-semibold' : 'font-medium'
-                          }`}
-                        >
-                          {displayTitle(item.title)}
-                        </span>
-                        <span class="flex min-w-0 items-center gap-1.5 text-badge text-ink-3">
-                          <span
-                            class={`inline-block size-1.5 flex-none rounded-full ${threadDot(item.status)}`}
-                            aria-hidden="true"
-                          />
-                          <span class="shrink-0 capitalize">{statusLabel(item.status)}</span>
-                          <Show when={threadWaiting(item) > 0}>
-                            <span aria-hidden="true">·</span>
-                            <span class="shrink-0 font-semibold text-warning">
-                              {props.t('threadNeedYou', { count: threadWaiting(item) })}
-                            </span>
-                          </Show>
-                          <span aria-hidden="true">·</span>
-                          <span class="truncate">{relativeTime(props.locale, item.updatedAt)}</span>
-                        </span>
-                      </button>
-                    }
-                  >
-                    <div class="px-2.5 py-2.5">
-                      <input
-                        class="h-7 w-full rounded-control border border-line bg-surface px-2 text-meta text-ink focus-visible:border-transparent focus-visible:outline-2 focus-visible:outline-ring"
-                        value={renameDraft()}
-                        aria-label={props.t('rename')}
-                        ref={(element) =>
-                          queueMicrotask(() => {
-                            element.focus()
-                            element.select()
-                          })
-                        }
-                        onInput={(event) => setRenameDraft(event.currentTarget.value)}
-                        onBlur={() => void commitRename(item.id)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault()
-                            void commitRename(item.id)
-                          } else if (event.key === 'Escape') {
-                            event.preventDefault()
-                            setRenamingId(undefined)
+                        <Show
+                          when={renamingId() === item.id}
+                          fallback={
+                            <button
+                              type="button"
+                              class="flex w-full min-w-0 flex-col gap-[3px] px-2.5 py-2 pr-9 text-left"
+                              onClick={() => {
+                                setDrawerOpen(false)
+                                props.onOpenThread(item.id)
+                              }}
+                              title={item.title}
+                            >
+                              <span
+                                class={`truncate text-meta text-ink ${
+                                  thread()?.id === item.id ? 'font-semibold' : 'font-medium'
+                                }`}
+                              >
+                                {displayTitle(item.title)}
+                              </span>
+                              <span class="flex min-w-0 items-center gap-1.5 text-badge text-ink-3">
+                                <span
+                                  class={`inline-block size-1.5 flex-none rounded-full ${threadDot(item.status)}`}
+                                  aria-hidden="true"
+                                />
+                                <span class="shrink-0 capitalize">{statusLabel(item.status)}</span>
+                                <Show when={threadWaiting(item) > 0}>
+                                  <span aria-hidden="true">·</span>
+                                  <span class="shrink-0 font-semibold text-warning">
+                                    {props.t('threadNeedYou', { count: threadWaiting(item) })}
+                                  </span>
+                                </Show>
+                                <span aria-hidden="true">·</span>
+                                <span class="truncate">
+                                  {relativeTime(props.locale, item.updatedAt)}
+                                </span>
+                              </span>
+                            </button>
                           }
-                        }}
-                      />
-                    </div>
-                  </Show>
+                        >
+                          <div class="px-2.5 py-2.5">
+                            <input
+                              class="h-7 w-full rounded-control border border-line bg-surface px-2 text-meta text-ink focus-visible:border-transparent focus-visible:outline-2 focus-visible:outline-ring"
+                              value={renameDraft()}
+                              aria-label={props.t('rename')}
+                              ref={(element) =>
+                                queueMicrotask(() => {
+                                  element.focus()
+                                  element.select()
+                                })
+                              }
+                              onInput={(event) => setRenameDraft(event.currentTarget.value)}
+                              onBlur={() => void commitRename(item.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault()
+                                  void commitRename(item.id)
+                                } else if (event.key === 'Escape') {
+                                  event.preventDefault()
+                                  setRenamingId(undefined)
+                                }
+                              }}
+                            />
+                          </div>
+                        </Show>
 
-                  <Show when={renamingId() !== item.id}>
-                    <button
-                      type="button"
-                      class={`absolute top-1 right-1 grid size-7 place-items-center rounded-control text-ink-3 transition-opacity hover:bg-subtle hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring ${
-                        menuFor() === item.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                      aria-label={props.t('threadActions')}
-                      title={props.t('threadActions')}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (menuFor() === item.id) {
-                          setMenuFor(undefined)
-                          return
-                        }
-                        const rect = event.currentTarget.getBoundingClientRect()
-                        const width = 128
-                        const height = 108
-                        const top =
-                          rect.bottom + 4 + height > window.innerHeight
-                            ? Math.max(8, rect.top - height - 4)
-                            : rect.bottom + 4
-                        setMenuPos({ left: Math.max(8, rect.right - width), top })
-                        setMenuFor(item.id)
-                      }}
-                    >
-                      <Icon name="more" size={15} />
-                    </button>
-                  </Show>
-                </div>
+                        <Show when={renamingId() !== item.id}>
+                          <button
+                            type="button"
+                            class={`absolute top-1 right-1 grid size-7 place-items-center rounded-control text-ink-3 transition-opacity hover:bg-subtle hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring ${
+                              menuFor() === item.id
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            aria-label={props.t('threadActions')}
+                            title={props.t('threadActions')}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              if (menuFor() === item.id) {
+                                setMenuFor(undefined)
+                                return
+                              }
+                              const rect = event.currentTarget.getBoundingClientRect()
+                              const width = 128
+                              const height = 108
+                              const top =
+                                rect.bottom + 4 + height > window.innerHeight
+                                  ? Math.max(8, rect.top - height - 4)
+                                  : rect.bottom + 4
+                              setMenuPos({ left: Math.max(8, rect.right - width), top })
+                              setMenuFor(item.id)
+                            }}
+                          >
+                            <Icon name="more" size={15} />
+                          </button>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </>
               )}
             </For>
             <Show when={filteredThreads().length === 0}>
@@ -1205,19 +1246,6 @@ export function ChatView(props: ChatViewProps) {
                 <span>{props.t('noThreads')}</span>
               </div>
             </Show>
-          </div>
-          <div class="flex-none px-3 pt-2 pb-3">
-            <button
-              type="button"
-              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-control border border-dashed border-control text-meta font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              onClick={() => {
-                setDrawerOpen(false)
-                void newThread()
-              }}
-            >
-              <Icon name="plus" size={14} />
-              {props.t('newThread')}
-            </button>
           </div>
         </div>
       </Show>
@@ -1494,38 +1522,7 @@ export function ChatView(props: ChatViewProps) {
                 </For>
               </div>
             </Show>
-            {/* 工作区只在“还没有工作区”时出现：已选过就归入线程头那一行（E 稿）。 */}
-            <Show when={currentWorkspace() === ''}>
-              <div class="mb-2 flex flex-wrap items-center gap-2 text-meta">
-                <button
-                  type="button"
-                  class="inline-flex h-[30px] min-w-0 max-w-[46ch] items-center gap-1.5 rounded-control border border-line bg-surface px-2.5 text-meta text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
-                  title={props.t('workspaceRequired')}
-                  disabled={picking() || active()}
-                  onClick={() => {
-                    void chooseWorkspace()
-                  }}
-                >
-                  <Icon name="file" size={14} />
-                  <span class="truncate">{props.t('chooseFolder')}</span>
-                </button>
-                <For each={readRecentWorkspaces()}>
-                  {(path) => (
-                    <button
-                      type="button"
-                      class="truncate rounded-control px-1.5 py-0.5 text-badge text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-                      title={path}
-                      onClick={() => {
-                        setWorkspace(path)
-                        rememberWorkspace(path)
-                      }}
-                    >
-                      {path.split('/').filter(Boolean).at(-1) ?? path}
-                    </button>
-                  )}
-                </For>
-              </div>
-            </Show>
+            {/* 工作区不在输入框里选：新建走抽屉的「+」，已建会话用它自己的 worktree。 */}
             {/* 一个输入壳（v9）：textarea + 控件行同属一块，不再分成三行。 */}
             <div class="rounded-[16px] border border-line-strong bg-raised px-3 pt-3 pb-[9px] shadow-[0_1px_2px_rgb(18_21_26/5%),0_12px_28px_-14px_rgb(18_21_26/18%)] transition-[border-color,box-shadow] focus-within:border-[color-mix(in_oklab,var(--hx-accent)_45%,var(--hx-line-default))]">
               <textarea
@@ -1547,32 +1544,15 @@ export function ChatView(props: ChatViewProps) {
                 onKeyDown={submitOnEnter}
               />
               <div class="flex items-center gap-1.5 pt-2">
-                <button
-                  type="button"
-                  class="inline-flex h-6 min-w-0 max-w-[22ch] items-center gap-[5px] rounded-control border border-line-strong px-2 text-badge font-medium text-ink-3 transition-colors hover:border-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
-                  title={
-                    currentWorkspace() === '' ? props.t('workspaceRequired') : currentWorkspace()
-                  }
-                  disabled={picking() || active()}
-                  onClick={() => {
-                    void chooseWorkspace()
-                  }}
-                >
-                  <Icon name="file" size={12} class="shrink-0" />
-                  <span class="truncate">
-                    {currentWorkspace() === ''
-                      ? props.t('chooseFolder')
-                      : shortPath(currentWorkspace())}
-                  </span>
-                </button>
+                {/* 权限：无边框的下拉（v9 控件行的降噪）。原生 select 保留语义与键盘。 */}
                 <label
-                  class="inline-flex h-6 items-center gap-[5px] rounded-control border border-line-strong px-2 text-badge font-medium text-ink-3 transition-colors hover:border-ink-3 hover:text-ink focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-ring"
+                  class="relative inline-flex h-6 items-center gap-[5px] text-badge font-medium text-ink-3 transition-colors hover:text-ink focus-within:text-ink"
                   title={props.t('workspace')}
                 >
                   <Icon name="shield" size={12} class="shrink-0" />
                   <select
                     id="chat-permission"
-                    class="cursor-pointer appearance-none border-0 bg-transparent text-badge font-medium text-ink-3 focus:outline-none"
+                    class="cursor-pointer appearance-none border-0 bg-transparent pr-4 text-badge font-medium text-ink-3 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
                     value={thread()?.permissionMode ?? permissionMode()}
                     disabled={active()}
                     onChange={(event) => {
@@ -1594,22 +1574,26 @@ export function ChatView(props: ChatViewProps) {
                     <option value="workspace-write">{props.t('permissionWorkspaceWrite')}</option>
                     <option value="full">{props.t('permissionFull')}</option>
                   </select>
+                  <Icon
+                    name="chevronDown"
+                    size={11}
+                    class="pointer-events-none absolute right-0 shrink-0"
+                  />
                 </label>
-                {/* 运行设置（ADR 0029 §2.4）：验收命令 / 可用 Agent / 预算。
+                {/* 运行设置：只给图标（ADR 0029 §2.4）。
                     非默认时带一个小圆点，否则没人记得自己改过。 */}
                 <button
                   type="button"
-                  class="inline-flex h-6 items-center gap-[5px] rounded-control border border-line-strong px-2 text-badge font-medium text-ink-3 transition-colors hover:border-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-60"
+                  class="relative inline-flex size-6 items-center justify-center text-ink-3 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-45"
                   title={props.t('runSettings')}
                   aria-label={props.t('runSettings')}
                   disabled={thread() === undefined}
                   onClick={() => setRunSettingsOpen(true)}
                 >
-                  <Icon name="settings" size={12} class="shrink-0" />
-                  <span class="max-[560px]:hidden">{props.t('runSettings')}</span>
+                  <Icon name="settings" size={13} />
                   <Show when={runSettingsDirty()}>
                     <span
-                      class="size-1.5 rounded-full bg-ink-2"
+                      class="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-ink-2"
                       aria-hidden="true"
                       title={props.t('runSettingsCustom')}
                     />
@@ -1818,9 +1802,13 @@ export function ChatView(props: ChatViewProps) {
 
       {/* 菜单用 fixed 定位渲染在滚动容器外：列表的 overflow 不会裁掉它。 */}
       <Show when={menuFor() !== undefined}>
-        <div class="fixed inset-0 z-30" aria-hidden="true" onClick={() => setMenuFor(undefined)} />
         <div
-          class="fixed z-40 w-32 rounded-panel border border-line bg-surface p-1 shadow-popover"
+          class="fixed inset-0 z-[60]"
+          aria-hidden="true"
+          onClick={() => setMenuFor(undefined)}
+        />
+        <div
+          class="fixed z-[70] w-32 rounded-panel border border-line bg-surface p-1 shadow-popover"
           style={{ left: `${menuPos().left}px`, top: `${menuPos().top}px` }}
           role="menu"
           aria-label={props.t('threadActions')}

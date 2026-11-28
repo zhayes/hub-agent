@@ -536,8 +536,13 @@ decided   switch claude-code → codex, same patch plus a jar-sync test
 
 遮罩 `rgb(0 0 0 / 20%)`；面板宽 280（`max 88vw`）、`bg-canvas`、右边线 `line-subtle`；入场从 `translateX(-16px)` 240ms `ease-drawer`，减动效直接出现。
 
-结构：`会话` 标题（13px/600）+ 关闭 → 搜索框（32px，`line-subtle` 边，`bg-surface`）→ 列表（`gap 2px`）→ 底部 `+ 新建对话`（32px 虚线 `line-control`）。
+结构：`会话` 标题（13px/600）+ 关闭 → **`+`（32px 图标按钮）+ 搜索框（32px，`line-subtle` 边，`bg-surface`）同一行** → 按工作区分组的列表（`gap 2px`）。
+
+**历史只算「有内容」的会话：** `messageCount = 0` 的线程不进列表（迁移前点「新会话」留下的空线程会被自然过滤）。新建用头部搜索框左边的 `+`：先选目录，**不写库**，回到空对话页；真正建线程发生在第一条消息发送时，标题也从那句话里取（`send`）。所以列表里不会出现 “New thread”。
+
+分组：同一 `worktree` 的会话归为一组，组头是短路径（`~/adstudio`；无工作区显示「未指定工作区」）；组的顺序就是组内最新会话的顺序。
 行 = 标题（13px，激活 600 / 其余 500）+ 次行（11px `fg-3`：`状态点 · 状态 · N 项等你处理 · 相对时间`）。状态点：在跑中性、完成 success、失败 danger、等待 warning。
+行被动：悬停/聚焦显示 `⋯`。操作菜单（重命名 / 归档 / 删除）是 `fixed` 浮层，**`z` 必须高于抽屉本体**（抽屉 `z-50` → 菜单 `z-[70]`、透明遮罩 `z-[60]`），否则菜单会被抽屉盖住到看不见。
 打开时聚焦搜索框；Esc / 点遮罩关闭；点条目先关抽屉再跳转。
 
 #### 3.8.5 对话页骨架
@@ -575,8 +580,8 @@ decided   switch claude-code → codex, same patch plus a jar-sync test
 
 `padding 0/20/18`，**无上边框、与页面同底色**（底部不分割）。壳 = `bg-raised` + `1px line-strong` + **16px 圆角** + `padding 12/12/9` + 双层软阴影；`focus-within` 时边框转 `color-mix(accent 45%)`。
 textarea 无边框、`min-height 48`、`padding 2/4`、行高 1.5。
-控件行 `pt-2 gap-1.5`：工作区 chip + 权限 chip（24px、`1px line-strong`、6px 圆角、11px/500、`fg-3`、图标 12px）→ 弹性空白 → `⏎ 发送` `⇧⏎ 换行`（11px `fg-3`，kbd 10px 带边框，≤560px 隐藏）→ 发送按钮 30px 圆形、`bg-ink`、`text-canvas`；`:active scale(.94)`；disabled 用 `line-strong` 底 + `fg-3` 字。
-工作区未选时，chip 上方单独一行给「选择文件夹…」+ 最近路径。
+控件行 `pt-2 gap-1.5`：**没有工作区 chip**（工作区只在建会话时由抽屉的 `+` 选一次）→ 权限下拉（无边框、`fg-3`，盾图标 12px + 原生 select + 11px chevron）→ 运行设置（**只有图标** 13px，非默认时右上一个小圆点）→ 弹性空白 → `⏎ 发送` `⇧⏎ 换行`（11px `fg-3`，kbd 10px 带边框，≤560px 隐藏）→ 发送按钮 30px 圆形、`bg-ink`、`text-canvas`；`:active scale(.94)`；disabled 用 `line-strong` 底 + `fg-3` 字。
+控件行**不再用带边框的按钮样式**：这三件是“附着在输入壳里的设置”，再套三层边框会把注意力从输入本身抢走。
 
 #### 3.8.9 浮层队列（`InboxPanel`）
 
@@ -761,6 +766,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | 收口（P9） | `scripts/contrast.mjs` 进 `pnpm verify`，把「对比度脚本可测」从口号变成门禁；`packages/web/test/{ui-boundary,spacing-scale}.test.ts` 两条守卫（门面/间距刻度）；`tests/e2e/transcript-window.spec.ts` 守住 10k 历史的 DOM 行数与长任务；`ChatView` 加 200 回合渲染窗口（多出的仍在内存，一键展开）；画廊从 `features/dev/` 移到 `src/dev/`；设置页从 `max-w-[980px]` 两栏收到 `mx-auto max-w-[720px]` + `[140px,1fr]`；任务详情页顶栏页名降为 `span`（消除两个 `h1`） | 间距没有真的回到纯 4px 网格：已批准稿的 18/14/22/9 保留，改成「4px + 审核例外 + 单测看守」（见决策 AD）；`line-control` 提亮后全局边框变重一档，已确认可接受 |
 | 审批页（P9 收尾） | 待批项改用 `DecisionBody`（与浮层/dock 同源），已处理降为只读行；页宽 880 → 720 | 待批多条时会有多个 primary 按钮（旧版也如此，未新增问题）；没有分页，待批很多时是一长列 |
 | 减法（ADR 0031） | 删掉三件“看起来有、其实没有”的东西：① 会话预算旋钮 + `ChatRunSettings.budget` + `brainBudget()`；② `delegate_task.budget` 的 `maxTokens` / `maxCostUsd`；③ `auto-merge` 模式 + 前置条件引擎（`runtime/workspace/delivery.ts` 整份）+ 无消费者的 `diffPatch`。`session.ts` 的交付改成直接 `revParse` 回报 `branch-only` | 成本可见性没了（V1 看不到 token/费用）；`ha run` 本体未关闭，门禁只是不再阻塞 |
+| 抽屉与输入框（交互修正） | 历史只列有内容的会话（`messageCount > 0`）并按工作区分组；`+` 移到搜索框左边且**不写库**（`startDraft`），标题在首条消息发送时才产生；输入控件行去掉工作区 chip、权限改无边框下拉、运行设置只留图标；修掉抽屉内 `⋯` 菜单被 `z-50` 抽屉盖住的层级 bug（菜单 `z-[70]`） | 旧库里的空线程不会被删除，只是不展示；新建仍走系统目录选择框（没有浏览器内目录浏览） |
 
 ### 6.2 视觉稿的优先级（哪块以哪份稿为准）
 
@@ -795,7 +801,7 @@ Goal ── 1:1 ── Thread（对话）── 1:1 ── Task（运行，ADR 0
 | 页面 | 对齐哪份稿 | 现状 | 还差什么 |
 |---|---|---|---|
 | 壳层（顶栏 / 移动底部条 / 注意力块 / 连接） | E + v2 `.bar` | ✅ 已对齐（50px、纯文字页签、琥珀方块、无刷新按钮） | — |
-| 会话抽屉 | E 稿 | ✅ 已对齐 | 不是真模态（背景可 Tab 到）；要不要加焦点陷阱待定 |
+| 会话抽屉 | E 稿 + 工作区分组 | ✅ 已对齐：`+` 在搜索框左边（选目录不建会话）；历史按 `worktree` 分组；`messageCount = 0` 的空线程不展示；行内 `⋯` 菜单层级已修正（`z-[70]`） | 不是真模态（背景可 Tab 到）；搜索只匹配标题与最后一条消息，不搜全文 |
 | 对话页（头部 / 过程流 / dock / 输入框 / 淡出） | v9 + v2 | ✅ 已对齐（含明暗两套层次） | — |
 | 决策体 / 浮层队列 | v9 + v7 | ✅ 已对齐（动作标题 / 过期 / 三问） | — |
 | **任务详情 `/tasks/:id`** | **t1 稿**（本仓自出，数值已收进 §3.8.12） | ✅ 已对齐：判决条 + 竖向证据脊柱（计划 → 需要你 → 执行 → 验收 → 记录）；diff 与检查表一级可见；失败节点就地给动作 | 重试/取消运行需后端端点；完整审计时间线需按任务查事件 |
